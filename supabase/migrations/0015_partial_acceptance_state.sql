@@ -1,0 +1,105 @@
+-- Adds the missing order-status vocabulary for the approved
+-- partial-acceptance/buyer-confirmation workflow. This migration changes
+-- ONLY order_status_enum. No tables, functions, triggers, indexes, RLS
+-- policies, stock mutation, or workflow logic are created here.
+--
+-- Canonical-doc finding
+-- -----------------------------------------------------------------------
+-- PRD 21.5 ("Partial acceptance"): "If seller accepts only some items:
+-- ... Buyer must tap Confirm Changes before remaining accepted items
+-- continue." This describes a real intermediate order state — seller has
+-- partially accepted, buyer has not yet agreed to proceed with the
+-- revised item set — that order_status_enum could not previously
+-- represent (only pending/accepted/ready/handed_over_or_shipped/
+-- received_confirmed/completed/declined/cancelled/expired/disputed
+-- existed prior to this migration; none of them mean "partially
+-- accepted, awaiting buyer confirmation").
+--
+-- No other canonical doc (ARCHITECTURE.md, ARCHITECTURE_ESSENTIALS.md,
+-- AGENTS.md, CLAUDE.md) names this state or proposes alternate
+-- terminology — all of them describe the same conceptual order-status
+-- flow as the PRD without adding detail here. No existing enum value is
+-- a disguised match for this concept (`accepted` means the buyer's
+-- request proceeds as originally submitted; `disputed` is an unrelated
+-- post-transaction escalation state). `changes_pending` is therefore
+-- approved as specified, with no conflicting canonical terminology
+-- found.
+--
+-- Canonical lifecycle this value enables (not implemented yet):
+--   pending -> accepted                              (full acceptance)
+--   pending -> declined                               (full decline)
+--   pending -> changes_pending -> accepted            (partial accept,
+--                                                       buyer confirms)
+--   pending -> changes_pending -> cancelled            (partial accept,
+--                                                       buyer declines
+--                                                       to continue)
+--
+-- Per the approved product decision, no stock reservation is created on
+-- the initial pending -> changes_pending transition — only once the
+-- buyer confirms does reservation occur for the seller-accepted items.
+-- This keeps inventory unblocked for a partial offer the buyer has not
+-- yet agreed to. None of this transition/reservation logic is built in
+-- this migration; it only adds the enum value those future trusted
+-- functions will need.
+--
+-- Enum placement
+-- -----------------------------------------------------------------------
+-- Placed immediately AFTER 'pending' (and therefore before 'accepted'),
+-- matching its semantic position in the lifecycle above: it is a
+-- fork/intermediate state reached FROM pending, before ever reaching
+-- accepted. PostgreSQL's physical enum ordering has no bearing on any
+-- business logic in this schema — no CHECK, function, or trigger anywhere
+-- in this database compares order_status_enum values using <, >, or
+-- ordinal position (confirmed by inspecting every existing constraint on
+-- orders/order_status_history and the two existing functions,
+-- handle_new_user and rls_auto_enable — neither touches order status at
+-- all). This placement is chosen purely for human readability when
+-- listing values (e.g. \dT+ output, admin tooling), never for business
+-- comparisons, which must always be done by explicit value equality in
+-- future trusted logic.
+--
+-- Affected columns
+-- -----------------------------------------------------------------------
+-- orders.status, order_status_history.from_status, and
+-- order_status_history.to_status all reference order_status_enum
+-- directly. Adding a value to the enum type makes it immediately valid
+-- for all three columns with no table rewrite, no FK change, and no
+-- CHECK constraint change — none of the existing CHECK constraints on
+-- either table enumerate or restrict the set of valid status values
+-- beyond "is a member of order_status_enum" (verified: orders' only
+-- CHECK is on public_code non-blankness; order_status_history's CHECKs
+-- are the from_status<>to_status invariant and the note non-blank rule,
+-- both value-agnostic). order_status_history already supports recording
+-- pending -> changes_pending, changes_pending -> accepted, and
+-- changes_pending -> cancelled with zero schema changes: from_status and
+-- to_status simply become two more valid enum members for the existing
+-- columns, and the from_status<>to_status CHECK poses no issue since
+-- each of those three transitions has genuinely different from/to
+-- values.
+--
+-- Expiry (explicitly not decided here)
+-- -----------------------------------------------------------------------
+-- PRD 21.7 states pending orders expire after 72 hours and accepted
+-- orders do not auto-expire. It does not address whether a
+-- changes_pending order — which is, in effect, "waiting on the buyer"
+-- rather than "waiting on the seller" — should expire, and on what
+-- timer. This is a genuine open workflow question left for a later
+-- decision alongside the expiry-worker design; no expiry behavior is
+-- implemented or assumed by adding this enum value.
+--
+-- Cancellation-request interaction (explicitly not decided here)
+-- -----------------------------------------------------------------------
+-- Existing product behavior: while Pending, buyer cancels directly; once
+-- Accepted, buyer cancellation requires a request the seller confirms
+-- (order_cancellation_requests, 0013). For changes_pending, the buyer
+-- has not yet agreed to the seller's revised offer at all — there is
+-- nothing for the buyer to be "requesting permission" to walk away from.
+-- The natural reading is that changes_pending should behave like pending
+-- in this respect (buyer may decline/cancel directly, no
+-- order_cancellation_requests row needed), which does not conflict with
+-- any canonical doc, but PRD 21.5 never states this explicitly for the
+-- new state. No cancellation behavior is implemented here; this is
+-- deferred to the future trusted RPC design, per instruction.
+
+alter type order_status_enum
+  add value 'changes_pending' after 'pending';
