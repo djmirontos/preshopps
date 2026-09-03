@@ -1,0 +1,77 @@
+-- Corrects a genuine schema constraint mismatch discovered while designing
+-- the completion transaction (received_confirmed -> completed). Touches
+-- ONLY the public.listings.stock_quantity CHECK constraint. No tables,
+-- functions, triggers, indexes, RLS, privileges, or data are touched.
+--
+-- Pre-inspection findings (read-only, immediately before writing this file)
+-- -----------------------------------------------------------------------
+-- Migration history ends at 0027_confirm_order_received; this is the next
+-- migration, no drift.
+--
+-- Live public.listings columns:
+--   stock_quantity      integer not null default 1      (plain column)
+--   reserved_quantity   integer not null default 0       (plain column)
+--   available_quantity  integer generated always as
+--                          (stock_quantity - reserved_quantity) stored
+--
+-- Live constraint being replaced:
+--   listings_stock_quantity_check   CHECK (stock_quantity >= 1)
+--
+-- Origin: 0008_listings.sql (lines 114-115), written when stock_quantity
+-- was understood only as "current sellable stock" and never expected to
+-- reach zero. 0008's own header comment (lines 31-37) already flagged the
+-- two stock CHECKs as a "structural backstop" for a completion design that
+-- did not exist yet. 0014_inventory_reservations.sql's header comment
+-- (lines 28-33), written after 0008, already documents the intended
+-- completion behavior this correction unblocks: "consumed: the reservation
+-- ended via order completion -- both reserved_quantity and stock_quantity
+-- were decremented by the same quantity in the same transaction." 0008's
+-- >= 1 floor was therefore always inconsistent with 0014's own documented
+-- design intent, not a new invention -- this migration reconciles the two.
+--
+-- listings_reserved_quantity_check (unchanged, not touched by this
+-- migration): CHECK (reserved_quantity >= 0 AND reserved_quantity <=
+-- stock_quantity). This constraint already permits reserved_quantity = 0
+-- and already forbids reserved_quantity > stock_quantity in every case,
+-- including stock_quantity = 0 (0 <= 0 satisfies the upper bound, and
+-- reserved_quantity = 1 with stock_quantity = 0 would violate it). No gap
+-- exists here; no new invariant is added because one is not needed.
+--
+-- available_quantity is a native GENERATED column (stock_quantity -
+-- reserved_quantity); with stock_quantity = 0 and reserved_quantity = 0 it
+-- correctly evaluates to 0. It is not modified by this migration and does
+-- not need to be -- its expression is already correct for the zero case.
+--
+-- Existing-data safety: public.listings currently contains 0 rows (read-
+-- only confirmed immediately before writing this migration). There is no
+-- existing stock_quantity, reserved_quantity, or reserved-exceeds-stock
+-- violation to reconcile, and no backfill of any kind is required or
+-- performed here.
+--
+-- Completion forward-compatibility note
+-- -----------------------------------------------------------------------
+-- The locked inventory semantics for the not-yet-built completion
+-- transaction are: on successful completion, reserved_quantity -=
+-- consumed quantity AND stock_quantity -= consumed quantity (reservation
+-- moves active -> consumed). A fully sold-out listing therefore
+-- legitimately reaches stock_quantity = 0, reserved_quantity = 0,
+-- available_quantity = 0. Under the prior >= 1 floor, completing the sale
+-- of a quantity-1 listing (the common pre-loved case) would have made
+-- stock_quantity's decrement violate listings_stock_quantity_check,
+-- blocking the entire completion transaction. This migration removes that
+-- blocker. complete_order(p_order_id uuid) itself is NOT created here --
+-- it is a separate, future migration.
+--
+-- Replacement: the existing constraint name is reused (PostgreSQL permits
+-- a DROP CONSTRAINT followed by an ADD CONSTRAINT of the same name within
+-- one migration transaction) so no application code, tooling, or prior
+-- error message referencing this constraint's name is affected -- only
+-- its definition changes, from >= 1 to >= 0. Negative stock remains
+-- forbidden; no other bound is altered or removed.
+
+alter table public.listings
+  drop constraint listings_stock_quantity_check;
+
+alter table public.listings
+  add constraint listings_stock_quantity_check
+    check (stock_quantity >= 0);
