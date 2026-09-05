@@ -63,6 +63,13 @@ function mapCondition(raw: BrowseListingRow["condition"]): ListingCondition | un
   return VALID_CARD_CONDITIONS.has(raw) ? (raw as ListingCondition) : undefined;
 }
 
+/** Global/search browse only ever returns 'available' rows, so this is a
+ * no-op there; shop-scoped browse (p_shop_id set) also returns 'reserved'
+ * rows, which need the card's existing Reserved badge surfaced. */
+function mapCardStatus(raw: BrowseListingRow["status"]): "reserved" | "sold" | undefined {
+  return raw === "reserved" || raw === "sold" ? raw : undefined;
+}
+
 /** Matches the relative-time label style already used elsewhere on cards
  * (PRD §16.1: "Just now", "2 hours ago", "3 days ago", "2 weeks ago").
  * Exported for reuse by the listing-detail data module. */
@@ -117,6 +124,7 @@ export function mapBrowseRowToListingCard(row: BrowseListingRow): ListingCardDat
     postedLabel: formatRelativeTime(row.created_at),
     shopName: row.shop_name,
     imageUrl: getListingImageUrl(row.cover_image_storage_path),
+    status: mapCardStatus(row.status),
   };
 }
 

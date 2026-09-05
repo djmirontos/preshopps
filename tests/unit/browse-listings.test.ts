@@ -192,4 +192,14 @@ describe("mapBrowseRowToListingCard", () => {
     });
     expect(card.href).toBe("/item/PLS-XYZ789");
   });
+
+  it("maps a reserved row's status through so shop-scoped browsing can show the Reserved badge", () => {
+    const card = mapBrowseRowToListingCard({ ...sampleRow, status: "reserved" });
+    expect(card.status).toBe("reserved");
+  });
+
+  it("leaves status undefined for an available row (global/search feeds never need a badge)", () => {
+    const card = mapBrowseRowToListingCard({ ...sampleRow, status: "available" });
+    expect(card.status).toBeUndefined();
+  });
 });
