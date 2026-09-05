@@ -1,26 +1,59 @@
 @import "tailwindcss";
 
+/*
+ * Preshopps design tokens (Phase 1 — light mode only).
+ * Raw values live here; @theme inline maps them to Tailwind utilities
+ * (bg-brand, text-ink, border-border, etc). See design report for the
+ * brand/brand-hover usage split (contrast-driven, not a palette change).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --brand: #e2582e;
+  --brand-hover: #c94a24;
+  --accent: #1c6e52;
+  --text-primary: #1a1a1a;
+  --text-secondary: #5a5a55;
+  --text-muted: #8a8a85;
+  --surface: #ffffff;
+  --canvas: #fafaf8;
+  --border-color: #e7e7e3;
+  --divider: #efefec;
+  --success: #1c6e52;
+  --warning: #b8760a;
+  --danger: #c0392b;
+  --info: #4a6fa5;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-accent: var(--accent);
+  --color-ink: var(--text-primary);
+  --color-ink-secondary: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+  --color-surface: var(--surface);
+  --color-canvas: var(--canvas);
+  --color-border: var(--border-color);
+  --color-divider: var(--divider);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --font-sans: var(--font-inter);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+
+/* Respect reduced-motion preferences across the app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
