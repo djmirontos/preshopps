@@ -4,6 +4,7 @@ import { ListingCard, type ListingCardData } from "@/components/marketplace/List
 
 const baseListing: ListingCardData = {
   id: "test-1",
+  href: "/item/test-listing-title-abc123",
   title: "Test Listing Title",
   priceCents: 150000,
   listingType: "preloved",
@@ -62,5 +63,20 @@ describe("ListingCard", () => {
   it("renders an accessible favorite button", () => {
     render(<ListingCard listing={baseListing} />);
     expect(screen.getByRole("button", { name: /favorite test listing title/i })).toBeInTheDocument();
+  });
+
+  it("links to the canonical /item/{slug} route", () => {
+    render(<ListingCard listing={baseListing} />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/item/test-listing-title-abc123");
+  });
+
+  it("shows the neutral placeholder icon when no image is provided", () => {
+    render(<ListingCard listing={baseListing} />);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("renders the real image when imageUrl is provided", () => {
+    render(<ListingCard listing={{ ...baseListing, imageUrl: "https://example.supabase.co/storage/v1/object/public/listing-images/a.webp" }} />);
+    expect(screen.getByRole("img", { name: "Test Listing Title" })).toBeInTheDocument();
   });
 });

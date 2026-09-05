@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Package } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { FavoriteButton } from "@/components/marketplace/FavoriteButton";
@@ -7,6 +8,8 @@ export type ListingCondition = "like_new" | "very_good" | "good" | "fair";
 
 export type ListingCardData = {
   id: string;
+  /** Canonical public route for this listing (PRD §37.2: /item/{slug}). */
+  href: string;
   title: string;
   priceCents: number;
   originalPriceCents?: number;
@@ -20,6 +23,9 @@ export type ListingCardData = {
   /** Feed queries already exclude reserved/sold; this is for contexts
    * (e.g. shop page, "you may also like") where showing the state matters. */
   status?: "reserved" | "sold";
+  /** Public cover image URL. Absent (no image yet, or none returned) falls
+   * back to the neutral placeholder. */
+  imageUrl?: string;
 };
 
 const CONDITION_LABELS: Record<ListingCondition, string> = {
@@ -46,6 +52,7 @@ function formatPriceFromCents(cents: number): string {
  */
 export function ListingCard({ listing }: { listing: ListingCardData }) {
   const {
+    href,
     title,
     priceCents,
     originalPriceCents,
@@ -56,6 +63,7 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
     postedLabel,
     shopName,
     status,
+    imageUrl,
   } = listing;
 
   // Brand New already communicates condition on its own — never print
@@ -69,11 +77,21 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
 
   return (
     <div className="relative w-[44%] shrink-0 snap-start sm:w-[30%] lg:w-auto">
-      <Link href="#" className="block focus-visible:outline-none">
+      <Link href={href} className="block focus-visible:outline-none">
         <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[14px] bg-divider">
-          <div className="flex h-full w-full items-center justify-center">
-            <Package className="h-8 w-8 text-ink-muted/60" aria-hidden="true" />
-          </div>
+          {imageUrl ? (
+            <Image
+              src={imageUrl}
+              alt={title}
+              fill
+              sizes="(max-width: 640px) 44vw, (max-width: 1024px) 30vw, 20vw"
+              className="object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <Package className="h-8 w-8 text-ink-muted/60" aria-hidden="true" />
+            </div>
+          )}
 
           {status && (
             <span className="absolute left-2 top-2">
