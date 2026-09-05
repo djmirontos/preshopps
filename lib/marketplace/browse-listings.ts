@@ -64,8 +64,9 @@ function mapCondition(raw: BrowseListingRow["condition"]): ListingCondition | un
 }
 
 /** Matches the relative-time label style already used elsewhere on cards
- * (PRD §16.1: "Just now", "2 hours ago", "3 days ago", "2 weeks ago"). */
-function formatRelativeTime(isoDate: string): string {
+ * (PRD §16.1: "Just now", "2 hours ago", "3 days ago", "2 weeks ago").
+ * Exported for reuse by the listing-detail data module. */
+export function formatRelativeTime(isoDate: string): string {
   const diffMs = Date.now() - new Date(isoDate).getTime();
   const minutes = Math.floor(diffMs / 60000);
 
@@ -88,8 +89,9 @@ function formatRelativeTime(isoDate: string): string {
 /** No storage bucket exists live yet (confirmed read-only), so this path is
  * currently unexercised by any real row — but it follows the documented
  * Supabase public-storage URL shape and the exact project host only
- * (no wildcard remote host). */
-function getListingImageUrl(path: string | null): string | undefined {
+ * (no wildcard remote host). Exported for reuse by the listing-detail data
+ * module so both share one URL-building rule. */
+export function getListingImageUrl(path: string | null): string | undefined {
   if (!path) return undefined;
   const { url } = getSupabaseEnv();
   return `${url}/storage/v1/object/public/${path}`;
@@ -98,7 +100,13 @@ function getListingImageUrl(path: string | null): string | undefined {
 export function mapBrowseRowToListingCard(row: BrowseListingRow): ListingCardData {
   return {
     id: row.listing_id,
-    href: `/item/${row.slug}`,
+    // MVP route identity is public_code alone (unique, authoritative, and
+    // the only key get_listing_detail accepts) -- slug is cosmetic/non-
+    // unique (0008_listings.sql) and is not safe to route on by itself.
+    // A prettier slug+code URL can be introduced later without changing
+    // listing identity; see product decision recorded in browse-listings
+    // task history.
+    href: `/item/${row.public_code}`,
     title: row.title,
     priceCents: row.price_cents,
     originalPriceCents: row.original_price_cents ?? undefined,

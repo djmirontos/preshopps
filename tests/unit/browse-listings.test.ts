@@ -103,7 +103,7 @@ describe("getHomepageMarketplaceData", () => {
     expect(freshFinds.hadError).toBe(false);
     expect(freshFinds.listings[0]).toMatchObject({
       id: sampleRow.listing_id,
-      href: "/item/test-item-abc123",
+      href: "/item/PLS-ABC123",
       title: "Test Item",
       priceCents: 10000,
       listingType: "preloved",
@@ -182,5 +182,14 @@ describe("mapBrowseRowToListingCard", () => {
   it("maps original_price_cents null to undefined", () => {
     const card = mapBrowseRowToListingCard(sampleRow);
     expect(card.originalPriceCents).toBeUndefined();
+  });
+
+  it("builds the item href from public_code, never from the non-unique slug", () => {
+    const card = mapBrowseRowToListingCard({
+      ...sampleRow,
+      public_code: "PLS-XYZ789",
+      slug: "totally-different-slug",
+    });
+    expect(card.href).toBe("/item/PLS-XYZ789");
   });
 });

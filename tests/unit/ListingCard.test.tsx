@@ -65,7 +65,7 @@ describe("ListingCard", () => {
     expect(screen.getByRole("button", { name: /favorite test listing title/i })).toBeInTheDocument();
   });
 
-  it("links to the canonical /item/{slug} route", () => {
+  it("links to the given canonical /item/{publicCode} href", () => {
     render(<ListingCard listing={baseListing} />);
     expect(screen.getByRole("link")).toHaveAttribute("href", "/item/test-listing-title-abc123");
   });

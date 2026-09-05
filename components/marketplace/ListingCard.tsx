@@ -8,7 +8,9 @@ export type ListingCondition = "like_new" | "very_good" | "good" | "fair";
 
 export type ListingCardData = {
   id: string;
-  /** Canonical public route for this listing (PRD §37.2: /item/{slug}). */
+  /** Canonical public route for this listing: /item/{public_code} (MVP
+   * route identity -- public_code is unique/authoritative; slug is
+   * cosmetic and not routable by itself). */
   href: string;
   title: string;
   priceCents: number;
@@ -35,7 +37,9 @@ const CONDITION_LABELS: Record<ListingCondition, string> = {
   fair: "Fair",
 };
 
-function formatPriceFromCents(cents: number): string {
+/** Exported for reuse on the listing detail page so price formatting
+ * never drifts between the card and the detail view. */
+export function formatPriceFromCents(cents: number): string {
   if (cents === 0) return "Free";
   return new Intl.NumberFormat("en-PH", {
     style: "currency",
