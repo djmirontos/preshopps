@@ -32,26 +32,31 @@ export function AppHeader() {
           Preshopps
         </Link>
 
-        {/* Desktop: fused search + location, centered */}
+        {/* Desktop: fused search + location, centered. Plain GET form --
+            Enter submits to /search?q=... with no client JS required. */}
         <div className="hidden flex-1 justify-center lg:flex">
-          <div className="flex w-full max-w-xl items-center rounded-full border border-border bg-canvas pl-3 pr-1.5">
+          <form
+            action="/search"
+            className="flex w-full max-w-xl items-center rounded-full border border-border bg-canvas pl-3 pr-1.5"
+          >
             <Search className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden="true" />
             <input
               type="text"
+              name="q"
               placeholder="Search for anything…"
               aria-label="Search for anything"
               className="w-full bg-transparent px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none"
             />
             <span className="h-6 w-px shrink-0 bg-border" aria-hidden="true" />
-            <button
-              type="button"
+            <Link
+              href="/search"
               className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 py-2.5 text-sm text-ink-secondary transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               <MapPin className="h-4 w-4" aria-hidden="true" />
               All Philippines
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </div>
+            </Link>
+          </form>
         </div>
 
         {/* Desktop right-hand actions */}
@@ -77,25 +82,29 @@ export function AppHeader() {
         </div>
       </div>
 
-      {/* Mobile row 2: search + location */}
+      {/* Mobile row 2: search + location -- same plain GET form pattern. */}
       <div className="border-t border-divider px-4 py-2.5 sm:px-6 lg:hidden">
-        <div className="flex items-center gap-1.5 rounded-full border border-border bg-canvas py-1 pl-3 pr-1.5">
+        <form
+          action="/search"
+          className="flex items-center gap-1.5 rounded-full border border-border bg-canvas py-1 pl-3 pr-1.5"
+        >
           <Search className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden="true" />
           <input
             type="text"
+            name="q"
             placeholder="Search for anything…"
             aria-label="Search for anything"
             className="w-full bg-transparent py-1.5 text-base text-ink placeholder:text-ink-muted focus:outline-none"
           />
-          <button
-            type="button"
+          <Link
+            href="/search"
             className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-1.5 text-xs font-medium text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
             All PH
             <ChevronDown className="h-3 w-3" aria-hidden="true" />
-          </button>
-        </div>
+          </Link>
+        </form>
       </div>
     </header>
   );

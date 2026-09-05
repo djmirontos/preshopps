@@ -22,7 +22,7 @@ export function Hero() {
       </p>
       <div className="mt-3 hidden items-center gap-4 lg:flex">
         <Link
-          href="#"
+          href="/search"
           className="rounded text-sm font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           Browse Items

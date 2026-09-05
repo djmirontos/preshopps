@@ -28,4 +28,20 @@ describe("AppHeader", () => {
     render(<AppHeader />);
     expect(screen.getAllByRole("textbox", { name: /search for anything/i }).length).toBeGreaterThan(0);
   });
+
+  it("submits search to /search via a plain GET form (no client JS required)", () => {
+    render(<AppHeader />);
+    const inputs = screen.getAllByRole("textbox", { name: /search for anything/i });
+    for (const input of inputs) {
+      expect(input).toHaveAttribute("name", "q");
+      const form = input.closest("form");
+      expect(form).toHaveAttribute("action", "/search");
+    }
+  });
+
+  it("links the location control into /search", () => {
+    render(<AppHeader />);
+    expect(screen.getByRole("link", { name: "All Philippines" })).toHaveAttribute("href", "/search");
+    expect(screen.getByRole("link", { name: "All PH" })).toHaveAttribute("href", "/search");
+  });
 });

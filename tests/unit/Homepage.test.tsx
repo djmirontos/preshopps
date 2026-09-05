@@ -2,16 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { ListingCardData } from "@/components/marketplace/ListingCard";
 import type { BrowseSection, HomepageMarketplaceData } from "@/lib/marketplace/browse-listings";
+import type { CategoryRef } from "@/lib/marketplace/reference-data";
 
-const { getHomepageMarketplaceDataMock } = vi.hoisted(() => ({
+const { getHomepageMarketplaceDataMock, getCategoriesMock } = vi.hoisted(() => ({
   getHomepageMarketplaceDataMock: vi.fn<() => Promise<HomepageMarketplaceData>>(),
+  getCategoriesMock: vi.fn<() => Promise<CategoryRef[]>>(),
 }));
 
 vi.mock("@/lib/marketplace/browse-listings", () => ({
   getHomepageMarketplaceData: getHomepageMarketplaceDataMock,
 }));
 
+vi.mock("@/lib/marketplace/reference-data", () => ({
+  getCategories: getCategoriesMock,
+}));
+
 import Home from "@/app/page";
+
+const sampleCategories: CategoryRef[] = [
+  { id: 1, slug: "women", name: "Women" },
+  { id: 10, slug: "cars", name: "Cars" },
+];
 
 const emptySection: BrowseSection = { listings: [], hadError: false };
 const errorSection: BrowseSection = { listings: [], hadError: true };
@@ -35,6 +46,7 @@ function mockData(overrides: Partial<HomepageMarketplaceData>) {
     brandNew: emptySection,
     ...overrides,
   });
+  getCategoriesMock.mockResolvedValue(sampleCategories);
 }
 
 describe("Homepage (real data)", () => {
@@ -110,5 +122,24 @@ describe("Homepage (real data)", () => {
     expect(screen.getByText("Meet safely")).toBeInTheDocument();
     expect(screen.getByText("Trusted sellers")).toBeInTheDocument();
     expect(screen.getByText("Verified reviews")).toBeInTheDocument();
+  });
+
+  it("wires the Hero and each section's View all link to /search with the right filter", async () => {
+    mockData({
+      freshFinds: { listings: [sampleListing], hadError: false },
+      preLoved: { listings: [sampleListing], hadError: false },
+      brandNew: { listings: [sampleListing], hadError: false },
+    });
+    render(await Home());
+
+    expect(screen.getByRole("link", { name: "Browse Items" })).toHaveAttribute("href", "/search");
+
+    // Fresh Finds, Pre-loved, Brand New -- in page order.
+    const viewAllLinks = screen.getAllByRole("link", { name: /view all/i });
+    expect(viewAllLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "/search?sort=newest",
+      "/search?type=preloved",
+      "/search?type=brand_new",
+    ]);
   });
 });

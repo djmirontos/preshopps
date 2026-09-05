@@ -6,6 +6,7 @@ import { ListingRail } from "@/components/marketplace/ListingRail";
 import { SectionEmptyState } from "@/components/marketplace/SectionEmptyState";
 import { TrustStrip } from "@/components/marketplace/TrustStrip";
 import { getHomepageMarketplaceData } from "@/lib/marketplace/browse-listings";
+import { getCategories } from "@/lib/marketplace/reference-data";
 
 /**
  * Popular Shops is intentionally omitted in Phase 1: real shop-activity
@@ -16,12 +17,15 @@ import { getHomepageMarketplaceData } from "@/lib/marketplace/browse-listings";
  */
 
 export default async function Home() {
-  const { freshFinds, preLoved, brandNew } = await getHomepageMarketplaceData();
+  const [{ freshFinds, preLoved, brandNew }, categories] = await Promise.all([
+    getHomepageMarketplaceData(),
+    getCategories(),
+  ]);
 
   return (
     <>
       <Hero />
-      <CategoryStrip />
+      <CategoryStrip categories={categories} />
 
       {/* Fresh Finds always stays visible — populated, a genuine-zero-rows
           empty state, or an RPC-failure fallback — never omitted. */}
