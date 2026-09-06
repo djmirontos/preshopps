@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Bell, ChevronDown, Heart, MapPin, MessageCircle, Plus, Search, ShoppingBag } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
@@ -26,9 +27,16 @@ export function AppHeader({ user }: Props) {
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:h-[72px] lg:px-8">
         <Link
           href="/"
-          className="shrink-0 rounded text-xl font-bold tracking-tight text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:text-2xl"
+          className="shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
-          Preshopps
+          <Image
+            src="/images/brand/preshopps_text.png"
+            alt="Preshopps"
+            width={1116}
+            height={224}
+            priority
+            className="h-7 w-auto lg:h-8"
+          />
         </Link>
 
         {/* Desktop: fused search + location, centered. Plain GET form --

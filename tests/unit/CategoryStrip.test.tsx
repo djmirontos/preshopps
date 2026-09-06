@@ -22,9 +22,34 @@ describe("CategoryStrip", () => {
     );
   });
 
-  it("renders an unmapped category slug with the fallback icon instead of breaking", () => {
+  it("renders the mapped category image for a known slug", () => {
     render(<CategoryStrip categories={categories} />);
-    expect(screen.getByRole("link", { name: "Future Category" })).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Women" });
+    const image = link.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image?.getAttribute("src")).toContain("womens.png");
+  });
+
+  it("renders the image with contain behavior, never cropped via cover", () => {
+    render(<CategoryStrip categories={categories} />);
+    const link = screen.getByRole("link", { name: "Women" });
+    const image = link.querySelector("img");
+    expect(image?.className).toContain("object-contain");
+    expect(image?.className).not.toContain("object-cover");
+  });
+
+  it("keeps the visible category label present alongside the image", () => {
+    render(<CategoryStrip categories={categories} />);
+    expect(screen.getByText("Women")).toBeInTheDocument();
+    expect(screen.getByText("Cars")).toBeInTheDocument();
+  });
+
+  it("renders an unmapped category slug with the fallback icon, not a broken image", () => {
+    render(<CategoryStrip categories={categories} />);
+    const link = screen.getByRole("link", { name: "Future Category" });
+    expect(link).toBeInTheDocument();
+    expect(link.querySelector("img")).toBeNull();
+    expect(link.querySelector("svg")).not.toBeNull();
   });
 
   it("renders nothing when no categories are available", () => {

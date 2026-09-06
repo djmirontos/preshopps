@@ -15,6 +15,22 @@ describe("AppHeader", () => {
     expect(logo).toHaveAttribute("href", "/");
   });
 
+  it("renders the brand logo as a local image asset with a meaningful accessible name", () => {
+    render(<AppHeader user={null} />);
+    const logo = screen.getByRole("link", { name: "Preshopps" });
+    const image = logo.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image).toHaveAttribute("alt", "Preshopps");
+    // Local /public asset -- no remote image host introduced.
+    expect(image?.getAttribute("src")).not.toMatch(/^https?:\/\//);
+  });
+
+  it("still renders Bell and Cart controls in the mobile header alongside the logo", () => {
+    render(<AppHeader user={null} />);
+    expect(screen.getAllByLabelText("Notifications").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Cart").length).toBeGreaterThan(0);
+  });
+
   it("renders accessible labels for the core action icons", () => {
     render(<AppHeader user={null} />);
     expect(screen.getAllByLabelText("Notifications").length).toBeGreaterThan(0);
