@@ -1,27 +1,26 @@
 import Link from "next/link";
-import {
-  Bell,
-  ChevronDown,
-  Heart,
-  MapPin,
-  MessageCircle,
-  Plus,
-  Search,
-  ShoppingBag,
-  UserCircle,
-} from "lucide-react";
+import { Bell, ChevronDown, Heart, MapPin, MessageCircle, Plus, Search, ShoppingBag } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
+import { AccountEntry } from "@/components/auth/AccountEntry";
+import { SellGate } from "@/components/auth/SellGate";
+import type { AuthUser } from "@/lib/auth/session";
+
+type Props = {
+  user: AuthUser | null;
+};
 
 /**
- * Single responsive header for guest/buyer/seller alike (Phase 1: no
- * auth-aware behavior yet). Desktop (>=1024px) renders one row with a
- * fused search+location control and a right-hand icon cluster. Below
- * 1024px, a compact two-row mobile header is shown instead.
+ * Single responsive header for guest/buyer/seller alike. Desktop
+ * (>=1024px) renders one row with a fused search+location control and a
+ * right-hand icon cluster. Below 1024px, a compact two-row mobile header
+ * is shown instead.
  *
- * All action icons/links are non-functional placeholders in this task —
- * no auth, no backend calls, no routing to unbuilt pages.
+ * Account and Sell are the only auth-aware entries in this task --
+ * Favorites/Messages/Notifications/Cart remain the existing non-
+ * functional placeholders (their real backends aren't in scope yet).
  */
-export function AppHeader() {
+export function AppHeader({ user }: Props) {
+  const isAuthenticated = Boolean(user);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:h-[72px] lg:px-8">
@@ -65,14 +64,14 @@ export function AppHeader() {
           <IconButton href="#" label="Messages" icon={MessageCircle} />
           <IconButton href="#" label="Notifications" icon={Bell} />
           <IconButton href="#" label="Cart" icon={ShoppingBag} />
-          <IconButton href="#" label="Account" icon={UserCircle} />
-          <Link
-            href="#"
+          <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
+          <SellGate
+            isAuthenticated={isAuthenticated}
             className="ml-2 inline-flex h-10 items-center rounded-[10px] bg-brand-hover px-4 text-sm font-semibold text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
           >
             <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />
             Sell
-          </Link>
+          </SellGate>
         </nav>
 
         {/* Mobile right-hand icons */}

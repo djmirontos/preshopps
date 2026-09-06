@@ -5,28 +5,44 @@ import { usePathname } from "next/navigation";
 import { CirclePlus, Home, MessageCircle, Search, UserCircle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { SellGate } from "@/components/auth/SellGate";
+import type { AuthUser } from "@/lib/auth/session";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: LucideIcon;
+type Props = {
+  user: AuthUser | null;
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/search", label: "Search", icon: Search },
-  { href: "#", label: "Sell", icon: CirclePlus },
-  { href: "#", label: "Messages", icon: MessageCircle },
-  { href: "#", label: "Account", icon: UserCircle },
-];
+const TAB_CLASS =
+  "flex h-full flex-col items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand";
+
+function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
+  return (
+    <>
+      <Icon className={cn("h-6 w-6", isActive ? "text-brand-hover" : "text-ink-muted")} aria-hidden="true" />
+      <span className={cn("text-[11px] font-medium", isActive ? "text-brand-hover" : "text-ink-muted")}>
+        {label}
+      </span>
+    </>
+  );
+}
 
 /**
  * Fixed bottom nav for mobile/tablet (<1024px). Hidden on desktop, where
  * navigation lives entirely in the header. Exactly the 5 canonical tabs —
  * cart and notifications intentionally live in the header instead.
+ *
+ * Sell and Account are auth-aware; Home/Search/Messages are unchanged
+ * (Messages remains the existing non-functional placeholder -- its real
+ * backend isn't in scope yet).
  */
-export function MobileBottomNav() {
+export function MobileBottomNav({ user }: Props) {
   const pathname = usePathname();
+  const isAuthenticated = Boolean(user);
+  const currentPath = pathname || "/";
+
+  const isHomeActive = pathname === "/";
+  const isSearchActive = pathname?.startsWith("/search") ?? false;
+  const isAccountActive = pathname?.startsWith("/account") ?? false;
 
   return (
     <nav
@@ -35,33 +51,45 @@ export function MobileBottomNav() {
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <ul className="flex h-16">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const isActive = href === "/" ? pathname === "/" : href !== "#" && pathname?.startsWith(href);
+        <li className="flex-1">
+          <Link href="/" aria-label="Home" aria-current={isHomeActive ? "page" : undefined} className={TAB_CLASS}>
+            {tabContent(Home, "Home", isHomeActive)}
+          </Link>
+        </li>
 
-          return (
-            <li key={label} className="flex-1">
-              <Link
-                href={href}
-                aria-label={label}
-                aria-current={isActive ? "page" : undefined}
-                className="flex h-full flex-col items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
-              >
-                <Icon
-                  className={cn("h-6 w-6", isActive ? "text-brand-hover" : "text-ink-muted")}
-                  aria-hidden="true"
-                />
-                <span
-                  className={cn(
-                    "text-[11px] font-medium",
-                    isActive ? "text-brand-hover" : "text-ink-muted",
-                  )}
-                >
-                  {label}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+        <li className="flex-1">
+          <Link
+            href="/search"
+            aria-label="Search"
+            aria-current={isSearchActive ? "page" : undefined}
+            className={TAB_CLASS}
+          >
+            {tabContent(Search, "Search", isSearchActive)}
+          </Link>
+        </li>
+
+        <li className="flex-1">
+          <SellGate isAuthenticated={isAuthenticated} className={TAB_CLASS}>
+            {tabContent(CirclePlus, "Sell", false)}
+          </SellGate>
+        </li>
+
+        <li className="flex-1">
+          <Link href="#" aria-label="Messages" className={TAB_CLASS}>
+            {tabContent(MessageCircle, "Messages", false)}
+          </Link>
+        </li>
+
+        <li className="flex-1">
+          <Link
+            href={isAuthenticated ? "/account" : `/sign-in?next=${encodeURIComponent(currentPath)}`}
+            aria-label="Account"
+            aria-current={isAuthenticated && isAccountActive ? "page" : undefined}
+            className={TAB_CLASS}
+          >
+            {tabContent(UserCircle, "Account", isAuthenticated && isAccountActive)}
+          </Link>
+        </li>
       </ul>
     </nav>
   );

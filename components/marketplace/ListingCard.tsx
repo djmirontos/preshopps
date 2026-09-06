@@ -132,7 +132,7 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
       {/* Sibling of the Link (not nested inside the <a>) so the button
           stays a valid, independently-interactive element. */}
       <div className="absolute right-2 top-2">
-        <FavoriteButton label={`Favorite ${title}`} />
+        <FavoriteButton label={`Favorite ${title}`} next={href} />
       </div>
     </div>
   );

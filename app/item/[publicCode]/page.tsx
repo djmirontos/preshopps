@@ -11,6 +11,7 @@ import { ListingMeta } from "@/components/listing/ListingMeta";
 import { ListingSellerCard } from "@/components/listing/ListingSellerCard";
 import { ListingSpecificDetails } from "@/components/listing/ListingSpecificDetails";
 import { getListingDetail } from "@/lib/marketplace/listing-detail";
+import { getAuthUser } from "@/lib/auth/session";
 
 const META_DESCRIPTION_LENGTH = 160;
 
@@ -52,7 +53,7 @@ export async function generateMetadata({ params }: ItemPageProps): Promise<Metad
 
 export default async function ItemPage({ params }: ItemPageProps) {
   const { publicCode } = await params;
-  const result = await getCachedListingDetail(publicCode);
+  const [result, user] = await Promise.all([getCachedListingDetail(publicCode), getAuthUser()]);
 
   if (result.status === "not_found") {
     // get_listing_detail raises the identical LISTING_NOT_FOUND signal for
@@ -98,7 +99,12 @@ export default async function ItemPage({ params }: ItemPageProps) {
             <ListingFulfillment methods={listing.fulfillmentMethods} meetupNote={listing.meetupNote} />
           </div>
 
-          <ListingActions status={listing.status} isInquiryOnly={listing.isInquiryOnly} />
+          <ListingActions
+            status={listing.status}
+            isInquiryOnly={listing.isInquiryOnly}
+            isAuthenticated={Boolean(user)}
+            next={`/item/${listing.publicCode}`}
+          />
         </div>
       </div>
 

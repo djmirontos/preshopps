@@ -1,11 +1,16 @@
 import Link from "next/link";
+import { SellGate } from "@/components/auth/SellGate";
+
+type Props = {
+  isAuthenticated: boolean;
+};
 
 /**
  * Deliberately compact — mobile ~100px, desktop ~150px. No illustration,
  * no gradient, no full-viewport section. Search lives in the header, not
  * inside the hero.
  */
-export function Hero() {
+export function Hero({ isAuthenticated }: Props) {
   return (
     <section
       aria-labelledby="hero-heading"
@@ -30,12 +35,12 @@ export function Hero() {
         <span className="text-border" aria-hidden="true">
           •
         </span>
-        <Link
-          href="#"
+        <SellGate
+          isAuthenticated={isAuthenticated}
           className="rounded text-sm font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           Start Selling
-        </Link>
+        </SellGate>
       </div>
     </section>
   );
