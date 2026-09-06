@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ListingActions } from "@/components/listing/ListingActions";
 import { ListingBreadcrumb } from "@/components/listing/ListingBreadcrumb";
+import { FavoriteButton } from "@/components/marketplace/FavoriteButton";
 import { ListingDescription } from "@/components/listing/ListingDescription";
 import { ListingFulfillment } from "@/components/listing/ListingFulfillment";
 import { ListingGallery } from "@/components/listing/ListingGallery";
@@ -79,8 +80,17 @@ export default async function ItemPage({ params }: ItemPageProps) {
       <ListingBreadcrumb categoryName={listing.categoryName} title={listing.title} />
 
       <div className="lg:grid lg:grid-cols-2 lg:gap-10">
-        <div>
+        <div className="relative">
           <ListingGallery images={listing.imageUrls} title={listing.title} />
+          {/* Sibling of the gallery (not nested inside its own links), same
+              composition/positioning as ListingCard's favorite corner. */}
+          <div className="absolute right-3 top-3">
+            <FavoriteButton
+              listingId={listing.id}
+              label={listing.title}
+              next={`/item/${listing.publicCode}`}
+            />
+          </div>
         </div>
 
         <div className="mt-5 lg:mt-0">

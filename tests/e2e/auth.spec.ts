@@ -23,3 +23,15 @@ test("/account as a guest redirects to sign-in with next=/account", async ({ pag
   await expect(page).toHaveURL(/\/sign-in\?next=%2Faccount/);
   await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
 });
+
+test("/favorites as a guest redirects to sign-in with next=/favorites", async ({ page }) => {
+  await page.goto("/favorites");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Ffavorites/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+});
+
+test("header Favorites icon navigates to the guest-protected /favorites route", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Favorites" }).click();
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Ffavorites/);
+});

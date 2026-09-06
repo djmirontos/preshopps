@@ -16,15 +16,20 @@ export type ListingCardData = {
   priceCents: number;
   originalPriceCents?: number;
   isNegotiable?: boolean;
-  listingType: "preloved" | "brand_new";
+  /** Absent only for the /favorites feed: get_my_favorites is a
+   * deliberately lightweight bookmarks projection that doesn't return
+   * listing_type/condition -- the card omits the Pre-loved/Brand New line
+   * entirely rather than guessing. Every other feed always supplies this. */
+  listingType?: "preloved" | "brand_new";
   /** Only meaningful for preloved listings. */
   condition?: ListingCondition;
   locationLabel: string;
   postedLabel?: string;
   shopName: string;
   /** Feed queries already exclude reserved/sold; this is for contexts
-   * (e.g. shop page, "you may also like") where showing the state matters. */
-  status?: "reserved" | "sold";
+   * (e.g. shop page, favorites, "you may also like") where showing the
+   * state matters. */
+  status?: "reserved" | "sold" | "archived";
   /** Public cover image URL. Absent (no image yet, or none returned) falls
    * back to the neutral placeholder. */
   imageUrl?: string;
@@ -36,6 +41,12 @@ const CONDITION_LABELS: Record<ListingCondition, string> = {
   good: "Good",
   fair: "Fair",
 };
+
+const STATUS_LABELS = {
+  reserved: "Reserved",
+  sold: "Sold",
+  archived: "Archived",
+} as const satisfies Record<NonNullable<ListingCardData["status"]>, string>;
 
 /** Exported for reuse on the listing detail page so price formatting
  * never drifts between the card and the detail view. */
@@ -56,6 +67,7 @@ export function formatPriceFromCents(cents: number): string {
  */
 export function ListingCard({ listing }: { listing: ListingCardData }) {
   const {
+    id,
     href,
     title,
     priceCents,
@@ -71,13 +83,17 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
   } = listing;
 
   // Brand New already communicates condition on its own — never print
-  // "Brand New · Brand New".
+  // "Brand New · Brand New". listingType is only absent for the
+  // /favorites feed (see ListingCardData) -- the line is omitted there
+  // rather than showing a guessed value.
   const typeLabel =
-    listingType === "brand_new"
-      ? "Brand New"
-      : condition
-        ? `Pre-loved · ${CONDITION_LABELS[condition]}`
-        : "Pre-loved";
+    listingType === undefined
+      ? null
+      : listingType === "brand_new"
+        ? "Brand New"
+        : condition
+          ? `Pre-loved · ${CONDITION_LABELS[condition]}`
+          : "Pre-loved";
 
   return (
     <div className="relative w-[44%] shrink-0 snap-start sm:w-[30%] lg:w-auto">
@@ -99,13 +115,13 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
 
           {status && (
             <span className="absolute left-2 top-2">
-              <Badge tone="neutral">{status === "reserved" ? "Reserved" : "Sold"}</Badge>
+              <Badge tone="neutral">{STATUS_LABELS[status]}</Badge>
             </span>
           )}
         </div>
 
         <div className="mt-2 space-y-0.5">
-          <p className="text-xs text-ink-secondary">{typeLabel}</p>
+          {typeLabel !== null && <p className="text-xs text-ink-secondary">{typeLabel}</p>}
 
           <h3 className="line-clamp-2 text-sm font-medium text-ink lg:text-[15px]">{title}</h3>
 
@@ -132,7 +148,7 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
       {/* Sibling of the Link (not nested inside the <a>) so the button
           stays a valid, independently-interactive element. */}
       <div className="absolute right-2 top-2">
-        <FavoriteButton label={`Favorite ${title}`} next={href} />
+        <FavoriteButton listingId={id} label={title} next={href} />
       </div>
     </div>
   );

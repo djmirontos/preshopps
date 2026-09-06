@@ -53,6 +53,11 @@ describe("AppHeader", () => {
     expect(screen.getAllByLabelText("Account").length).toBeGreaterThan(0);
   });
 
+  it("links the Favorites icon to the real /favorites route, not a placeholder", () => {
+    render(<AppHeader user={null} />);
+    expect(screen.getByLabelText("Favorites")).toHaveAttribute("href", "/favorites");
+  });
+
   it("renders the Sell call-to-action as a guest-gated control", () => {
     render(<AppHeader user={null} />);
     expect(screen.getByRole("button", { name: /sell/i })).toBeInTheDocument();

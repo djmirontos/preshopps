@@ -62,7 +62,7 @@ describe("ListingCard", () => {
 
   it("renders an accessible favorite button", () => {
     render(<ListingCard listing={baseListing} />);
-    expect(screen.getByRole("button", { name: /favorite test listing title/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add test listing title to favorites/i })).toBeInTheDocument();
   });
 
   it("links to the given canonical /item/{publicCode} href", () => {

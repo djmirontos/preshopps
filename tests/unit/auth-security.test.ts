@@ -95,12 +95,34 @@ describe("auth security review (source scan)", () => {
     expect(source, "must not call getUser/getSession directly").not.toMatch(/\.auth\.getUser\(/);
   });
 
-  it("FavoriteButton does not import the Supabase client directly (reads shared auth status instead)", () => {
+  it("FavoriteButton reads auth status from the shared context, not its own subscription", () => {
+    // FavoriteButton legitimately imports the Supabase client now (to call
+    // the real add_favorite/remove_favorite RPCs), but must still get its
+    // guest/authenticated status from the shared AuthStatusProvider context
+    // rather than creating a second, per-button getUser/getSession/
+    // onAuthStateChange subscription -- the exact N+1-subscription problem
+    // useIsAuthenticated was introduced to solve.
     const source = readFileSync(
       path.join(process.cwd(), "components/marketplace/FavoriteButton.tsx"),
       "utf-8",
     );
-    expect(source).not.toMatch(/@\/lib\/supabase\/client/);
+    expect(source, "must use the shared useIsAuthenticated hook").toContain("useIsAuthenticated");
+    expect(source, "must not call getUser/getSession directly").not.toMatch(/\.auth\.getUser\(|\.auth\.getSession\(/);
+    expect(source, "must not install its own onAuthStateChange subscription").not.toMatch(/onAuthStateChange/);
+  });
+
+  it("FavoriteButton's mutation calls never pass a client-supplied user id", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "components/marketplace/FavoriteButton.tsx"),
+      "utf-8",
+    );
+    expect(source, "must call the existing add_favorite/remove_favorite RPCs").toMatch(
+      /rpc\(\s*["']add_favorite["']/,
+    );
+    expect(source).toMatch(/rpc\(\s*["']remove_favorite["']/);
+    // Only the listing id is ever sent -- the caller's identity comes from
+    // the RPC's own auth.uid(), never a user_id argument from the client.
+    expect(source, "must never send a user_id/p_user_id argument").not.toMatch(/user_id\s*:/);
   });
 
   it("the confirm callback never blindly forwards to next without a verified credential", () => {

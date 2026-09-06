@@ -42,6 +42,13 @@ describe("AccountPage", () => {
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
   });
 
+  it("renders a Favorites link pointing at /favorites for an authenticated user", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+    render(await AccountPage());
+
+    expect(screen.getByRole("link", { name: /favorites/i })).toHaveAttribute("href", "/favorites");
+  });
+
   it("never renders account content before the server auth check resolves negatively", async () => {
     getAuthUserMock.mockResolvedValue(null);
     await expect(AccountPage()).rejects.toThrow();
