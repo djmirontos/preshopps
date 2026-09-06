@@ -124,15 +124,13 @@ describe("Homepage (real data)", () => {
     expect(screen.getByText("Verified reviews")).toBeInTheDocument();
   });
 
-  it("wires the Hero and each section's View all link to /search with the right filter", async () => {
+  it("wires each section's View all link to /search with the right filter", async () => {
     mockData({
       freshFinds: { listings: [sampleListing], hadError: false },
       preLoved: { listings: [sampleListing], hadError: false },
       brandNew: { listings: [sampleListing], hadError: false },
     });
     render(await Home());
-
-    expect(screen.getByRole("link", { name: "Browse Items" })).toHaveAttribute("href", "/search");
 
     // Fresh Finds, Pre-loved, Brand New -- in page order.
     const viewAllLinks = screen.getAllByRole("link", { name: /view all/i });

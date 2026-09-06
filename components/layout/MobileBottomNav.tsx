@@ -13,15 +13,24 @@ type Props = {
 };
 
 const TAB_CLASS =
-  "flex h-full flex-col items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand";
+  "flex h-full w-full flex-col items-center justify-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand";
 
+const LABEL_CLASS = "text-[11px] font-medium leading-none";
+
+/**
+ * Every tab (Sell included) reserves the same h-9 icon slot so all 5
+ * labels sit at an identical baseline regardless of whether that slot
+ * holds a bare icon or Sell's filled circle -- fixes the previous
+ * misalignment where Sell's icon block was a different height than the
+ * other four.
+ */
 function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
   return (
     <>
-      <Icon className={cn("h-6 w-6", isActive ? "text-brand-hover" : "text-ink-muted")} aria-hidden="true" />
-      <span className={cn("text-[11px] font-medium", isActive ? "text-brand-hover" : "text-ink-muted")}>
-        {label}
+      <span className="flex h-9 w-9 items-center justify-center">
+        <Icon className={cn("h-6 w-6", isActive ? "text-brand-hover" : "text-ink-muted")} aria-hidden="true" />
       </span>
+      <span className={cn(LABEL_CLASS, isActive ? "text-brand-hover" : "text-ink-muted")}>{label}</span>
     </>
   );
 }
@@ -70,7 +79,10 @@ export function MobileBottomNav({ user }: Props) {
 
         <li className="flex-1">
           <SellGate isAuthenticated={isAuthenticated} className={TAB_CLASS}>
-            {tabContent(CirclePlus, "Sell", false)}
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-hover text-white">
+              <CirclePlus className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <span className={cn(LABEL_CLASS, "text-ink-muted")}>Sell</span>
           </SellGate>
         </li>
 

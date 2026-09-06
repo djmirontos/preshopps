@@ -13,7 +13,11 @@ const SIGNALS: Signal[] = [
   { icon: Star, title: "Verified reviews", description: "Real feedback from completed orders." },
 ];
 
-/** Low-key strip near the footer. Never implies Trusted Seller is purchasable. */
+/**
+ * Low-key strip near the footer, presented as one contained/bordered
+ * group rather than three items spread loosely across the full page
+ * width. Never implies Trusted Seller is purchasable.
+ */
 export function TrustStrip() {
   return (
     <section aria-labelledby="trust-heading" className="border-t border-divider bg-canvas">
@@ -21,10 +25,10 @@ export function TrustStrip() {
         <h2 id="trust-heading" className="sr-only">
           Buying and selling safely on Preshopps
         </h2>
-        <ul className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+        <ul className="mx-auto flex max-w-3xl flex-col divide-y divide-divider rounded-[14px] border border-border bg-surface sm:flex-row sm:divide-x sm:divide-y-0">
           {SIGNALS.map(({ icon: Icon, title, description }) => (
-            <li key={title} className="flex items-start gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink-secondary">
+            <li key={title} className="flex flex-1 items-start gap-3 p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-canvas text-ink-secondary">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </span>
               <div>

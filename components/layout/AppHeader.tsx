@@ -27,15 +27,24 @@ export function AppHeader({ user }: Props) {
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:h-[72px] lg:px-8">
         <Link
           href="/"
-          className="shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          aria-label="Preshopps"
+          className="flex shrink-0 items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:gap-2"
         >
           <Image
+            src="/images/brand/Preshopps Logo.png"
+            alt=""
+            width={64}
+            height={64}
+            priority
+            className="h-7 w-7 lg:h-9 lg:w-9"
+          />
+          <Image
             src="/images/brand/preshopps_text.png"
-            alt="Preshopps"
+            alt=""
             width={1116}
             height={224}
             priority
-            className="h-7 w-auto lg:h-8"
+            className="h-6 w-auto lg:h-7"
           />
         </Link>
 

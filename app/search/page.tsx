@@ -6,6 +6,7 @@ import { SearchResultsClient } from "@/components/search/SearchResultsClient";
 import { SortSelect } from "@/components/search/SortSelect";
 import {
   buildSearchHref,
+  countActiveFilters,
   parseSearchFilters,
   type BrowseCursor,
   type RawSearchParams,
@@ -146,6 +147,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             initialCursor={result.nextCursor}
             loadMore={loadMoreAction}
             query={filters.q}
+            hasActiveFilters={countActiveFilters(displayFilters) > 0}
             clearFiltersHref={clearFiltersHref}
           />
         </div>

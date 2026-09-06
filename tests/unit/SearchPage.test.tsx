@@ -86,13 +86,30 @@ describe("SearchPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Marketplace" })).toBeInTheDocument();
   });
 
-  it("shows the empty state when there are zero results and no error", async () => {
+  it("shows the query-specific empty state when there are zero results for a plain text search", async () => {
     mockReferenceData();
     searchListingsMock.mockResolvedValue({ listings: [], hadError: false, nextCursor: null });
 
     await renderSearchPage({ q: "nonexistent" });
-    expect(screen.getByText("No listings match your filters.")).toBeInTheDocument();
+    expect(screen.getByText("No results for “nonexistent”.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: /search results for "nonexistent"/i })).toBeInTheDocument();
+  });
+
+  it("shows the filters-specific empty state when a real filter (not just a query) is active", async () => {
+    mockReferenceData();
+    searchListingsMock.mockResolvedValue({ listings: [], hadError: false, nextCursor: null });
+
+    await renderSearchPage({ category: "cars" });
+    expect(screen.getByText("No listings match your filters.")).toBeInTheDocument();
+  });
+
+  it("shows the true-empty-marketplace copy when there is no query and no filters at all", async () => {
+    mockReferenceData();
+    searchListingsMock.mockResolvedValue({ listings: [], hadError: false, nextCursor: null });
+
+    await renderSearchPage({});
+    expect(screen.getByText("No listings yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No listings match your filters.")).not.toBeInTheDocument();
   });
 
   it("shows the RPC error fallback rather than a fake empty/success state", async () => {

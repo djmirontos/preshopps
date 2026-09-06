@@ -7,7 +7,6 @@ import { SectionEmptyState } from "@/components/marketplace/SectionEmptyState";
 import { TrustStrip } from "@/components/marketplace/TrustStrip";
 import { getHomepageMarketplaceData } from "@/lib/marketplace/browse-listings";
 import { getCategories } from "@/lib/marketplace/reference-data";
-import { getAuthUser } from "@/lib/auth/session";
 
 /**
  * Popular Shops is intentionally omitted in Phase 1: real shop-activity
@@ -18,15 +17,14 @@ import { getAuthUser } from "@/lib/auth/session";
  */
 
 export default async function Home() {
-  const [{ freshFinds, preLoved, brandNew }, categories, user] = await Promise.all([
+  const [{ freshFinds, preLoved, brandNew }, categories] = await Promise.all([
     getHomepageMarketplaceData(),
     getCategories(),
-    getAuthUser(),
   ]);
 
   return (
     <>
-      <Hero isAuthenticated={Boolean(user)} />
+      <Hero />
       <CategoryStrip categories={categories} />
 
       {/* Fresh Finds always stays visible — populated, a genuine-zero-rows

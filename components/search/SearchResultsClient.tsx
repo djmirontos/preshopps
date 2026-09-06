@@ -19,6 +19,7 @@ type Props = {
   initialCursor: BrowseCursor | null;
   loadMore: (cursor: BrowseCursor) => Promise<LoadMoreResult>;
   query: string | null;
+  hasActiveFilters: boolean;
   clearFiltersHref: string;
 };
 
@@ -40,6 +41,7 @@ export function SearchResultsClient({
   initialCursor,
   loadMore,
   query,
+  hasActiveFilters,
   clearFiltersHref,
 }: Props) {
   const [listings, setListings] = useState(initialListings);
@@ -52,7 +54,9 @@ export function SearchResultsClient({
   }
 
   if (listings.length === 0) {
-    return <SearchEmptyState query={query} clearFiltersHref={clearFiltersHref} />;
+    return (
+      <SearchEmptyState query={query} hasActiveFilters={hasActiveFilters} clearFiltersHref={clearFiltersHref} />
+    );
   }
 
   function handleLoadMore() {

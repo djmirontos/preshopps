@@ -92,6 +92,17 @@ export default async function ShopPage({ params }: ShopPageProps) {
     ? listingsResult.listings.find((listing) => listing.id === shop.featuredListingId)
     : undefined;
 
+  // Presentation-only: drop the featured listing from the FIRST rendered
+  // grid page so it doesn't visibly repeat right below "Featured". This
+  // never touches listingsResult.nextCursor -- that cursor is still
+  // computed by getShopListings from the untouched backend page, so
+  // "Load More" keeps paging from the real boundary and never needs to
+  // know about this exclusion (a later page can't contain this id again,
+  // since it already appeared before the cursor).
+  const gridListings = featuredListing
+    ? listingsResult.listings.filter((listing) => listing.id !== featuredListing.id)
+    : listingsResult.listings;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <ShopBreadcrumb shopName={shop.name} />
@@ -120,7 +131,7 @@ export default async function ShopPage({ params }: ShopPageProps) {
         <h2 className="text-lg font-semibold text-ink">Listings</h2>
         <div className="mt-2">
           <ShopListingsClient
-            initialListings={listingsResult.listings}
+            initialListings={gridListings}
             initialHadError={listingsResult.hadError}
             initialCursor={listingsResult.nextCursor}
             loadMore={loadMoreAction}

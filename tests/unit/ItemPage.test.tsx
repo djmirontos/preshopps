@@ -135,6 +135,61 @@ describe("ItemPage", () => {
     expect(screen.queryByText("Rental Details")).not.toBeInTheDocument();
   });
 
+  it("renders a compact seller/trust preview linking to the shop, above Fulfillment/Actions", async () => {
+    getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+    render(await ItemPage(makeParams("PLS-ABC123")));
+
+    const previewLinks = screen.getAllByRole("link", { name: /sole traders/i });
+    expect(previewLinks[0]).toHaveAttribute("href", "/shop/sole-traders");
+  });
+
+  it("shows Trusted Seller in the compact preview when the shop is trusted, hides it otherwise", async () => {
+    getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+    const { rerender } = render(await ItemPage(makeParams("PLS-ABC123")));
+    expect(screen.getAllByText("Trusted Seller").length).toBeGreaterThan(0);
+
+    getListingDetailMock.mockResolvedValue({
+      status: "found",
+      listing: { ...sampleListing, shop: { ...sampleListing.shop, isTrustedSeller: false } },
+    });
+    rerender(await ItemPage(makeParams("PLS-ABC123")));
+    expect(screen.queryByText("Trusted Seller")).not.toBeInTheDocument();
+  });
+
+  it("shows rating/review count in the compact preview only when reviews exist", async () => {
+    getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+    render(await ItemPage(makeParams("PLS-ABC123")));
+    expect(screen.getAllByText(/4\.7.*3 reviews/).length).toBeGreaterThan(0);
+  });
+
+  it("omits the rating line in the compact preview when there are no reviews yet", async () => {
+    getListingDetailMock.mockResolvedValue({
+      status: "found",
+      listing: { ...sampleListing, reviewCount: 0, averageRating: null },
+    });
+    render(await ItemPage(makeParams("PLS-ABC123")));
+    // The compact preview's rating line ("4.7 · 3 reviews") is gone; the
+    // full seller card's own "No reviews yet" fallback further down is
+    // untouched and expected to still render.
+    expect(screen.queryByText(/^\d\.\d\s·\s\d+\s?reviews?$/)).not.toBeInTheDocument();
+    expect(screen.getByText("No reviews yet")).toBeInTheDocument();
+  });
+
+  it("still renders the full seller card (Messenger, member since) further down the page", async () => {
+    getListingDetailMock.mockResolvedValue({
+      status: "found",
+      listing: { ...sampleListing, shop: { ...sampleListing.shop, messengerLink: "https://m.me/soletraders" } },
+    });
+    render(await ItemPage(makeParams("PLS-ABC123")));
+
+    expect(screen.getByRole("heading", { name: "Seller" })).toBeInTheDocument();
+    expect(screen.getByText(/member since/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /contact on messenger/i })).toHaveAttribute(
+      "href",
+      "https://m.me/soletraders",
+    );
+  });
+
   it("renders the Vehicle Details block for a Cars/Motorcycles listing with vehicle fields", async () => {
     getListingDetailMock.mockResolvedValue({
       status: "found",

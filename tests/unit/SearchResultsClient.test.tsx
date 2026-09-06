@@ -35,6 +35,7 @@ describe("SearchResultsClient", () => {
         initialCursor={null}
         loadMore={loadMore}
         query={null}
+        hasActiveFilters={false}
         clearFiltersHref="/search"
       />,
     );
@@ -44,7 +45,7 @@ describe("SearchResultsClient", () => {
     expect(screen.queryByRole("button", { name: /load more/i })).not.toBeInTheDocument();
   });
 
-  it("shows the search empty state (not the homepage empty state) when there are zero results", () => {
+  it("shows the query-specific empty state (not the generic filters message) for a text-only query", () => {
     render(
       <SearchResultsClient
         initialListings={[]}
@@ -52,7 +53,29 @@ describe("SearchResultsClient", () => {
         initialCursor={null}
         loadMore={vi.fn()}
         query="galaxy fold"
+        hasActiveFilters={false}
         clearFiltersHref="/search?q=galaxy+fold"
+      />,
+    );
+
+    expect(screen.getByText("No results for “galaxy fold”.")).toBeInTheDocument();
+    expect(screen.queryByText("No listings match your filters.")).not.toBeInTheDocument();
+    // Nothing to clear when the query is the only thing set -- "Clear
+    // filters" would be a no-op, so it's hidden.
+    expect(screen.queryByRole("link", { name: /clear filters/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /browse all listings/i })).toBeInTheDocument();
+  });
+
+  it("shows the generic filters-empty state (with the query named as a secondary line) when a real filter is also active", () => {
+    render(
+      <SearchResultsClient
+        initialListings={[]}
+        initialHadError={false}
+        initialCursor={null}
+        loadMore={vi.fn()}
+        query="galaxy fold"
+        hasActiveFilters
+        clearFiltersHref="/search?q=galaxy+fold&category=electronics"
       />,
     );
 
@@ -60,7 +83,7 @@ describe("SearchResultsClient", () => {
     expect(screen.getByText(/galaxy fold/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /clear filters/i })).toHaveAttribute(
       "href",
-      "/search?q=galaxy+fold",
+      "/search?q=galaxy+fold&category=electronics",
     );
   });
 
@@ -72,6 +95,7 @@ describe("SearchResultsClient", () => {
         initialCursor={null}
         loadMore={vi.fn()}
         query={null}
+        hasActiveFilters={false}
         clearFiltersHref="/search"
       />,
     );
@@ -92,6 +116,7 @@ describe("SearchResultsClient", () => {
         initialCursor={{ createdAt: "2026-01-01T00:00:00Z", id: "a" }}
         loadMore={loadMore}
         query={null}
+        hasActiveFilters={false}
         clearFiltersHref="/search"
       />,
     );
@@ -115,6 +140,7 @@ describe("SearchResultsClient", () => {
         initialCursor={{ id: "a" }}
         loadMore={loadMore}
         query={null}
+        hasActiveFilters={false}
         clearFiltersHref="/search"
       />,
     );
@@ -136,6 +162,7 @@ describe("SearchResultsClient", () => {
         initialCursor={{ id: "a" }}
         loadMore={loadMore}
         query={null}
+        hasActiveFilters={false}
         clearFiltersHref="/search"
       />,
     );

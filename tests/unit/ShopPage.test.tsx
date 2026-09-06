@@ -123,6 +123,64 @@ describe("ShopPage", () => {
     expect(permanentRedirectMock).not.toHaveBeenCalled();
   });
 
+  it("does not repeat the featured listing a second time in the normal grid on the first page", async () => {
+    const secondListing: ListingCardData = {
+      id: "listing-2",
+      href: "/item/PLS-XYZ789",
+      title: "Second Item",
+      priceCents: 75000,
+      listingType: "preloved",
+      condition: "very_good",
+      locationLabel: "Tangub City",
+      shopName: "Anne's Closet",
+    };
+
+    getShopDetailMock.mockResolvedValue({
+      status: "found",
+      shop: { ...sampleShop, featuredListingId: "listing-1" },
+      isCurrentSlug: true,
+    });
+    getShopListingsMock.mockResolvedValue({
+      listings: [sampleListing, secondListing],
+      hadError: false,
+      nextCursor: { createdAt: "2026-01-01T00:00:00Z", id: "listing-2" },
+    });
+
+    render(await ShopPage(makeParams("annes-closet")));
+
+    // The featured listing's title appears exactly once (in Featured),
+    // not a second time in the Listings grid directly below it.
+    expect(screen.getAllByText("Sample Item")).toHaveLength(1);
+    expect(screen.getByText("Second Item")).toBeInTheDocument();
+    // Load More is still offered, driven by the real backend cursor --
+    // proves the presentation-only filter didn't touch pagination.
+    expect(screen.getByRole("button", { name: /load more/i })).toBeInTheDocument();
+  });
+
+  it("requests the normal, unfiltered first page from the backend -- the exclusion never reaches the RPC call", async () => {
+    getShopDetailMock.mockResolvedValue({
+      status: "found",
+      shop: { ...sampleShop, featuredListingId: "listing-1" },
+      isCurrentSlug: true,
+    });
+    getShopListingsMock.mockResolvedValue({
+      listings: [sampleListing],
+      hadError: false,
+      nextCursor: null,
+    });
+
+    render(await ShopPage(makeParams("annes-closet")));
+
+    // getShopListings is called exactly as it always was (shop id + the
+    // plain page limit) -- the featured-id exclusion is applied only to
+    // the array handed to the grid afterward, never to the request.
+    expect(getShopListingsMock).toHaveBeenCalledWith("shop-1", 20);
+    // With only the featured listing on this page and no further cursor,
+    // the grid has nothing left to show -- an honest empty message,
+    // not a fabricated one.
+    expect(screen.getByText("No listings available right now.")).toBeInTheDocument();
+  });
+
   it("shows the Featured section when the featured listing is found on the fetched page", async () => {
     getShopDetailMock.mockResolvedValue({
       status: "found",

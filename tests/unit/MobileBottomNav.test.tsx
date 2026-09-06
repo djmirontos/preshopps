@@ -32,4 +32,50 @@ describe("MobileBottomNav", () => {
     render(<MobileBottomNav user={{ id: "u1", email: "buyer@example.com" }} />);
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
   });
+
+  it("gives every tab's icon slot the same size, so all 5 labels sit at the same baseline", () => {
+    render(<MobileBottomNav user={null} />);
+    const tabs = [
+      screen.getByRole("link", { name: "Home" }),
+      screen.getByRole("link", { name: "Search" }),
+      screen.getByRole("button", { name: "Sell" }),
+      screen.getByRole("link", { name: "Messages" }),
+      screen.getByRole("link", { name: "Account" }),
+    ];
+    for (const tab of tabs) {
+      const slot = tab.querySelector("span.h-9.w-9");
+      expect(slot, `${tab.getAttribute("aria-label") ?? tab.textContent} is missing its h-9 w-9 icon slot`).not.toBeNull();
+    }
+  });
+
+  it("uses the same 22-24px icon size for every non-Sell tab", () => {
+    render(<MobileBottomNav user={null} />);
+    for (const name of ["Home", "Search", "Messages", "Account"]) {
+      const tab = screen.getByRole("link", { name });
+      const icon = tab.querySelector("svg");
+      expect(icon?.getAttribute("class")).toContain("h-6");
+      expect(icon?.getAttribute("class")).toContain("w-6");
+    }
+  });
+
+  it("keeps Sell only modestly emphasized -- a ~36px circle, not an oversized floating action button", () => {
+    render(<MobileBottomNav user={null} />);
+    const sellButton = screen.getByRole("button", { name: "Sell" });
+    const circle = sellButton.querySelector(".rounded-full");
+    expect(circle?.className).toContain("h-9");
+    expect(circle?.className).toContain("w-9");
+  });
+
+  it("uses identical label typography for all 5 tabs", () => {
+    render(<MobileBottomNav user={null} />);
+    const labels = ["Home", "Search", "Sell", "Messages", "Account"].map((name) => screen.getByText(name));
+    const classes = labels.map((label) => label.className);
+    expect(new Set(classes.map((c) => c.replace("text-brand-hover", "").replace("text-ink-muted", "").trim())).size).toBe(1);
+  });
+
+  it("uses the shared brand-hover (orange) token for the active tab, not a one-off color", () => {
+    render(<MobileBottomNav user={null} />);
+    const activeLabel = screen.getByText("Home");
+    expect(activeLabel.className).toContain("text-brand-hover");
+  });
 });

@@ -15,14 +15,27 @@ describe("AppHeader", () => {
     expect(logo).toHaveAttribute("href", "/");
   });
 
-  it("renders the brand logo as a local image asset with a meaningful accessible name", () => {
+  it("renders both the box icon and the wordmark as local image assets in one lockup", () => {
     render(<AppHeader user={null} />);
     const logo = screen.getByRole("link", { name: "Preshopps" });
-    const image = logo.querySelector("img");
-    expect(image).not.toBeNull();
-    expect(image).toHaveAttribute("alt", "Preshopps");
-    // Local /public asset -- no remote image host introduced.
-    expect(image?.getAttribute("src")).not.toMatch(/^https?:\/\//);
+    const images = logo.querySelectorAll("img");
+    expect(images).toHaveLength(2);
+    for (const image of images) {
+      // Local /public asset -- no remote image host introduced.
+      expect(image.getAttribute("src")).not.toMatch(/^https?:\/\//);
+    }
+  });
+
+  it("carries exactly one accessible brand name, not one per image", () => {
+    render(<AppHeader user={null} />);
+    const logo = screen.getByRole("link", { name: "Preshopps" });
+    // The accessible name comes from the link's own aria-label; both
+    // images are decorative (alt="") so they never contribute a second
+    // competing name/announcement.
+    for (const image of logo.querySelectorAll("img")) {
+      expect(image).toHaveAttribute("alt", "");
+    }
+    expect(screen.getAllByRole("link", { name: "Preshopps" })).toHaveLength(1);
   });
 
   it("still renders Bell and Cart controls in the mobile header alongside the logo", () => {

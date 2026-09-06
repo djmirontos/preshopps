@@ -9,6 +9,7 @@ import { ListingGallery } from "@/components/listing/ListingGallery";
 import { ListingHeader } from "@/components/listing/ListingHeader";
 import { ListingMeta } from "@/components/listing/ListingMeta";
 import { ListingSellerCard } from "@/components/listing/ListingSellerCard";
+import { ListingSellerPreview } from "@/components/listing/ListingSellerPreview";
 import { ListingSpecificDetails } from "@/components/listing/ListingSpecificDetails";
 import { getListingDetail } from "@/lib/marketplace/listing-detail";
 import { getAuthUser } from "@/lib/auth/session";
@@ -93,6 +94,14 @@ export default async function ItemPage({ params }: ItemPageProps) {
             status={listing.status}
             locationLabel={listing.locationLabel}
             availableQuantity={listing.availableQuantity}
+          />
+
+          <ListingSellerPreview
+            slug={listing.shop.slug}
+            name={listing.shop.name}
+            isTrustedSeller={listing.shop.isTrustedSeller}
+            reviewCount={listing.reviewCount}
+            averageRating={listing.averageRating}
           />
 
           <div className="mt-5">
