@@ -31,8 +31,8 @@ function pillClass(isActive: boolean): string {
   return cn(
     "flex h-9 items-center rounded-full border px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
     isActive
-      ? "border-brand-hover bg-brand-hover text-white"
-      : "border-border bg-surface text-ink-secondary hover:border-brand-hover hover:text-brand-hover",
+      ? "border-brand-action bg-brand-action text-brand-action-text"
+      : "border-border bg-surface text-ink-secondary hover:border-brand-link hover:text-brand-link",
   );
 }
 

@@ -87,7 +87,7 @@ export function SearchResultsClient({
             type="button"
             onClick={handleLoadMore}
             disabled={isPending}
-            className="rounded-[10px] border border-border bg-surface px-5 py-2.5 text-sm font-semibold text-ink hover:border-brand-hover hover:text-brand-hover disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            className="rounded-[10px] border border-border bg-surface px-5 py-2.5 text-sm font-semibold text-ink hover:border-brand-link hover:text-brand-link disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             {isPending ? "Loading…" : "Load more"}
           </button>

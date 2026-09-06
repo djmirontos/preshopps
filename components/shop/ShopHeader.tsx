@@ -86,7 +86,7 @@ export function ShopHeader({
           <p className="flex items-center justify-center gap-1 text-sm font-semibold text-ink">
             {reviewCount > 0 && averageRating !== null ? (
               <>
-                <Star className="h-4 w-4 fill-current text-brand-hover" aria-hidden="true" />
+                <Star className="h-4 w-4 fill-current text-brand-link" aria-hidden="true" />
                 {averageRating.toFixed(1)}
               </>
             ) : (

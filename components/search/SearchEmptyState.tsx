@@ -44,14 +44,14 @@ export function SearchEmptyState({ query, hasActiveFilters, clearFiltersHref }: 
           {hasActiveFilters && (
             <Link
               href={clearFiltersHref}
-              className="rounded-[10px] border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:border-brand-hover hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              className="rounded-[10px] border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               Clear filters
             </Link>
           )}
           <Link
             href="/search"
-            className="rounded-[10px] bg-brand-hover px-4 py-2 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            className="rounded-[10px] bg-brand-action px-4 py-2 text-sm font-semibold text-brand-action-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
           >
             Browse all listings
           </Link>

@@ -91,7 +91,7 @@ export function AuthGate({ title, reason, next, onClose }: Props) {
             <Link
               href={`/sign-in?next=${nextParam}`}
               onClick={onClose}
-              className="flex h-11 items-center justify-center rounded-[10px] bg-brand-hover px-4 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+              className="flex h-11 items-center justify-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
             >
               Sign in
             </Link>

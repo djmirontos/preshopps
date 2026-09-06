@@ -60,7 +60,7 @@ export function ListingSellerCard({
       <p className="mt-2 flex items-center gap-1.5 text-sm text-ink-secondary">
         {reviewCount > 0 && averageRating !== null ? (
           <>
-            <Star className="h-4 w-4 fill-current text-brand-hover" aria-hidden="true" />
+            <Star className="h-4 w-4 fill-current text-brand-link" aria-hidden="true" />
             {averageRating.toFixed(1)} · {reviewCount} review{reviewCount === 1 ? "" : "s"}
           </>
         ) : (

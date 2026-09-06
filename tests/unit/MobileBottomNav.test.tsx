@@ -70,12 +70,12 @@ describe("MobileBottomNav", () => {
     render(<MobileBottomNav user={null} />);
     const labels = ["Home", "Search", "Sell", "Messages", "Account"].map((name) => screen.getByText(name));
     const classes = labels.map((label) => label.className);
-    expect(new Set(classes.map((c) => c.replace("text-brand-hover", "").replace("text-ink-muted", "").trim())).size).toBe(1);
+    expect(new Set(classes.map((c) => c.replace("text-brand-link", "").replace("text-ink-muted", "").trim())).size).toBe(1);
   });
 
-  it("uses the shared brand-hover (orange) token for the active tab, not a one-off color", () => {
+  it("uses the shared brand-link (navy) token for the active tab's text/icon, not orange", () => {
     render(<MobileBottomNav user={null} />);
     const activeLabel = screen.getByText("Home");
-    expect(activeLabel.className).toContain("text-brand-hover");
+    expect(activeLabel.className).toContain("text-brand-link");
   });
 });

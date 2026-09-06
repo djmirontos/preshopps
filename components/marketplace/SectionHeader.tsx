@@ -21,7 +21,7 @@ export function SectionHeader({ id, title, eyebrow, viewAllHref }: SectionHeader
       {viewAllHref && (
         <Link
           href={viewAllHref}
-          className="shrink-0 rounded text-sm font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="shrink-0 rounded text-sm font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           View all →
         </Link>

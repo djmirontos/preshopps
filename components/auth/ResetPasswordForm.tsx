@@ -103,7 +103,7 @@ export function ResetPasswordForm() {
         <p className="text-sm text-ink-secondary">Your password has been updated.</p>
         <Link
           href="/"
-          className="inline-flex h-11 items-center rounded-[10px] bg-brand-hover px-4 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+          className="inline-flex h-11 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
         >
           Continue to Preshopps
         </Link>
@@ -157,7 +157,7 @@ export function ResetPasswordForm() {
       <button
         type="submit"
         disabled={isSubmitting}
-        className="h-12 w-full rounded-[10px] bg-brand-hover text-sm font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+        className="h-12 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
       >
         {isSubmitting ? "Updating…" : "Update password"}
       </button>

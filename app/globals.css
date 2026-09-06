@@ -3,39 +3,50 @@
 /*
  * Preshopps design tokens (Phase 1 — light mode only).
  * Raw values live here; @theme inline maps them to Tailwind utilities
- * (bg-brand, text-ink, border-border, etc). See design report for the
- * brand/brand-hover usage split (contrast-driven, not a palette change).
+ * (bg-brand, text-ink, border-border, etc).
  *
- * UX Revision Pass #1 correction: brand/brand-hover moved from blue to
- * the Preshopps orange family -- #E9782B (--brand-accent, sampled from
- * the box-icon artwork) is the approved swatch, but it only reaches
- * 2.92:1 against white -- well short of the 4.5:1 normal-text minimum,
- * and unsafe both as a white-text button fill AND as plain text-on-white
- * (bg-brand-hover/text-brand-hover/border-brand/ring-brand all share
- * these two variables and are used both ways across the app, including
- * plain link text like "Forgot password?"/"View all"/the active bottom-
- * nav label -- there is no single spot to special-case). --brand/
- * --brand-hover are therefore the same hue/saturation as --brand-accent
- * (h≈24°, s≈81%) darkened to L=40%/36%, verified to clear AA in every
- * direction actually used: #B95613 vs white 4.77:1, #A64E11 vs white
- * 5.65:1 (both comfortably above 4.5:1, and above the 3:1 UI-component
- * minimum for focus rings). A deep-navy-on-light-orange treatment was
- * evaluated first per the preferred direction, but measured navy
- * (#123B6D) on #E9782B is only 3.84:1 and gets worse as the orange
- * darkens -- it does not reliably pass AA, so dark navy text was not
- * used as the primary/hover pairing. --brand-navy and --brand-accent are
- * kept exactly as approved, for structural/decorative use where their
- * own contrast is safe (e.g. dark ink on a light-orange-tinted badge:
- * 5.96:1) -- not swapped into the shared action token. --accent (green,
- * Trusted Seller/success) is unchanged. Neither the original red-orange
- * primary nor the intermediate blue primary from earlier passes remain
- * anywhere in :root -- see git history for those values if needed.
+ * Final brand-color correction: the product owner wants the actual vivid
+ * box-icon orange (#E9782B) visible as the primary CTA color -- the
+ * previous single shared brand/brand-hover pair (#B95613/#A64E11) was a
+ * darkened compromise made specifically so ONE token pair could double as
+ * both a white-text button fill AND plain link/text-on-white, and reads
+ * as too dark/burnt. That compromise is no longer needed now that the
+ * role is split into two purpose-specific token pairs, each solved for
+ * its own contrast requirement instead of one value trying to satisfy
+ * both:
+ *
+ *   --brand-action / --brand-action-hover  -- FILLED button/CTA
+ *     backgrounds only (Sell, sign-in/up submits, Add to Cart, active
+ *     filter pills, the bottom-nav Sell circle). Paired with dark ink
+ *     text/icons (--brand-action-text), never white -- #E9782B only
+ *     reaches 2.92:1 against white, far short of the 4.5:1 normal-text
+ *     minimum, but dark ink on #E9782B reaches 5.96:1.
+ *
+ *   --brand-link / --brand-link-hover -- plain text-only "brand" color:
+ *     links ("Forgot password?", "View all", breadcrumbs), the active
+ *     bottom-nav label/icon, rating-star accents, selected-thumbnail
+ *     borders. These sit directly on white/canvas, where orange text
+ *     fails AA outright -- navy (#123B6D) reaches 11.22:1.
+ *
+ * --brand is kept only for focus rings (ring-brand/border-brand are used
+ * pervasively for that across the app) and is pointed at the same navy
+ * value, per the requirement that focus indicators use a reliably
+ * compliant color rather than the sub-3:1 orange. --brand-navy and
+ * --brand-accent remain the raw reference swatches (structural/
+ * decorative use, e.g. dark ink on a light-orange-tinted badge: 5.96:1)
+ * that --brand-link/--brand-action are drawn from. --accent (green,
+ * Trusted Seller/success) is unchanged. #B95613/#A64E11 no longer appear
+ * anywhere in :root.
  */
 :root {
-  --brand: #b95613;
-  --brand-hover: #a64e11;
   --brand-navy: #123b6d;
   --brand-accent: #e9782b;
+  --brand: var(--brand-navy);
+  --brand-action: var(--brand-accent);
+  --brand-action-hover: #de6817;
+  --brand-action-text: #1a1a1a;
+  --brand-link: var(--brand-navy);
+  --brand-link-hover: #0f315a;
   --accent: #1c6e52;
   --text-primary: #1a1a1a;
   --text-secondary: #5a5a55;
@@ -52,7 +63,11 @@
 
 @theme inline {
   --color-brand: var(--brand);
-  --color-brand-hover: var(--brand-hover);
+  --color-brand-action: var(--brand-action);
+  --color-brand-action-hover: var(--brand-action-hover);
+  --color-brand-action-text: var(--brand-action-text);
+  --color-brand-link: var(--brand-link);
+  --color-brand-link-hover: var(--brand-link-hover);
   --color-brand-navy: var(--brand-navy);
   --color-brand-accent: var(--brand-accent);
   --color-accent: var(--accent);

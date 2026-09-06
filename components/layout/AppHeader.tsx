@@ -84,7 +84,7 @@ export function AppHeader({ user }: Props) {
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
           <SellGate
             isAuthenticated={isAuthenticated}
-            className="ml-2 inline-flex h-10 items-center rounded-[10px] bg-brand-hover px-4 text-sm font-semibold text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            className="ml-2 inline-flex h-10 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
           >
             <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />
             Sell

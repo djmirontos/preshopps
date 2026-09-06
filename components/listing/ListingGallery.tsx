@@ -57,7 +57,7 @@ export function ListingGallery({ images, title }: Props) {
               onClick={() => setSelected(index)}
               className={cn(
                 "relative h-16 w-16 shrink-0 overflow-hidden rounded-[10px] border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                index === selected ? "border-brand-hover" : "border-transparent",
+                index === selected ? "border-brand-link" : "border-transparent",
               )}
             >
               <Image src={src} alt="" fill sizes="64px" className="object-cover" />

@@ -9,7 +9,7 @@ type BadgeProps = {
 
 const TONE_CLASSES: Record<NonNullable<BadgeProps["tone"]>, string> = {
   neutral: "bg-ink/80 text-white",
-  brand: "bg-brand-hover text-white",
+  brand: "bg-brand-action text-brand-action-text",
   accent: "bg-accent text-white",
 };
 

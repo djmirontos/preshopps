@@ -59,7 +59,7 @@ export function ListingActions({ status, isInquiryOnly, isAuthenticated, next }:
             onClick={isAuthenticated ? undefined : () => setOpenGate("cart")}
             className={cn(
               buttonBaseClass,
-              "bg-brand-hover text-white",
+              "bg-brand-action text-brand-action-text",
               isAuthenticated ? "cursor-not-allowed opacity-60" : "hover:brightness-95",
             )}
           >

@@ -89,7 +89,7 @@ export function ActiveFilterChips({ filters, categoryName, locationLabel }: Prop
         <Link
           key={chip.key}
           href={chip.href}
-          className="flex h-8 items-center gap-1 rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-hover hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="flex h-8 items-center gap-1 rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           {chip.label}
           <X className="h-3 w-3" aria-hidden="true" />
@@ -98,7 +98,7 @@ export function ActiveFilterChips({ filters, categoryName, locationLabel }: Prop
       {chips.length > 1 && (
         <Link
           href={buildSearchHref(filters, CLEAR_ALL_UPDATES)}
-          className="flex h-8 items-center rounded-full px-3 text-xs font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="flex h-8 items-center rounded-full px-3 text-xs font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           Clear all
         </Link>

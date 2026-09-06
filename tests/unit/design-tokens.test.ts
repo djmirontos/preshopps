@@ -24,12 +24,14 @@ function contrastRatio(hex1: string, hex2: string): number {
 }
 
 const WHITE = "#ffffff";
-const BRAND = "#b95613";
-const BRAND_HOVER = "#a64e11";
-const BRAND_ACCENT = "#e9782b";
-const BRAND_NAVY = "#123b6d";
+const CANVAS = "#fafaf8";
+const ACTION = "#e9782b";
+const ACTION_HOVER = "#de6817";
+const ACTION_TEXT = "#1a1a1a";
+const LINK = "#123b6d";
+const LINK_HOVER = "#0f315a";
 
-describe("design tokens (UX Revision Pass #1 correction: blue -> orange)", () => {
+describe("design tokens (final brand-color correction: vivid orange action + navy links)", () => {
   it("no longer defines the old red-orange primary (#e2582e) anywhere in globals.css", () => {
     expect(CSS_SOURCE.toLowerCase()).not.toContain("#e2582e");
   });
@@ -39,61 +41,65 @@ describe("design tokens (UX Revision Pass #1 correction: blue -> orange)", () =>
     expect(CSS_SOURCE.toLowerCase()).not.toContain("#195fc9");
   });
 
-  it("defines --brand and --brand-hover as the new orange-family values", () => {
-    expect(CSS_SOURCE).toMatch(/--brand:\s*#b95613/i);
-    expect(CSS_SOURCE).toMatch(/--brand-hover:\s*#a64e11/i);
+  it("removes the darker burnt-orange compromise (#b95613 / #a64e11) from the primary action styling", () => {
+    expect(CSS_SOURCE.toLowerCase()).not.toMatch(/:\s*#b95613/);
+    expect(CSS_SOURCE.toLowerCase()).not.toMatch(/:\s*#a64e11/);
   });
 
-  it("keeps --brand-navy and --brand-accent at their previously approved values", () => {
+  it("defines --brand-action / --brand-action-hover as the vivid Preshopps orange family", () => {
+    expect(CSS_SOURCE).toMatch(/--brand-action:\s*var\(--brand-accent\)|--brand-action:\s*#e9782b/i);
+    expect(CSS_SOURCE).toMatch(/--brand-action-hover:\s*#de6817/i);
+  });
+
+  it("defines --brand-action-text as dark ink, never white", () => {
+    expect(CSS_SOURCE).toMatch(/--brand-action-text:\s*#1a1a1a/i);
+  });
+
+  it("defines --brand-link / --brand-link-hover as navy, for plain text-on-white", () => {
+    expect(CSS_SOURCE).toMatch(/--brand-link:\s*var\(--brand-navy\)|--brand-link:\s*#123b6d/i);
+    expect(CSS_SOURCE).toMatch(/--brand-link-hover:\s*#0f315a/i);
+  });
+
+  it("keeps --brand-navy and --brand-accent at their previously approved reference values", () => {
     expect(CSS_SOURCE).toMatch(/--brand-navy:\s*#123b6d/i);
     expect(CSS_SOURCE).toMatch(/--brand-accent:\s*#e9782b/i);
+  });
+
+  it("points the shared focus-ring token (--brand) at navy, not orange", () => {
+    expect(CSS_SOURCE).toMatch(/--brand:\s*var\(--brand-navy\)/i);
   });
 
   it("keeps the semantic green (--accent / Trusted Seller) unchanged", () => {
     expect(CSS_SOURCE).toMatch(/--accent:\s*#1c6e52/i);
   });
 
-  it("does not sprinkle a raw hex brand color into component files -- only globals.css defines them", () => {
-    // Every consumer uses the bg-brand-hover/text-brand-hover/etc utility
-    // classes (already verified project-wide in the earlier color pass);
-    // this just re-confirms the new values are declared in exactly one
-    // place.
-    const brandDeclarations = CSS_SOURCE.match(/--brand(-hover)?:\s*#[0-9a-f]{6}/gi) ?? [];
-    expect(brandDeclarations.length).toBe(2);
+  it("no component file references the retired bg-brand-hover/text-brand-hover classes", () => {
+    expect(CSS_SOURCE).not.toMatch(/--brand-hover:/);
   });
 
-  it("primary orange (--brand) meets WCAG AA (>=4.5:1) as a white-text button background", () => {
-    expect(contrastRatio(BRAND, WHITE)).toBeGreaterThanOrEqual(4.5);
+  it("action orange + dark ink text meets WCAG AA (>=4.5:1) for a filled button", () => {
+    expect(contrastRatio(ACTION, ACTION_TEXT)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("hover orange (--brand-hover) meets WCAG AA (>=4.5:1) as a white-text button background", () => {
-    expect(contrastRatio(BRAND_HOVER, WHITE)).toBeGreaterThanOrEqual(4.5);
+  it("action-hover orange + dark ink text meets WCAG AA (>=4.5:1)", () => {
+    expect(contrastRatio(ACTION_HOVER, ACTION_TEXT)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("primary orange also meets WCAG AA when used as plain text color on white (links, active nav label)", () => {
-    // Same two values are used both as bg-brand-hover (button fills) and
-    // text-brand-hover (plain links/labels) throughout the app -- both
-    // directions must clear 4.5:1 since contrast is direction-symmetric.
-    expect(contrastRatio(WHITE, BRAND)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(WHITE, BRAND_HOVER)).toBeGreaterThanOrEqual(4.5);
+  it("navy link color meets WCAG AA on white and canvas", () => {
+    expect(contrastRatio(LINK, WHITE)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(LINK, CANVAS)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("primary orange clears the 3:1 minimum for focus-ring/UI-component contrast", () => {
-    expect(contrastRatio(BRAND, WHITE)).toBeGreaterThanOrEqual(3);
+  it("navy link-hover is darker (higher contrast) than the resting link color", () => {
+    expect(contrastRatio(LINK_HOVER, WHITE)).toBeGreaterThan(contrastRatio(LINK, WHITE));
   });
 
-  it("documents why raw #E9782B is unsafe as the shared action token (white text)", () => {
-    expect(contrastRatio(BRAND_ACCENT, WHITE)).toBeLessThan(4.5);
+  it("navy focus-ring color clears the 3:1 minimum against white and canvas surfaces", () => {
+    expect(contrastRatio(LINK, WHITE)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(LINK, CANVAS)).toBeGreaterThanOrEqual(3);
   });
 
-  it("documents why deep navy on the light orange accent is not a reliable AA pairing", () => {
-    // Measured finding behind the design decision: navy-on-orange does
-    // not reliably clear 4.5:1, so it was not used as the primary text/
-    // background pairing despite being the initially preferred direction.
-    expect(contrastRatio(BRAND_NAVY, BRAND_ACCENT)).toBeLessThan(4.5);
-  });
-
-  it("dark ink on the light orange accent is a safe pairing where --brand-accent IS used directly", () => {
-    expect(contrastRatio("#1a1a1a", BRAND_ACCENT)).toBeGreaterThanOrEqual(4.5);
+  it("documents why raw orange text/white-text-on-orange is unsafe (why the split token architecture exists)", () => {
+    expect(contrastRatio(ACTION, WHITE)).toBeLessThan(4.5);
   });
 });

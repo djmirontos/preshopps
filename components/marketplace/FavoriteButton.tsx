@@ -41,10 +41,10 @@ export function FavoriteButton({ label, next }: Props) {
         aria-label={label}
         aria-pressed={isFavorited}
         onClick={handleClick}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/85 text-ink-secondary shadow-sm backdrop-blur-sm transition-colors duration-150 hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/85 text-ink-secondary shadow-sm backdrop-blur-sm transition-colors duration-150 hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       >
         <Heart
-          className={cn("h-4 w-4", isFavorited && "fill-brand-hover text-brand-hover")}
+          className={cn("h-4 w-4", isFavorited && "fill-brand-link text-brand-link")}
           aria-hidden="true"
         />
       </button>

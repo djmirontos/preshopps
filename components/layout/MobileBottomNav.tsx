@@ -28,9 +28,9 @@ function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
   return (
     <>
       <span className="flex h-9 w-9 items-center justify-center">
-        <Icon className={cn("h-6 w-6", isActive ? "text-brand-hover" : "text-ink-muted")} aria-hidden="true" />
+        <Icon className={cn("h-6 w-6", isActive ? "text-brand-link" : "text-ink-muted")} aria-hidden="true" />
       </span>
-      <span className={cn(LABEL_CLASS, isActive ? "text-brand-hover" : "text-ink-muted")}>{label}</span>
+      <span className={cn(LABEL_CLASS, isActive ? "text-brand-link" : "text-ink-muted")}>{label}</span>
     </>
   );
 }
@@ -79,7 +79,7 @@ export function MobileBottomNav({ user }: Props) {
 
         <li className="flex-1">
           <SellGate isAuthenticated={isAuthenticated} className={TAB_CLASS}>
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-hover text-white">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-action text-brand-action-text">
               <CirclePlus className="h-5 w-5" aria-hidden="true" />
             </span>
             <span className={cn(LABEL_CLASS, "text-ink-muted")}>Sell</span>

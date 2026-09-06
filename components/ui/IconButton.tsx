@@ -27,7 +27,7 @@ export function IconButton({
       aria-label={label}
       className={cn(
         "inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-        active && "text-brand-hover",
+        active && "text-brand-link",
         className,
       )}
     >

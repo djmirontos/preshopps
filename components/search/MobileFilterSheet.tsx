@@ -88,7 +88,7 @@ export function MobileFilterSheet({ filters, categories, provinces, cities, bara
         <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
         Filters
         {activeCount > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-hover px-1 text-[11px] font-semibold text-white">
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-action px-1 text-[11px] font-semibold text-brand-action-text">
             {activeCount}
           </span>
         )}
@@ -136,7 +136,7 @@ export function MobileFilterSheet({ filters, categories, provinces, cities, bara
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="flex-1 rounded-[10px] bg-brand-hover px-4 py-2.5 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                className="flex-1 rounded-[10px] bg-brand-action px-4 py-2.5 text-sm font-semibold text-brand-action-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
               >
                 Show results
               </button>

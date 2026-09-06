@@ -24,7 +24,7 @@ export function ListingSellerPreview({ slug, name, isTrustedSeller, reviewCount,
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
       <Link
         href={`/shop/${slug}`}
-        className="rounded font-semibold text-ink hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        className="rounded font-semibold text-ink hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       >
         {name}
       </Link>
@@ -38,7 +38,7 @@ export function ListingSellerPreview({ slug, name, isTrustedSeller, reviewCount,
 
       {reviewCount > 0 && averageRating !== null && (
         <span className="flex items-center gap-1 text-xs text-ink-secondary">
-          <Star className="h-3.5 w-3.5 fill-current text-brand-hover" aria-hidden="true" />
+          <Star className="h-3.5 w-3.5 fill-current text-brand-link" aria-hidden="true" />
           {averageRating.toFixed(1)} · {reviewCount} review{reviewCount === 1 ? "" : "s"}
         </span>
       )}

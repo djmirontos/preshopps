@@ -66,7 +66,7 @@ export function SignInForm({ next }: Props) {
           </label>
           <Link
             href="/forgot-password"
-            className="rounded text-xs font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            className="rounded text-xs font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             Forgot password?
           </Link>
@@ -92,7 +92,7 @@ export function SignInForm({ next }: Props) {
       <button
         type="submit"
         disabled={isSubmitting}
-        className="h-12 w-full rounded-[10px] bg-brand-hover text-sm font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+        className="h-12 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
       >
         {isSubmitting ? "Signing in…" : "Sign in"}
       </button>
@@ -101,7 +101,7 @@ export function SignInForm({ next }: Props) {
         New to Preshopps?{" "}
         <Link
           href={`/sign-up?next=${encodeURIComponent(next)}`}
-          className="rounded font-medium text-brand-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="rounded font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           Create an account
         </Link>
