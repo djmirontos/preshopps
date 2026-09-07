@@ -173,6 +173,21 @@ export function GuestCartClient() {
         <span className="text-sm font-semibold text-ink">Item subtotal</span>
         <span className="text-lg font-bold tabular-nums text-ink">{overallSubtotal}</span>
       </div>
+
+      {/* Order submission requires an account (PRD/AGENTS.md: guests may
+          build/view a cart but not submit an order) -- the primary action
+          here leads to sign-in rather than attempting any submission, and
+          never auto-creates an account. next=/cart is a fixed, known-safe
+          internal path, not user input. */}
+      <div className="rounded-[14px] border border-border bg-surface p-4 text-center sm:p-5">
+        <p className="text-sm text-ink-secondary">Sign in to submit your order.</p>
+        <Link
+          href={`/sign-in?next=${encodeURIComponent("/cart")}`}
+          className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+        >
+          Sign in to Checkout
+        </Link>
+      </div>
     </div>
   );
 }

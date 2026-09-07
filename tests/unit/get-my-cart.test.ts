@@ -19,6 +19,7 @@ createClientMock.mockResolvedValue({ rpc: rpcMock });
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
+    cart_item_id: "ci-1",
     listing_id: "listing-1",
     public_code: "PLS-ABC",
     slug: "nike-air-max",
@@ -36,6 +37,7 @@ function row(overrides: Record<string, unknown> = {}) {
     shop_id: "shop-1",
     shop_slug: "annes-closet",
     shop_name: "Anne's Closet",
+    fulfillment_methods: ["meetup", "shipping"],
     added_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -79,6 +81,33 @@ describe("get-my-cart", () => {
       isSubmittable: true,
       shopName: "Anne's Closet",
     });
+  });
+
+  it("maps cart_item_id (added by 0041_get_my_cart_projection_fix.sql)", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: null });
+    rpcMock.mockResolvedValue({ data: [row({ cart_item_id: "ci-xyz" })], error: null });
+    const { getMyCart } = await import("@/lib/cart/get-my-cart");
+
+    const result = await getMyCart();
+    expect(result.lines[0].cartItemId).toBe("ci-xyz");
+  });
+
+  it("maps fulfillment_methods (added by 0041_get_my_cart_projection_fix.sql)", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: null });
+    rpcMock.mockResolvedValue({ data: [row({ fulfillment_methods: ["pickup", "local_delivery"] })], error: null });
+    const { getMyCart } = await import("@/lib/cart/get-my-cart");
+
+    const result = await getMyCart();
+    expect(result.lines[0].fulfillmentMethods).toEqual(["pickup", "local_delivery"]);
+  });
+
+  it("maps a null fulfillment_methods (hidden/unavailable row) to an empty array, never a guessed value", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: null });
+    rpcMock.mockResolvedValue({ data: [row({ fulfillment_methods: null })], error: null });
+    const { getMyCart } = await import("@/lib/cart/get-my-cart");
+
+    const result = await getMyCart();
+    expect(result.lines[0].fulfillmentMethods).toEqual([]);
   });
 
   it("returns hadError true when the RPC fails", async () => {

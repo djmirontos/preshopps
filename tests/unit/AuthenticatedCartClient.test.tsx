@@ -12,6 +12,7 @@ import type { CartLineDisplay } from "@/lib/cart/get-my-cart";
 
 function makeLine(overrides: Partial<CartLineDisplay> = {}): CartLineDisplay {
   return {
+    cartItemId: "ci-listing-1",
     listingId: "listing-1",
     publicCode: "PLS-ABC",
     title: "Nike Air Max 270",
@@ -28,6 +29,7 @@ function makeLine(overrides: Partial<CartLineDisplay> = {}): CartLineDisplay {
     shopId: "shop-1",
     shopSlug: "annes-closet",
     shopName: "Anne's Closet",
+    fulfillmentMethods: ["meetup", "shipping"],
     addedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -133,5 +135,52 @@ describe("AuthenticatedCartClient", () => {
     const [, args] = rpcMock.mock.calls[0];
     expect(Object.keys(args).sort()).toEqual(["p_listing_id", "p_quantity"]);
     expect(args.p_listing_id).toBe("listing-77");
+  });
+
+  it("renders the order review/submit area for an eligible cart", () => {
+    renderClient([makeLine()]);
+    expect(screen.getByText("1 item ready to submit")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit Order" })).toBeInTheDocument();
+  });
+
+  it("a successful order submission that empties the cart still shows the success confirmation, not just the empty state", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({
+          data: [{ order_id: "o1", shop_id: "shop-1", order_public_code: "PSO-ABC", item_count: 1, total_cents: 500000, status: "pending" }],
+          error: null,
+        });
+      }
+      if (fn === "get_my_cart") return Promise.resolve({ data: [], error: null });
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    renderClient([makeLine()]);
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/order submitted successfully/i));
+    expect(screen.getByText("Your cart is empty.")).toBeInTheDocument();
+  });
+
+  it("never calls set_cart_item_quantity during order submission -- cart_item_id comes directly from get_my_cart", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({
+          data: [{ order_id: "o1", shop_id: "shop-1", order_public_code: "PSO-ABC", item_count: 1, total_cents: 500000, status: "pending" }],
+          error: null,
+        });
+      }
+      if (fn === "get_my_cart") return Promise.resolve({ data: [], error: null });
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    renderClient([makeLine()]);
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("submit_cart_order", expect.anything()));
+    expect(rpcMock).not.toHaveBeenCalledWith("set_cart_item_quantity", expect.anything());
+    expect(rpcMock.mock.calls.find(([fn]) => fn === "submit_cart_order")?.[1].p_cart_item_ids).toEqual(["ci-listing-1"]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 function readFile(relativePath: string): string {
@@ -94,5 +94,66 @@ describe("cart architecture matches the locked design", () => {
     const source = readFile("components/layout/MobileBottomNav.tsx");
     expect(source).not.toMatch(/CartIconLink/);
     expect(source).not.toMatch(/href="\/cart"/);
+  });
+});
+
+describe("order submission reuses the existing 0039/0040 backend only", () => {
+  it("submit-cart-order.ts never defines new backend functions/migrations", () => {
+    const source = readFile("lib/cart/submit-cart-order.ts");
+    expect(source).not.toMatch(/create (or replace )?function/i);
+    expect(source).toMatch(/rpc\(\s*["']submit_cart_order["']/);
+  });
+
+  it("submit-cart-order.ts never calls set_cart_item_quantity -- cart_item_id comes directly from get_my_cart (0041)", () => {
+    const source = readFile("lib/cart/submit-cart-order.ts");
+    expect(source).not.toMatch(/rpc\(\s*["']set_cart_item_quantity["']/);
+  });
+
+  it("submit_cart_order is called exactly once per submission attempt -- no per-seller manual submit loop", () => {
+    const source = readFile("lib/cart/submit-cart-order.ts");
+    const callSites = source.match(/rpc\(\s*["']submit_cart_order["']/g) ?? [];
+    expect(callSites.length).toBe(1);
+    // The multi-shop payload is built as a single array (Array.from/.map),
+    // never inside a per-shop loop that calls the RPC repeatedly.
+    expect(source).not.toMatch(/for\s*\([^)]*\)\s*{[\s\S]*?rpc\(\s*["']submit_cart_order["']/);
+  });
+
+  it("never passes a client-supplied buyer/user id to submit_cart_order or set_cart_item_quantity", () => {
+    const source = readFile("lib/cart/submit-cart-order.ts");
+    expect(source).not.toMatch(/p_buyer_id/);
+    expect(source).not.toMatch(/p_user_id/);
+    expect(source).not.toMatch(/buyer_id\s*:/);
+  });
+
+  it("OrderReviewSubmit shows the required multi-seller explanation copy", () => {
+    const source = readFile("components/cart/OrderReviewSubmit.tsx");
+    expect(source).toMatch(/created as separate orders/i);
+  });
+
+  it("OrderReviewSubmit derives fulfillment choices from each row's own fulfillmentMethods -- never hardcoded by category", () => {
+    const source = readFile("components/cart/OrderReviewSubmit.tsx");
+    expect(source).toMatch(/fulfillmentMethods/);
+    expect(source).not.toMatch(/is_inquiry_only|category(Id|Name)|listingType/i);
+  });
+
+  it("0041_get_my_cart_projection_fix migration only touches get_my_cart -- no RLS, table, or other function changes", () => {
+    const source = readFile("supabase/migrations/0041_get_my_cart_projection_fix.sql");
+    expect(source).toMatch(/create (or replace )?function public\.get_my_cart/i);
+    expect(source).not.toMatch(/create policy|drop policy|alter policy/i);
+    expect(source).not.toMatch(/create table|alter table|drop table/i);
+    expect(source).not.toMatch(/create or replace function public\.submit_cart_order/i);
+    expect(source).not.toMatch(/create or replace function public\.set_cart_item_quantity/i);
+    expect(source).not.toMatch(/create or replace function public\.merge_guest_cart/i);
+  });
+});
+
+describe("no buyer Orders page was added (no safe backend read path exists yet)", () => {
+  it("app/orders does not exist", () => {
+    expect(existsSync(path.join(process.cwd(), "app/orders"))).toBe(false);
+  });
+
+  it("no dead 'Orders' navigation was added to the account page", () => {
+    const source = readFile("app/account/page.tsx");
+    expect(source).not.toMatch(/href="\/orders"/);
   });
 });

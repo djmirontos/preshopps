@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useCart } from "@/components/cart/CartProvider";
 import { CartRow, type CartRowViewModel } from "@/components/cart/CartRow";
+import { OrderReviewSubmit } from "@/components/cart/OrderReviewSubmit";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 import { labelForUnavailableReason } from "@/lib/cart/unavailable-labels";
 import type { CartLineDisplay } from "@/lib/cart/get-my-cart";
@@ -68,21 +69,6 @@ export function AuthenticatedCartClient({ initialLines, hadError }: Props) {
     return <p className="text-sm text-ink-secondary">Unable to load your cart right now.</p>;
   }
 
-  if (lines.length === 0) {
-    return (
-      <div className="rounded-[14px] border border-border bg-canvas px-4 py-10 text-center">
-        <p className="text-sm font-medium text-ink">Your cart is empty.</p>
-        <p className="mt-1 text-sm text-ink-muted">Items you add will appear here.</p>
-        <Link
-          href="/search"
-          className="mt-4 inline-flex h-10 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-        >
-          Browse listings
-        </Link>
-      </div>
-    );
-  }
-
   async function applyQuantity(line: CartLineDisplay, nextQuantity: number) {
     setRowError(null);
     setBusyId(line.listingId);
@@ -131,51 +117,71 @@ export function AuthenticatedCartClient({ initialLines, hadError }: Props) {
 
   return (
     <div className="space-y-6">
-      {groups.map((group) => (
-        <div key={group.shopId} className="rounded-[14px] border border-border bg-surface p-4 sm:p-5">
-          <p className="text-sm font-semibold text-ink">{group.shopName}</p>
-          <div className="mt-2 divide-y divide-divider">
-            {group.rows.map((row) => {
-              const viewModel: CartRowViewModel = {
-                listingId: row.listingId,
-                href: row.publicCode ? `/item/${row.publicCode}` : null,
-                title: row.title,
-                imageUrl: row.imageUrl,
-                quantity: row.quantity,
-                unitPriceCents: row.priceCents,
-                availableQuantity: row.availableQuantity,
-                isUnavailable: !row.isSubmittable,
-                unavailableLabel: labelForUnavailableReason(row.unavailableReason),
-              };
-              return (
-                <div key={row.listingId}>
-                  <CartRow
-                    row={viewModel}
-                    isBusy={busyId === row.listingId}
-                    onIncrement={() => applyQuantity(row, row.quantity + 1)}
-                    onDecrement={() => applyQuantity(row, row.quantity - 1)}
-                    onRemove={() => handleRemove(row)}
-                  />
-                  {rowError?.listingId === row.listingId && (
-                    <p role="alert" className="pb-2 text-xs text-danger">
-                      {rowError.message}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex justify-between border-t border-divider pt-3 text-sm">
-            <span className="text-ink-secondary">Subtotal</span>
-            <span className="font-semibold tabular-nums text-ink">{formatSubtotal(group.rows)}</span>
-          </div>
-        </div>
-      ))}
+      {/* Mounted unconditionally (not inside the lines.length === 0 branch
+          below) so its own success/error state survives a submission that
+          empties the cart entirely -- see OrderReviewSubmit's own comment. */}
+      <OrderReviewSubmit lines={lines} onLinesChange={setLines} />
 
-      <div className="flex items-center justify-between rounded-[14px] border border-border bg-canvas p-4 sm:p-5">
-        <span className="text-sm font-semibold text-ink">Item subtotal</span>
-        <span className="text-lg font-bold tabular-nums text-ink">{overallSubtotal}</span>
-      </div>
+      {lines.length === 0 ? (
+        <div className="rounded-[14px] border border-border bg-canvas px-4 py-10 text-center">
+          <p className="text-sm font-medium text-ink">Your cart is empty.</p>
+          <p className="mt-1 text-sm text-ink-muted">Items you add will appear here.</p>
+          <Link
+            href="/search"
+            className="mt-4 inline-flex h-10 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+          >
+            Browse listings
+          </Link>
+        </div>
+      ) : (
+        <>
+          {groups.map((group) => (
+            <div key={group.shopId} className="rounded-[14px] border border-border bg-surface p-4 sm:p-5">
+              <p className="text-sm font-semibold text-ink">{group.shopName}</p>
+              <div className="mt-2 divide-y divide-divider">
+                {group.rows.map((row) => {
+                  const viewModel: CartRowViewModel = {
+                    listingId: row.listingId,
+                    href: row.publicCode ? `/item/${row.publicCode}` : null,
+                    title: row.title,
+                    imageUrl: row.imageUrl,
+                    quantity: row.quantity,
+                    unitPriceCents: row.priceCents,
+                    availableQuantity: row.availableQuantity,
+                    isUnavailable: !row.isSubmittable,
+                    unavailableLabel: labelForUnavailableReason(row.unavailableReason),
+                  };
+                  return (
+                    <div key={row.listingId}>
+                      <CartRow
+                        row={viewModel}
+                        isBusy={busyId === row.listingId}
+                        onIncrement={() => applyQuantity(row, row.quantity + 1)}
+                        onDecrement={() => applyQuantity(row, row.quantity - 1)}
+                        onRemove={() => handleRemove(row)}
+                      />
+                      {rowError?.listingId === row.listingId && (
+                        <p role="alert" className="pb-2 text-xs text-danger">
+                          {rowError.message}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex justify-between border-t border-divider pt-3 text-sm">
+                <span className="text-ink-secondary">Subtotal</span>
+                <span className="font-semibold tabular-nums text-ink">{formatSubtotal(group.rows)}</span>
+              </div>
+            </div>
+          ))}
+
+          <div className="flex items-center justify-between rounded-[14px] border border-border bg-canvas p-4 sm:p-5">
+            <span className="text-sm font-semibold text-ink">Item subtotal</span>
+            <span className="text-lg font-bold tabular-nums text-ink">{overallSubtotal}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

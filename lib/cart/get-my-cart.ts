@@ -1,33 +1,9 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthUser } from "@/lib/auth/session";
-import { getListingImageUrl } from "@/lib/marketplace/browse-listings";
+import { mapCartRowToDisplay, type GetMyCartRow, type CartLineDisplay } from "@/lib/cart/map-cart-row";
 
-/**
- * Row shape exactly matching public.get_my_cart's RETURNS TABLE
- * (0037_favorites_cart_rls_and_rpcs.sql), confirmed by reading the
- * migration immediately before writing this module.
- */
-export type GetMyCartRow = {
-  listing_id: string;
-  public_code: string | null;
-  slug: string | null;
-  title: string | null;
-  cover_image_storage_path: string | null;
-  price_cents: number | null;
-  price_cents_snapshot: number;
-  price_changed: boolean | null;
-  status: string;
-  is_inquiry_only: boolean | null;
-  requested_quantity: number;
-  current_available_quantity: number | null;
-  is_submittable: boolean;
-  unavailable_reason: string | null;
-  shop_id: string | null;
-  shop_slug: string | null;
-  shop_name: string | null;
-  added_at: string;
-};
+export type { GetMyCartRow, CartLineDisplay };
 
 async function fetchMyCartRowsUncached(): Promise<{ rows: GetMyCartRow[]; hadError: boolean }> {
   const user = await getAuthUser();
@@ -84,54 +60,14 @@ export async function getMyCartQuantities(): Promise<CartQuantityLine[]> {
   }));
 }
 
-export type CartLineDisplay = {
-  listingId: string;
-  publicCode: string | null;
-  title: string | null;
-  imageUrl: string | undefined;
-  priceCents: number | null;
-  priceCentsSnapshot: number;
-  priceChanged: boolean;
-  status: string;
-  isInquiryOnly: boolean;
-  quantity: number;
-  availableQuantity: number | null;
-  isSubmittable: boolean;
-  unavailableReason: string | null;
-  shopId: string | null;
-  shopSlug: string | null;
-  shopName: string | null;
-  addedAt: string;
-};
-
 export type GetMyCartResult = {
   lines: CartLineDisplay[];
   hadError: boolean;
 };
 
-/** Full display projection for the /cart page. */
+/** Full display projection for the /cart page. Row-to-display mapping is
+ * shared with the client-side refresh path via map-cart-row.ts. */
 export async function getMyCart(): Promise<GetMyCartResult> {
   const { rows, hadError } = await getMyCartRows();
-
-  const lines: CartLineDisplay[] = rows.map((row) => ({
-    listingId: row.listing_id,
-    publicCode: row.public_code,
-    title: row.title,
-    imageUrl: getListingImageUrl(row.cover_image_storage_path),
-    priceCents: row.price_cents,
-    priceCentsSnapshot: row.price_cents_snapshot,
-    priceChanged: row.price_changed ?? false,
-    status: row.status,
-    isInquiryOnly: row.is_inquiry_only ?? false,
-    quantity: row.requested_quantity,
-    availableQuantity: row.current_available_quantity,
-    isSubmittable: row.is_submittable,
-    unavailableReason: row.unavailable_reason,
-    shopId: row.shop_id,
-    shopSlug: row.shop_slug,
-    shopName: row.shop_name,
-    addedAt: row.added_at,
-  }));
-
-  return { lines, hadError };
+  return { lines: rows.map(mapCartRowToDisplay), hadError };
 }

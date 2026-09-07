@@ -113,4 +113,16 @@ describe("GuestCartClient", () => {
     await waitFor(() => expect(screen.getByText("Your cart is empty.")).toBeInTheDocument());
     expect(rpcMock).not.toHaveBeenCalled();
   });
+
+  it("shows a primary sign-in action instead of any submit control -- order submission requires an account", async () => {
+    writeGuestCart([{ listingId: "listing-1", publicCode: "PLS-ABC", quantity: 1 }]);
+    rpcMock.mockResolvedValue({ data: [detailRow()], error: null });
+
+    renderGuestCart();
+    await waitFor(() => expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument());
+
+    const signInLink = screen.getByRole("link", { name: "Sign in to Checkout" });
+    expect(signInLink).toHaveAttribute("href", `/sign-in?next=${encodeURIComponent("/cart")}`);
+    expect(screen.queryByRole("button", { name: /submit order/i })).not.toBeInTheDocument();
+  });
 });
