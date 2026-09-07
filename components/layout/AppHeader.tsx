@@ -17,9 +17,15 @@ type Props = {
  * right-hand icon cluster. Below 1024px, a compact two-row mobile header
  * is shown instead.
  *
- * Account, Favorites, and Cart are real; Messages/Notifications remain the
- * existing non-functional placeholders (their real backends aren't in
- * scope yet).
+ * Account, Favorites, Cart, and Messages are all real. Messages links
+ * directly to /messages (matching the Favorites icon's own convention) --
+ * that page itself redirects a guest to sign-in, so no auth branching is
+ * needed here. No unread-count badge is added: it would require a new
+ * root-layout-wide query on every page load site-wide for a purely
+ * optional affordance ("if unread count exists efficiently, small badge
+ * is acceptable") -- deferred, reported, not silently invented.
+ * Notifications remains the existing non-functional placeholder (its real
+ * backend isn't in scope yet).
  */
 export function AppHeader({ user }: Props) {
   const isAuthenticated = Boolean(user);
@@ -79,7 +85,7 @@ export function AppHeader({ user }: Props) {
         {/* Desktop right-hand actions */}
         <nav aria-label="Account actions" className="ml-auto hidden items-center gap-0.5 lg:flex">
           <IconButton href="/favorites" label="Favorites" icon={Heart} />
-          <IconButton href="#" label="Messages" icon={MessageCircle} />
+          <IconButton href="/messages" label="Messages" icon={MessageCircle} />
           <IconButton href="#" label="Notifications" icon={Bell} />
           <CartIconLink />
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />

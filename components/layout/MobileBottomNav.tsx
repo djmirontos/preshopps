@@ -40,9 +40,9 @@ function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
  * navigation lives entirely in the header. Exactly the 5 canonical tabs —
  * cart and notifications intentionally live in the header instead.
  *
- * Sell and Account are auth-aware; Home/Search/Messages are unchanged
- * (Messages remains the existing non-functional placeholder -- its real
- * backend isn't in scope yet).
+ * Sell and Account are auth-aware. Messages now links to /messages
+ * (matching Search's own always-linked convention) -- the page itself
+ * redirects a guest to sign-in, so no auth branching is needed here.
  */
 export function MobileBottomNav({ user }: Props) {
   const pathname = usePathname();
@@ -51,6 +51,7 @@ export function MobileBottomNav({ user }: Props) {
 
   const isHomeActive = pathname === "/";
   const isSearchActive = pathname?.startsWith("/search") ?? false;
+  const isMessagesActive = pathname?.startsWith("/messages") ?? false;
   const isAccountActive = pathname?.startsWith("/account") ?? false;
 
   return (
@@ -87,8 +88,13 @@ export function MobileBottomNav({ user }: Props) {
         </li>
 
         <li className="flex-1">
-          <Link href="#" aria-label="Messages" className={TAB_CLASS}>
-            {tabContent(MessageCircle, "Messages", false)}
+          <Link
+            href="/messages"
+            aria-label="Messages"
+            aria-current={isMessagesActive ? "page" : undefined}
+            className={TAB_CLASS}
+          >
+            {tabContent(MessageCircle, "Messages", isMessagesActive)}
           </Link>
         </li>
 

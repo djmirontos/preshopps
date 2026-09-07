@@ -37,3 +37,16 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/auth/actions", () => ({
   signOutAction: vi.fn(async () => {}),
 }));
+
+// Real Messaging wires ownership checks into ItemPage/ShopPage via
+// getMyShop() (lib/seller/get-my-shop.ts), which also ultimately imports
+// the real lib/supabase/server.ts -- same "server-only" problem as
+// getAuthUser above, for the same reason (many pre-existing, ownership-
+// unrelated tests now transitively import it just by rendering these
+// pages). Defaulting to "no shop" matches every existing test's original
+// assumption (never the listing/shop owner); a test that specifically
+// covers owner behavior overrides this with its own vi.mock of the same
+// module, which takes precedence over this setup-file mock.
+vi.mock("@/lib/seller/get-my-shop", () => ({
+  getMyShop: vi.fn(async () => null),
+}));

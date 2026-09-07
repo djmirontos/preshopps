@@ -17,6 +17,7 @@ vi.mock("@/lib/marketplace/listing-detail", () => ({
 
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 import ItemPage, { generateMetadata } from "@/app/item/[publicCode]/page";

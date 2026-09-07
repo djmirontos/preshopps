@@ -70,3 +70,22 @@ test("/seller/orders/[publicCode] as a guest redirects to sign-in with the order
   await page.goto("/seller/orders/PSO-DOESNOTEXIST");
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fseller%2Forders%2FPSO-DOESNOTEXIST/);
 });
+
+test("/messages as a guest redirects to sign-in with next=/messages", async ({ page }) => {
+  await page.goto("/messages");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fmessages/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+});
+
+test("header Messages icon navigates to the guest-protected /messages route", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Messages" }).click();
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fmessages/);
+});
+
+test("mobile bottom-nav Messages tab navigates to the guest-protected /messages route", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("link", { name: "Messages" }).click();
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fmessages/);
+});

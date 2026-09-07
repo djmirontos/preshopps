@@ -6,8 +6,11 @@ import { ShopDescription } from "@/components/shop/ShopDescription";
 import { ShopFeaturedListing } from "@/components/shop/ShopFeaturedListing";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { ShopListingsClient } from "@/components/shop/ShopListingsClient";
+import { ShopMessageAction } from "@/components/shop/ShopMessageAction";
 import { getShopDetail } from "@/lib/marketplace/shop-detail";
 import { getShopListings } from "@/lib/marketplace/shop-listings";
+import { getAuthUser } from "@/lib/auth/session";
+import { getMyShop } from "@/lib/seller/get-my-shop";
 import type { BrowseCursor } from "@/lib/marketplace/search-params";
 
 const LISTINGS_LIMIT = 20;
@@ -49,7 +52,8 @@ export async function generateMetadata({ params }: ShopPageProps): Promise<Metad
 
 export default async function ShopPage({ params }: ShopPageProps) {
   const { slug } = await params;
-  const result = await getCachedShopDetail(slug);
+  const [result, user] = await Promise.all([getCachedShopDetail(slug), getAuthUser()]);
+  const myShop = result.status === "found" && user ? await getMyShop() : null;
 
   if (result.status === "not_found") {
     // get_shop_detail raises the identical SHOP_NOT_FOUND signal for a
@@ -119,6 +123,13 @@ export default async function ShopPage({ params }: ShopPageProps) {
         averageRating={shop.averageRating}
         completedOrderCount={shop.completedOrderCount}
         activeListingCount={shop.activeListingCount}
+      />
+
+      <ShopMessageAction
+        shopId={shop.id}
+        shopSlug={shop.slug}
+        isAuthenticated={Boolean(user)}
+        isOwnShop={myShop?.id === shop.id}
       />
 
       {featuredListing && (

@@ -3,9 +3,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/auth/use-is-authenticated", async (importOriginal) => importOriginal());
 
-const { rpcMock } = vi.hoisted(() => ({ rpcMock: vi.fn() }));
+const { rpcMock, pushMock } = vi.hoisted(() => ({ rpcMock: vi.fn(), pushMock: vi.fn() }));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ rpc: rpcMock }),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
 }));
 
 import { AuthStatusProvider } from "@/components/auth/AuthStatusProvider";
@@ -16,6 +19,7 @@ const NEXT = "/item/PLS-ABC123";
 
 beforeEach(() => {
   rpcMock.mockReset();
+  pushMock.mockReset();
   window.localStorage.clear();
 });
 
@@ -26,6 +30,8 @@ function renderActions({
   availableQuantity = 5,
   listingId = "listing-1",
   publicCode = "PLS-ABC123",
+  shopId = "shop-1",
+  isOwnListing = false,
 }: {
   isAuthenticated: boolean;
   status?: "available" | "reserved" | "sold" | "archived";
@@ -33,6 +39,8 @@ function renderActions({
   availableQuantity?: number;
   listingId?: string;
   publicCode?: string;
+  shopId?: string;
+  isOwnListing?: boolean;
 }) {
   return render(
     <AuthStatusProvider isAuthenticated={isAuthenticated}>
@@ -40,10 +48,12 @@ function renderActions({
         <ListingActions
           listingId={listingId}
           publicCode={publicCode}
+          shopId={shopId}
           availableQuantity={availableQuantity}
           status={status}
           isInquiryOnly={isInquiryOnly}
           isAuthenticated={isAuthenticated}
+          isOwnListing={isOwnListing}
           next={NEXT}
         />
       </CartProvider>
@@ -68,16 +78,42 @@ describe("ListingActions (authenticated)", () => {
     );
   });
 
-  it("shows Message Seller alongside Add to Cart, still disabled/coming soon", () => {
+  it("shows an enabled Message Seller alongside Add to Cart", () => {
     renderActions({ isAuthenticated: true });
-    expect(screen.getByRole("button", { name: "Message Seller" })).toBeDisabled();
-    expect(screen.getByText(/messaging is coming soon/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Message Seller" })).not.toBeDisabled();
   });
 
-  it("does not open the message auth gate for an authenticated user", () => {
+  it("opens a compose dialog (not the auth gate) for an authenticated user", () => {
     renderActions({ isAuthenticated: true });
     fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByText("Sign in to message this seller")).not.toBeInTheDocument();
+  });
+
+  it("calls start_conversation with the shop id, listing id, and typed body, then navigates to the resulting conversation", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
+      error: null,
+    });
+    renderActions({ isAuthenticated: true, shopId: "shop-1", listingId: "listing-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Is this still available?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("start_conversation", {
+        p_shop_id: "shop-1",
+        p_body: "Is this still available?",
+        p_listing_id: "listing-1",
+      }),
+    );
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages/conv-1"));
+  });
+
+  it("hides Message Seller entirely for the listing's own owner", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    expect(screen.queryByRole("button", { name: "Message Seller" })).not.toBeInTheDocument();
   });
 
   it("hides Add to Cart when reserved", () => {
@@ -154,5 +190,10 @@ describe("ListingActions (guest)", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("hides Message Seller entirely for the listing's own owner (never reachable as a guest, but the isOwnListing prop is still honored)", () => {
+    renderActions({ isAuthenticated: false, isOwnListing: true });
+    expect(screen.queryByRole("button", { name: "Message Seller" })).not.toBeInTheDocument();
   });
 });

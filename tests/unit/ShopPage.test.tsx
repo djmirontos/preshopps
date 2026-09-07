@@ -3,8 +3,10 @@ import { render, screen } from "@testing-library/react";
 import type { ListingCardData } from "@/components/marketplace/ListingCard";
 import type { ShopDetail, ShopDetailResult } from "@/lib/marketplace/shop-detail";
 import type { ShopListingsResult } from "@/lib/marketplace/shop-listings";
+import type { AuthUser } from "@/lib/auth/session";
+import type { MyShop } from "@/lib/seller/get-my-shop";
 
-const { getShopDetailMock, getShopListingsMock, notFoundMock, permanentRedirectMock } = vi.hoisted(() => ({
+const { getShopDetailMock, getShopListingsMock, notFoundMock, permanentRedirectMock, getAuthUserMock, getMyShopMock } = vi.hoisted(() => ({
   getShopDetailMock: vi.fn<(slug: string) => Promise<ShopDetailResult>>(),
   getShopListingsMock: vi.fn<() => Promise<ShopListingsResult>>(),
   notFoundMock: vi.fn(() => {
@@ -13,6 +15,8 @@ const { getShopDetailMock, getShopListingsMock, notFoundMock, permanentRedirectM
   permanentRedirectMock: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
+  getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
+  getMyShopMock: vi.fn<() => Promise<MyShop | null>>(),
 }));
 
 vi.mock("@/lib/marketplace/shop-detail", () => ({
@@ -23,9 +27,18 @@ vi.mock("@/lib/marketplace/shop-listings", () => ({
   getShopListings: getShopListingsMock,
 }));
 
+vi.mock("@/lib/auth/session", () => ({
+  getAuthUser: getAuthUserMock,
+}));
+
+vi.mock("@/lib/seller/get-my-shop", () => ({
+  getMyShop: getMyShopMock,
+}));
+
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
   permanentRedirect: permanentRedirectMock,
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 import ShopPage, { generateMetadata } from "@/app/shop/[slug]/page";
@@ -66,6 +79,8 @@ function makeParams(slug: string) {
 describe("ShopPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getAuthUserMock.mockResolvedValue(null);
+    getMyShopMock.mockResolvedValue(null);
   });
 
   it("renders the shop when found, with populated listings", async () => {
@@ -231,5 +246,33 @@ describe("ShopPage", () => {
 
     const { container } = render(await ShopPage(makeParams("annes-closet")));
     expect(container.innerHTML).not.toMatch(/owner_id/i);
+  });
+
+  it("shows a Message Seller action for a guest viewing the shop", async () => {
+    getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: true });
+    getShopListingsMock.mockResolvedValue({ listings: [sampleListing], hadError: false, nextCursor: null });
+
+    render(await ShopPage(makeParams("annes-closet")));
+    expect(screen.getByRole("button", { name: "Message Seller" })).toBeInTheDocument();
+  });
+
+  it("shows a Message Seller action for an authenticated non-owner", async () => {
+    getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: true });
+    getShopListingsMock.mockResolvedValue({ listings: [sampleListing], hadError: false, nextCursor: null });
+    getAuthUserMock.mockResolvedValue({ id: "buyer-1", email: "buyer@example.com" });
+    getMyShopMock.mockResolvedValue(null);
+
+    render(await ShopPage(makeParams("annes-closet")));
+    expect(screen.getByRole("button", { name: "Message Seller" })).toBeInTheDocument();
+  });
+
+  it("hides the Message Seller action for the shop's own owner", async () => {
+    getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: true });
+    getShopListingsMock.mockResolvedValue({ listings: [sampleListing], hadError: false, nextCursor: null });
+    getAuthUserMock.mockResolvedValue({ id: "owner-1", email: "owner@example.com" });
+    getMyShopMock.mockResolvedValue({ id: "shop-1", slug: "annes-closet", name: "Anne's Closet" });
+
+    render(await ShopPage(makeParams("annes-closet")));
+    expect(screen.queryByRole("button", { name: "Message Seller" })).not.toBeInTheDocument();
   });
 });

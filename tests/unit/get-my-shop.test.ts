@@ -11,6 +11,13 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: createClientMock,
 }));
 
+// Overrides the "no shop" global default mock from
+// tests/setup/vitest.setup.ts for this file specifically -- this is the
+// one file that needs the real implementation (to test it), not a stub.
+vi.mock("@/lib/seller/get-my-shop", async (importOriginal) => {
+  return importOriginal<typeof import("@/lib/seller/get-my-shop")>();
+});
+
 createClientMock.mockResolvedValue({ from: fromMock });
 fromMock.mockReturnValue({ select: selectMock });
 selectMock.mockReturnValue({ maybeSingle: maybeSingleMock });
