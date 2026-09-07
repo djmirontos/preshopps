@@ -63,8 +63,8 @@ export function getOrderStatusGuidance(status: OrderStatus, fulfillmentMethod: F
       return "Your order is ready for pickup or handover.";
     case "handed_over_or_shipped":
       return fulfillmentMethod === "shipping"
-        ? "The seller marked this order as shipped."
-        : "The seller marked this order as handed over.";
+        ? "The seller marked this order as shipped. Confirm once you've received it."
+        : "The seller marked this order as handed over. Confirm once you've received it.";
     case "received_confirmed":
       return "You've confirmed receiving this order.";
     case "completed":
@@ -170,6 +170,59 @@ export function getAllowedSellerActions(status: OrderStatus, hasPendingCancellat
       return hasPendingCancellationRequest
         ? ["resolve_cancellation", "cancel_accepted"]
         : ["mark_handed_over_or_shipped", "cancel_accepted"];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Centralized buyer lifecycle-action model -- the single source of truth
+ * for "what can the buyer actually do with this order right now", derived
+ * from exactly the lifecycle rules the existing backend RPCs already
+ * enforce (never invented here):
+ *
+ * - pending: cancel_pending_order is the buyer's only direct-cancel path
+ *   (no reason parameter -- the seller has not acted yet).
+ * - changes_pending: reachable in practice today because Seller Order
+ *   Management's accept_order_items partial-acceptance outcome produces
+ *   it -- this is not a dead/unreachable state. confirm_order_changes
+ *   ratifies the seller's already-decided item set (buyer cannot pick
+ *   which items); cancel_order_changes directly cancels (changes_pending
+ *   behaves like pending here -- direct cancel, no request row -- per
+ *   0019's own locked product decision, not accepted's request/confirm
+ *   flow).
+ * - accepted/ready: no direct buyer cancel exists for these statuses --
+ *   only request_order_cancellation (reason required), which creates a
+ *   pending order_cancellation_requests row for the seller to resolve. If
+ *   a request is already pending, request_order_cancellation is hidden
+ *   (not merely disabled) to prevent a duplicate -- the RPC itself is
+ *   idempotent on a duplicate call (returns the existing pending request
+ *   rather than erroring), but the UI still avoids inviting a redundant
+ *   submission.
+ * - handed_over_or_shipped: confirm_order_received is the buyer's one
+ *   explicit "I received this" action. Per 0044, a fresh confirmation now
+ *   also completes the order synchronously in the same call when eligible
+ *   -- there is no separate "Complete" action for the buyer to take
+ *   afterward, and none is ever exposed.
+ * - received_confirmed/completed/declined/cancelled/expired/disputed: no
+ *   buyer action exists for any of these in the current backend --
+ *   received_confirmed is normally only a fleeting intermediate value
+ *   immediately superseded by completed (0044); no seller-facing or
+ *   buyer-facing action can be taken against it either way.
+ */
+export type BuyerAction = "cancel_pending" | "confirm_changes" | "cancel_changes" | "request_cancellation" | "confirm_receipt";
+
+export function getAllowedBuyerActions(status: OrderStatus, hasPendingCancellationRequest: boolean): BuyerAction[] {
+  switch (status) {
+    case "pending":
+      return ["cancel_pending"];
+    case "changes_pending":
+      return ["confirm_changes", "cancel_changes"];
+    case "accepted":
+    case "ready":
+      return hasPendingCancellationRequest ? [] : ["request_cancellation"];
+    case "handed_over_or_shipped":
+      return ["confirm_receipt"];
     default:
       return [];
   }

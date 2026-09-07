@@ -24,6 +24,8 @@ function row(overrides: Record<string, unknown> = {}) {
     fulfillment_method: "meetup",
     buyer_note: null,
     created_at: "2026-01-05T00:00:00.000Z",
+    pending_cancellation_request_id: null,
+    pending_cancellation_reason: null,
     order_item_id: "item-1",
     listing_id: "listing-1",
     listing_public_code_snapshot: "PLS-XYZ",
@@ -67,6 +69,8 @@ describe("getMyOrderDetail", () => {
       status: "pending",
       fulfillmentMethod: "meetup",
       buyerNote: null,
+      pendingCancellationRequestId: null,
+      pendingCancellationReason: null,
       totalCents: 90000, // 2 * 45000
     });
     expect(result.order.items).toEqual([
@@ -105,6 +109,18 @@ describe("getMyOrderDetail", () => {
     expect(result.status).toBe("found");
     if (result.status !== "found") return;
     expect(result.order.buyerNote).toBe("Call before arriving.");
+  });
+
+  it("surfaces a pending cancellation request id/reason when present", async () => {
+    rpcMock.mockResolvedValue({
+      data: [row({ pending_cancellation_request_id: "req-1", pending_cancellation_reason: "Changed my mind" })],
+      error: null,
+    });
+    const result = await getMyOrderDetail("PSO-ABC12345");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.order.pendingCancellationRequestId).toBe("req-1");
+    expect(result.order.pendingCancellationReason).toBe("Changed my mind");
   });
 
   it("returns status: error on an RPC error, distinct from not_found", async () => {

@@ -5,9 +5,11 @@ import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
 
 /**
  * Row shape exactly matching public.get_my_order_detail's RETURNS TABLE
- * (0042_buyer_orders_read_rpcs.sql) -- one row per order_item, with
- * order-level fields repeated on every row (the same denormalized shape
- * get_my_cart already uses for shop fields).
+ * (0042_buyer_orders_read_rpcs.sql, extended by
+ * 0045_buyer_order_detail_cancellation_request.sql with
+ * pending_cancellation_request_id/pending_cancellation_reason) -- one row
+ * per order_item, with order-level fields repeated on every row (the same
+ * denormalized shape get_my_cart already uses for shop fields).
  */
 export type GetMyOrderDetailRow = {
   order_id: string;
@@ -19,6 +21,8 @@ export type GetMyOrderDetailRow = {
   fulfillment_method: FulfillmentMethod;
   buyer_note: string | null;
   created_at: string;
+  pending_cancellation_request_id: string | null;
+  pending_cancellation_reason: string | null;
   order_item_id: string;
   listing_id: string | null;
   listing_public_code_snapshot: string;
@@ -50,6 +54,8 @@ export type OrderDetail = {
   fulfillmentMethod: FulfillmentMethod;
   buyerNote: string | null;
   createdAt: string;
+  pendingCancellationRequestId: string | null;
+  pendingCancellationReason: string | null;
   items: OrderDetailItem[];
   totalCents: number;
 };
@@ -118,6 +124,8 @@ export async function getMyOrderDetail(publicCode: string): Promise<OrderDetailR
       fulfillmentMethod: first.fulfillment_method,
       buyerNote: first.buyer_note,
       createdAt: first.created_at,
+      pendingCancellationRequestId: first.pending_cancellation_request_id,
+      pendingCancellationReason: first.pending_cancellation_reason,
       items,
       totalCents,
     },

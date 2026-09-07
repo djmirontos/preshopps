@@ -4,6 +4,7 @@ import {
   getOrderStatusGuidance,
   getSellerOrderStatusGuidance,
   getAllowedSellerActions,
+  getAllowedBuyerActions,
   isPositiveOrderStatus,
   type OrderStatus,
 } from "@/lib/orders/order-status-copy";
@@ -109,6 +110,43 @@ describe("order-status-copy", () => {
     it("allows no seller action for every terminal status", () => {
       for (const status of ["changes_pending", "completed", "declined", "cancelled", "expired", "disputed"] as const) {
         expect(getAllowedSellerActions(status, false)).toEqual([]);
+      }
+    });
+  });
+
+  describe("getAllowedBuyerActions", () => {
+    it("allows only cancel_pending for a pending order", () => {
+      expect(getAllowedBuyerActions("pending", false)).toEqual(["cancel_pending"]);
+    });
+
+    it("allows confirm_changes and cancel_changes for a changes_pending order", () => {
+      expect(getAllowedBuyerActions("changes_pending", false)).toEqual(["confirm_changes", "cancel_changes"]);
+    });
+
+    it("allows request_cancellation for an accepted order with no pending request", () => {
+      expect(getAllowedBuyerActions("accepted", false)).toEqual(["request_cancellation"]);
+    });
+
+    it("allows request_cancellation for a ready order with no pending request", () => {
+      expect(getAllowedBuyerActions("ready", false)).toEqual(["request_cancellation"]);
+    });
+
+    it("hides request_cancellation once a cancellation request is already pending, to prevent duplicates", () => {
+      expect(getAllowedBuyerActions("accepted", true)).toEqual([]);
+      expect(getAllowedBuyerActions("ready", true)).toEqual([]);
+    });
+
+    it("allows only confirm_receipt for a handed_over_or_shipped order", () => {
+      expect(getAllowedBuyerActions("handed_over_or_shipped", false)).toEqual(["confirm_receipt"]);
+    });
+
+    it("allows no buyer action for received_confirmed -- it is a fleeting state immediately superseded by completed", () => {
+      expect(getAllowedBuyerActions("received_confirmed", false)).toEqual([]);
+    });
+
+    it("allows no buyer action for every terminal status", () => {
+      for (const status of ["completed", "declined", "cancelled", "expired", "disputed"] as const) {
+        expect(getAllowedBuyerActions(status, false)).toEqual([]);
       }
     });
   });

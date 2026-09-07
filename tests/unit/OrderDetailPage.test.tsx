@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { OrderDetailResult, OrderDetail } from "@/lib/orders/get-my-order-detail";
 
-const { getAuthUserMock, getMyOrderDetailMock, redirectMock, notFoundMock } = vi.hoisted(() => ({
+const { getAuthUserMock, getMyOrderDetailMock, redirectMock, notFoundMock, refreshMock } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getMyOrderDetailMock: vi.fn<(code: string) => Promise<OrderDetailResult>>(),
   redirectMock: vi.fn((url: string) => {
@@ -12,6 +12,7 @@ const { getAuthUserMock, getMyOrderDetailMock, redirectMock, notFoundMock } = vi
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  refreshMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -25,6 +26,7 @@ vi.mock("@/lib/orders/get-my-order-detail", () => ({
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
   notFound: notFoundMock,
+  useRouter: () => ({ refresh: refreshMock }),
 }));
 
 import OrderDetailPage from "@/app/orders/[publicCode]/page";
@@ -42,6 +44,8 @@ function sampleOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
     fulfillmentMethod: "meetup" as const,
     buyerNote: null,
     createdAt: "2026-01-05T00:00:00.000Z",
+    pendingCancellationRequestId: null,
+    pendingCancellationReason: null,
     items: [
       {
         orderItemId: "item-uuid-1",

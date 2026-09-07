@@ -5,6 +5,8 @@ import { Package } from "lucide-react";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyOrderDetail } from "@/lib/orders/get-my-order-detail";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
+import { Badge } from "@/components/ui/Badge";
+import { BuyerOrderActionsClient } from "@/components/orders/BuyerOrderActionsClient";
 import { getOrderStatusGuidance } from "@/lib/orders/order-status-copy";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
@@ -63,6 +65,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </div>
       <p className="mt-1 text-sm text-ink-secondary">{getOrderStatusGuidance(order.status, order.fulfillmentMethod)}</p>
 
+      {order.pendingCancellationRequestId && (
+        <div className="mt-4 rounded-[14px] border border-danger/40 bg-danger/5 p-4">
+          <p className="text-sm font-semibold text-ink">Cancellation requested -- awaiting seller review.</p>
+          {order.pendingCancellationReason && (
+            <p className="mt-1 text-sm text-ink-secondary">&ldquo;{order.pendingCancellationReason}&rdquo;</p>
+          )}
+        </div>
+      )}
+
       <div className="mt-6 rounded-[14px] border border-border bg-surface p-4 sm:p-5">
         <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm sm:grid-cols-4">
           <div>
@@ -113,6 +124,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
               <p className="mt-0.5 text-xs text-ink-muted">
                 Qty {item.quantity} × {formatPriceFromCents(item.priceCentsSnapshot)}
               </p>
+              {order.status === "changes_pending" && (
+                <div className="mt-1">
+                  <Badge tone={item.status === "accepted" ? "brand" : "neutral"}>
+                    {item.status === "accepted" ? "Accepted" : "Declined"}
+                  </Badge>
+                </div>
+              )}
             </div>
             <p className="shrink-0 text-sm font-semibold tabular-nums text-ink">
               {formatPriceFromCents(item.priceCentsSnapshot * item.quantity)}
@@ -120,6 +138,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </div>
         ))}
       </div>
+
+      <BuyerOrderActionsClient
+        orderId={order.orderId}
+        status={order.status}
+        hasPendingCancellationRequest={order.pendingCancellationRequestId !== null}
+      />
     </div>
   );
 }
