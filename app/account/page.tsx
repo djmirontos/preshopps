@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, Heart, Package } from "lucide-react";
+import { ChevronRight, Heart, Package, Store } from "lucide-react";
 import { getAuthUser } from "@/lib/auth/session";
 import { signOutAction } from "@/lib/auth/actions";
 
@@ -12,11 +12,15 @@ export const metadata = { title: "Account | Preshopps" };
  * (getAuthUser() runs before anything renders), not by a hidden client
  * check, so no account data is ever sent to an unauthenticated request.
  *
- * Favorites and Orders are reachable here rather than as extra bottom-nav
- * tabs -- the canonical mobile bottom nav stays Home/Search/Sell/Messages/
- * Account (see MobileBottomNav.tsx) -- so these links are mobile's only
- * path to /favorites and /orders (desktop also has the header heart icon
- * for Favorites in AppHeader.tsx; Orders has no header entry).
+ * Favorites, Orders, and Seller Orders are reachable here rather than as
+ * extra bottom-nav tabs -- the canonical mobile bottom nav stays Home/
+ * Search/Sell/Messages/Account (see MobileBottomNav.tsx) -- so these links
+ * are mobile's only path to /favorites, /orders, and /seller/orders
+ * (desktop also has the header heart icon for Favorites in AppHeader.tsx;
+ * Orders and Seller Orders have no header entry). Seller Orders is shown
+ * to every signed-in account, not only accounts that already have a shop
+ * -- /seller/orders itself shows a simple explanatory state for accounts
+ * with no shop yet, rather than hiding the entry point entirely.
  */
 export default async function AccountPage() {
   const user = await getAuthUser();
@@ -52,6 +56,17 @@ export default async function AccountPage() {
           <span className="flex items-center gap-2">
             <Package className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
             Orders
+          </span>
+          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+        </Link>
+
+        <Link
+          href="/seller/orders"
+          className="mt-3 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <span className="flex items-center gap-2">
+            <Store className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+            Seller Orders
           </span>
           <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
         </Link>
