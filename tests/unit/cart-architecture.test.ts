@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 function readFile(relativePath: string): string {
@@ -147,13 +147,8 @@ describe("order submission reuses the existing 0039/0040 backend only", () => {
   });
 });
 
-describe("no buyer Orders page was added (no safe backend read path exists yet)", () => {
-  it("app/orders does not exist", () => {
-    expect(existsSync(path.join(process.cwd(), "app/orders"))).toBe(false);
-  });
-
-  it("no dead 'Orders' navigation was added to the account page", () => {
-    const source = readFile("app/account/page.tsx");
-    expect(source).not.toMatch(/href="\/orders"/);
-  });
-});
+// The "no buyer Orders page was added" assertion that used to live here
+// applied only while Buyer Orders was genuinely out of scope (the Order
+// Submission task). That module has since been built deliberately -- see
+// orders-architecture.test.ts for its own coverage (migration scope,
+// no-service-role, account/cart navigation wiring).

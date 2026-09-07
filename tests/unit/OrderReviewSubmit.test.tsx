@@ -176,6 +176,17 @@ describe("OrderReviewSubmit", () => {
     expect(screen.getByText(/PSO-ABC123/)).toBeInTheDocument();
   });
 
+  it("includes a View orders link to /orders in the success confirmation", async () => {
+    mockHappyPathRpc();
+    render(<Harness initialLines={[makeRow()]} />);
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "View orders" })).toHaveAttribute("href", "/orders");
+  });
+
   it("does not expose raw UUIDs when a public order code is available", async () => {
     mockHappyPathRpc();
     render(<Harness initialLines={[makeRow()]} />);

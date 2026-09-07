@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { useCart } from "@/components/cart/CartProvider";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
@@ -149,6 +150,12 @@ export function OrderReviewSubmit({ lines, onLinesChange }: Props) {
               </li>
             ))}
           </ul>
+          <Link
+            href="/orders"
+            className="mt-3 inline-flex h-9 items-center rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            View orders
+          </Link>
         </div>
       )}
 

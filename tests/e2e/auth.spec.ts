@@ -48,3 +48,14 @@ test("header Cart icon navigates to /cart for a guest, with no sign-in redirect"
   await page.getByRole("link", { name: "Cart" }).click();
   await expect(page).toHaveURL(/\/cart$/);
 });
+
+test("/orders as a guest redirects to sign-in with next=/orders", async ({ page }) => {
+  await page.goto("/orders");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Forders/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+});
+
+test("/orders/[publicCode] as a guest redirects to sign-in with the order path preserved as next=", async ({ page }) => {
+  await page.goto("/orders/PSO-DOESNOTEXIST");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Forders%2FPSO-DOESNOTEXIST/);
+});
