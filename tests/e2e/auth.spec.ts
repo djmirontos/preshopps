@@ -89,3 +89,15 @@ test("mobile bottom-nav Messages tab navigates to the guest-protected /messages 
   await page.getByRole("link", { name: "Messages" }).click();
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fmessages/);
 });
+
+test("/notifications as a guest redirects to sign-in with next=/notifications", async ({ page }) => {
+  await page.goto("/notifications");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fnotifications/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+});
+
+test("header Bell navigates to the guest-protected /notifications route", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Notifications" }).click();
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fnotifications/);
+});

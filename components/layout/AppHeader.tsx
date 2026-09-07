@@ -1,14 +1,21 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Bell, ChevronDown, Heart, MapPin, MessageCircle, Plus, Search } from "lucide-react";
+import { ChevronDown, Heart, MapPin, MessageCircle, Plus, Search } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 import { AccountEntry } from "@/components/auth/AccountEntry";
 import { SellGate } from "@/components/auth/SellGate";
 import { CartIconLink } from "@/components/cart/CartIconLink";
+import { NotificationBellLink } from "@/components/notifications/NotificationBellLink";
 import type { AuthUser } from "@/lib/auth/session";
 
 type Props = {
   user: AuthUser | null;
+  /** Sourced from one root-layout-level get_my_notification_unread_count
+   * call (lib/notifications/get-my-notification-unread-count.ts) -- never
+   * fetched here, so this component adds no query of its own. Defaults to
+   * 0 so every existing call site (and every existing test) that doesn't
+   * pass it keeps rendering exactly as before. */
+  unreadNotificationCount?: number;
 };
 
 /**
@@ -17,17 +24,16 @@ type Props = {
  * right-hand icon cluster. Below 1024px, a compact two-row mobile header
  * is shown instead.
  *
- * Account, Favorites, Cart, and Messages are all real. Messages links
- * directly to /messages (matching the Favorites icon's own convention) --
- * that page itself redirects a guest to sign-in, so no auth branching is
- * needed here. No unread-count badge is added: it would require a new
- * root-layout-wide query on every page load site-wide for a purely
- * optional affordance ("if unread count exists efficiently, small badge
- * is acceptable") -- deferred, reported, not silently invented.
- * Notifications remains the existing non-functional placeholder (its real
- * backend isn't in scope yet).
+ * Account, Favorites, Cart, Messages, and Notifications are all real.
+ * Messages/Notifications link directly to their own routes (matching the
+ * Favorites icon's own convention) -- those pages themselves redirect a
+ * guest to sign-in, so no auth branching is needed here. Notifications
+ * carries an unread-count badge, since get_my_notification_unread_count
+ * is a single efficient scalar RPC already supported cleanly by the
+ * backend (see NotificationBellLink) -- unlike Messages, which has no
+ * equivalent cheap count RPC and therefore stays badge-less.
  */
-export function AppHeader({ user }: Props) {
+export function AppHeader({ user, unreadNotificationCount = 0 }: Props) {
   const isAuthenticated = Boolean(user);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface">
@@ -86,7 +92,7 @@ export function AppHeader({ user }: Props) {
         <nav aria-label="Account actions" className="ml-auto hidden items-center gap-0.5 lg:flex">
           <IconButton href="/favorites" label="Favorites" icon={Heart} />
           <IconButton href="/messages" label="Messages" icon={MessageCircle} />
-          <IconButton href="#" label="Notifications" icon={Bell} />
+          <NotificationBellLink unreadCount={unreadNotificationCount} />
           <CartIconLink />
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
           <SellGate
@@ -100,7 +106,7 @@ export function AppHeader({ user }: Props) {
 
         {/* Mobile right-hand icons */}
         <div className="ml-auto flex items-center gap-0.5 lg:hidden">
-          <IconButton href="#" label="Notifications" icon={Bell} />
+          <NotificationBellLink unreadCount={unreadNotificationCount} />
           <CartIconLink />
         </div>
       </div>

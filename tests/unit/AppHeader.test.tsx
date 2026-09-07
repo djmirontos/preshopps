@@ -58,6 +58,31 @@ describe("AppHeader", () => {
     expect(screen.getByLabelText("Favorites")).toHaveAttribute("href", "/favorites");
   });
 
+  it("links the Bell to the real /notifications route, not a placeholder", () => {
+    render(<AppHeader user={null} />);
+    for (const link of screen.getAllByLabelText("Notifications")) {
+      expect(link).toHaveAttribute("href", "/notifications");
+    }
+  });
+
+  it("renders no unread badge when unreadNotificationCount is 0 (the default)", () => {
+    render(<AppHeader user={null} />);
+    for (const link of screen.getAllByLabelText("Notifications")) {
+      expect(link.textContent).toBe("");
+    }
+  });
+
+  it("renders an unread badge with the count and an accessible label when unreadNotificationCount > 0", () => {
+    render(<AppHeader user={{ id: "u1", email: "buyer@example.com" }} unreadNotificationCount={3} />);
+    expect(screen.getAllByLabelText("Notifications, 3 unread").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+  });
+
+  it("caps the displayed badge at 99+ for a very large unread count", () => {
+    render(<AppHeader user={{ id: "u1", email: "buyer@example.com" }} unreadNotificationCount={150} />);
+    expect(screen.getAllByText("99+").length).toBeGreaterThan(0);
+  });
+
   it("links the Cart icon to the real /cart route, not a placeholder", () => {
     render(<AppHeader user={null} />);
     for (const link of screen.getAllByLabelText("Cart")) {
