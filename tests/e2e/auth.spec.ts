@@ -71,6 +71,12 @@ test("/seller/orders/[publicCode] as a guest redirects to sign-in with the order
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fseller%2Forders%2FPSO-DOESNOTEXIST/);
 });
 
+test("/seller/shop as a guest redirects to sign-in with next=/seller/shop", async ({ page }) => {
+  await page.goto("/seller/shop");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fseller%2Fshop/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+});
+
 test("/messages as a guest redirects to sign-in with next=/messages", async ({ page }) => {
   await page.goto("/messages");
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fmessages/);
