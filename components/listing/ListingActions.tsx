@@ -2,10 +2,14 @@
 
 import { useState } from "react";
 import { AuthGate } from "@/components/auth/AuthGate";
+import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { cn } from "@/lib/cn";
 import type { ListingStatus } from "@/lib/marketplace/listing-detail";
 
 type Props = {
+  listingId: string;
+  publicCode: string;
+  availableQuantity: number;
   status: ListingStatus;
   isInquiryOnly: boolean;
   isAuthenticated: boolean;
@@ -20,27 +24,25 @@ const UNAVAILABLE_NOTES: Partial<Record<ListingStatus, string>> = {
   archived: "This listing is archived and no longer available.",
 };
 
-type GateKind = "cart" | "message" | null;
-
-const GATE_COPY: Record<Exclude<GateKind, null>, { title: string; reason: string }> = {
-  cart: { title: "Sign in to add to cart", reason: "Create a free account to add items to your cart." },
-  message: {
-    title: "Sign in to message this seller",
-    reason: "Create a free account to message sellers directly.",
-  },
-};
-
 /**
- * A guest clicking Add to Cart or Message Seller sees the auth gate --
- * this is only auth interception, not real feature behavior. An
- * authenticated user still sees the existing disabled, honest "coming
- * soon" buttons (no cart/order/messaging backend exists yet, so nothing
- * here ever pretends an action succeeded).
+ * Add to Cart is now real (set_cart_item_quantity / local guest cart, see
+ * components/cart/AddToCartButton.tsx) -- a guest adds directly, no auth
+ * gate, per PRD S20.1. Message Seller remains the existing honest
+ * "coming soon" placeholder gated behind sign-in for a guest -- messaging
+ * itself is out of scope for the Cart module.
  */
-export function ListingActions({ status, isInquiryOnly, isAuthenticated, next }: Props) {
+export function ListingActions({
+  listingId,
+  publicCode,
+  availableQuantity,
+  status,
+  isInquiryOnly,
+  isAuthenticated,
+  next,
+}: Props) {
   const isAvailable = status === "available";
   const unavailableNote = UNAVAILABLE_NOTES[status];
-  const [openGate, setOpenGate] = useState<GateKind>(null);
+  const [isMessageGateOpen, setIsMessageGateOpen] = useState(false);
 
   const buttonBaseClass = "h-12 flex-1 rounded-[10px] px-5 text-sm font-semibold";
 
@@ -52,26 +54,19 @@ export function ListingActions({ status, isInquiryOnly, isAuthenticated, next }:
 
       <div className="flex flex-col gap-2.5 sm:flex-row">
         {!isInquiryOnly && isAvailable && (
-          <button
-            type="button"
-            disabled={isAuthenticated}
-            aria-disabled={isAuthenticated ? "true" : undefined}
-            onClick={isAuthenticated ? undefined : () => setOpenGate("cart")}
-            className={cn(
-              buttonBaseClass,
-              "bg-brand-action text-brand-action-text",
-              isAuthenticated ? "cursor-not-allowed opacity-60" : "hover:brightness-95",
-            )}
-          >
-            Add to Cart
-          </button>
+          <AddToCartButton
+            listingId={listingId}
+            publicCode={publicCode}
+            availableQuantity={availableQuantity}
+            className="flex-1"
+          />
         )}
 
         <button
           type="button"
           disabled={isAuthenticated}
           aria-disabled={isAuthenticated ? "true" : undefined}
-          onClick={isAuthenticated ? undefined : () => setOpenGate("message")}
+          onClick={isAuthenticated ? undefined : () => setIsMessageGateOpen(true)}
           className={cn(
             buttonBaseClass,
             "border border-border bg-surface text-ink",
@@ -82,14 +77,14 @@ export function ListingActions({ status, isInquiryOnly, isAuthenticated, next }:
         </button>
       </div>
 
-      <p className="text-xs text-ink-muted">Cart and messaging are coming soon.</p>
+      <p className="text-xs text-ink-muted">Messaging is coming soon.</p>
 
-      {openGate && (
+      {isMessageGateOpen && (
         <AuthGate
-          title={GATE_COPY[openGate].title}
-          reason={GATE_COPY[openGate].reason}
+          title="Sign in to message this seller"
+          reason="Create a free account to message sellers directly."
           next={next}
-          onClose={() => setOpenGate(null)}
+          onClose={() => setIsMessageGateOpen(false)}
         />
       )}
     </div>

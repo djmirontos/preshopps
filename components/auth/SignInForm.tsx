@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
+import { mergeGuestCartOnAuth } from "@/lib/cart/merge-guest-cart-on-auth";
 
 type Props = {
   next: string;
@@ -33,6 +34,12 @@ export function SignInForm({ next }: Props) {
       setError(mapAuthError(signInError));
       return;
     }
+
+    // Merge the local guest cart into the account cart now that a session
+    // exists (PRD S20.2/AGENTS.md Cart Rules) -- must happen before the
+    // refresh below so the root layout's next render picks up the merged
+    // DB cart, not the pre-merge state.
+    await mergeGuestCartOnAuth();
 
     // A Server Component layout/page (e.g. the header's auth state) only
     // reflects the session on its next render -- refresh so it picks up

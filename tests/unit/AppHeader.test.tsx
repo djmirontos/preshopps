@@ -58,6 +58,13 @@ describe("AppHeader", () => {
     expect(screen.getByLabelText("Favorites")).toHaveAttribute("href", "/favorites");
   });
 
+  it("links the Cart icon to the real /cart route, not a placeholder", () => {
+    render(<AppHeader user={null} />);
+    for (const link of screen.getAllByLabelText("Cart")) {
+      expect(link).toHaveAttribute("href", "/cart");
+    }
+  });
+
   it("renders the Sell call-to-action as a guest-gated control", () => {
     render(<AppHeader user={null} />);
     expect(screen.getByRole("button", { name: /sell/i })).toBeInTheDocument();

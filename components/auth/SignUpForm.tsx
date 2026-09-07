@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
 import { getAppUrl } from "@/lib/env";
+import { mergeGuestCartOnAuth } from "@/lib/cart/merge-guest-cart-on-auth";
 
 type Props = {
   next: string;
@@ -56,7 +57,9 @@ export function SignUpForm({ next }: Props) {
 
     if (data.session) {
       // Confirmation is off for this project -- the user is already
-      // signed in, so treat this exactly like a successful sign-in.
+      // signed in, so treat this exactly like a successful sign-in,
+      // including merging any local guest cart (see SignInForm).
+      await mergeGuestCartOnAuth();
       router.push(next);
       router.refresh();
       return;

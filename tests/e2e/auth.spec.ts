@@ -35,3 +35,16 @@ test("header Favorites icon navigates to the guest-protected /favorites route", 
   await page.getByRole("link", { name: "Favorites" }).click();
   await expect(page).toHaveURL(/\/sign-in\?next=%2Ffavorites/);
 });
+
+test("/cart is accessible to a guest -- unlike /account and /favorites, it never redirects to sign-in", async ({ page }) => {
+  const response = await page.goto("/cart");
+  expect(response?.ok()).toBeTruthy();
+  await expect(page).toHaveURL(/\/cart$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Cart" })).toBeVisible();
+});
+
+test("header Cart icon navigates to /cart for a guest, with no sign-in redirect", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Cart" }).click();
+  await expect(page).toHaveURL(/\/cart$/);
+});

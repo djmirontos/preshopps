@@ -1,6 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
-import { getSupabaseEnv } from "@/lib/supabase/env";
+import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 import type { ListingCardData, ListingCondition } from "@/components/marketplace/ListingCard";
+
+/** Re-exported for existing importers (lib/marketplace/listing-detail.ts,
+ * lib/favorites/get-my-favorites.ts, lib/cart/get-my-cart.ts, and this
+ * file's own mapBrowseRowToListingCard below) -- the implementation now
+ * lives in lib/marketplace/listing-image-url.ts so it can also be
+ * imported from client components without pulling in the server-only
+ * Supabase client this file otherwise depends on. See that module's
+ * comment for why the split was necessary. */
+export { getListingImageUrl };
 
 /**
  * Row shape exactly matching public.browse_listings' RETURNS TABLE, confirmed
@@ -93,16 +102,6 @@ export function formatRelativeTime(isoDate: string): string {
   return `${months} month${months === 1 ? "" : "s"} ago`;
 }
 
-/** No storage bucket exists live yet (confirmed read-only), so this path is
- * currently unexercised by any real row — but it follows the documented
- * Supabase public-storage URL shape and the exact project host only
- * (no wildcard remote host). Exported for reuse by the listing-detail data
- * module so both share one URL-building rule. */
-export function getListingImageUrl(path: string | null): string | undefined {
-  if (!path) return undefined;
-  const { url } = getSupabaseEnv();
-  return `${url}/storage/v1/object/public/${path}`;
-}
 
 export function mapBrowseRowToListingCard(row: BrowseListingRow): ListingCardData {
   return {

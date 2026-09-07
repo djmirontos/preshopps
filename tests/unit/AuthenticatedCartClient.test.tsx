@@ -1,0 +1,137 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+const { rpcMock } = vi.hoisted(() => ({ rpcMock: vi.fn() }));
+vi.mock("@/lib/supabase/client", () => ({
+  createClient: () => ({ rpc: rpcMock }),
+}));
+
+import { CartProvider } from "@/components/cart/CartProvider";
+import { AuthenticatedCartClient } from "@/components/cart/AuthenticatedCartClient";
+import type { CartLineDisplay } from "@/lib/cart/get-my-cart";
+
+function makeLine(overrides: Partial<CartLineDisplay> = {}): CartLineDisplay {
+  return {
+    listingId: "listing-1",
+    publicCode: "PLS-ABC",
+    title: "Nike Air Max 270",
+    imageUrl: undefined,
+    priceCents: 250000,
+    priceCentsSnapshot: 250000,
+    priceChanged: false,
+    status: "available",
+    isInquiryOnly: false,
+    quantity: 2,
+    availableQuantity: 5,
+    isSubmittable: true,
+    unavailableReason: null,
+    shopId: "shop-1",
+    shopSlug: "annes-closet",
+    shopName: "Anne's Closet",
+    addedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function renderClient(lines: CartLineDisplay[], hadError = false) {
+  return render(
+    <CartProvider initialLines={lines.map((l) => ({ listingId: l.listingId, publicCode: l.publicCode, quantity: l.quantity }))} isAuthenticated>
+      <AuthenticatedCartClient initialLines={lines} hadError={hadError} />
+    </CartProvider>,
+  );
+}
+
+beforeEach(() => {
+  rpcMock.mockReset();
+});
+
+describe("AuthenticatedCartClient", () => {
+  it("shows the empty state when there are no lines", () => {
+    renderClient([]);
+    expect(screen.getByText("Your cart is empty.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse listings" })).toHaveAttribute("href", "/search");
+  });
+
+  it("shows an error message when hadError is true", () => {
+    renderClient([], true);
+    expect(screen.getByText(/unable to load your cart/i)).toBeInTheDocument();
+  });
+
+  it("groups rows by shop", () => {
+    renderClient([
+      makeLine({ listingId: "l1", shopId: "shop-1", shopName: "Anne's Closet" }),
+      makeLine({ listingId: "l2", shopId: "shop-2", shopName: "Bob's Store", title: "Vintage Jacket" }),
+    ]);
+    expect(screen.getByText("Anne's Closet")).toBeInTheDocument();
+    expect(screen.getByText("Bob's Store")).toBeInTheDocument();
+  });
+
+  it("computes per-shop and overall subtotal math from submittable rows", () => {
+    renderClient([
+      makeLine({ listingId: "l1", priceCents: 10000, quantity: 2 }), // 20000
+      makeLine({ listingId: "l2", priceCents: 5000, quantity: 3 }), // 15000
+    ]);
+    // Both rows share shop-1 -> group subtotal appears twice (group + overall = same value here).
+    const subtotals = screen.getAllByText("₱350");
+    expect(subtotals.length).toBeGreaterThan(0);
+  });
+
+  it("excludes non-submittable rows from the subtotal", () => {
+    renderClient([
+      makeLine({ listingId: "l1", priceCents: 10000, quantity: 1, isSubmittable: true }),
+      makeLine({ listingId: "l2", priceCents: 99999900, quantity: 1, isSubmittable: false, unavailableReason: "sold" }),
+    ]);
+    expect(screen.getByText("Sold")).toBeInTheDocument();
+    expect(screen.getByText("Item subtotal")).toBeInTheDocument();
+    expect(screen.getAllByText("₱100").length).toBeGreaterThan(0);
+  });
+
+  it("keeps an unavailable row visible with its reason label", () => {
+    renderClient([makeLine({ unavailableReason: "reserved", isSubmittable: false })]);
+    expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
+    expect(screen.getByText("Reserved")).toBeInTheDocument();
+  });
+
+  it("increments quantity via set_cart_item_quantity", async () => {
+    rpcMock.mockResolvedValue({ data: [{ cart_item_id: "ci1" }], error: null });
+    renderClient([makeLine({ quantity: 2 })]);
+
+    fireEvent.click(screen.getByRole("button", { name: /increase quantity/i }));
+
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("set_cart_item_quantity", { p_listing_id: "listing-1", p_quantity: 3 }),
+    );
+  });
+
+  it("rolls back quantity on RPC failure", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "stock unavailable" } });
+    renderClient([makeLine({ quantity: 2 })]);
+
+    fireEvent.click(screen.getByRole("button", { name: /increase quantity/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/couldn't update quantity/i));
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("removes a row via remove_cart_item", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([makeLine()]);
+
+    fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("remove_cart_item", { p_listing_id: "listing-1" }));
+    await waitFor(() => expect(screen.getByText("Your cart is empty.")).toBeInTheDocument());
+  });
+
+  it("never passes a client-supplied user id to the mutation RPCs", async () => {
+    rpcMock.mockResolvedValue({ data: [{ cart_item_id: "ci1" }], error: null });
+    renderClient([makeLine({ listingId: "listing-77" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: /increase quantity/i }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    const [, args] = rpcMock.mock.calls[0];
+    expect(Object.keys(args).sort()).toEqual(["p_listing_id", "p_quantity"]);
+    expect(args.p_listing_id).toBe("listing-77");
+  });
+});

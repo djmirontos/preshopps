@@ -119,6 +119,9 @@ export default async function ItemPage({ params }: ItemPageProps) {
           </div>
 
           <ListingActions
+            listingId={listing.id}
+            publicCode={listing.publicCode}
+            availableQuantity={listing.availableQuantity}
             status={listing.status}
             isInquiryOnly={listing.isInquiryOnly}
             isAuthenticated={Boolean(user)}

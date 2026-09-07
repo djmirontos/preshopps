@@ -1,9 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Bell, ChevronDown, Heart, MapPin, MessageCircle, Plus, Search, ShoppingBag } from "lucide-react";
+import { Bell, ChevronDown, Heart, MapPin, MessageCircle, Plus, Search } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 import { AccountEntry } from "@/components/auth/AccountEntry";
 import { SellGate } from "@/components/auth/SellGate";
+import { CartIconLink } from "@/components/cart/CartIconLink";
 import type { AuthUser } from "@/lib/auth/session";
 
 type Props = {
@@ -16,9 +17,9 @@ type Props = {
  * right-hand icon cluster. Below 1024px, a compact two-row mobile header
  * is shown instead.
  *
- * Account and Sell are the only auth-aware entries in this task --
- * Favorites/Messages/Notifications/Cart remain the existing non-
- * functional placeholders (their real backends aren't in scope yet).
+ * Account, Favorites, and Cart are real; Messages/Notifications remain the
+ * existing non-functional placeholders (their real backends aren't in
+ * scope yet).
  */
 export function AppHeader({ user }: Props) {
   const isAuthenticated = Boolean(user);
@@ -80,7 +81,7 @@ export function AppHeader({ user }: Props) {
           <IconButton href="/favorites" label="Favorites" icon={Heart} />
           <IconButton href="#" label="Messages" icon={MessageCircle} />
           <IconButton href="#" label="Notifications" icon={Bell} />
-          <IconButton href="#" label="Cart" icon={ShoppingBag} />
+          <CartIconLink />
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
           <SellGate
             isAuthenticated={isAuthenticated}
@@ -94,7 +95,7 @@ export function AppHeader({ user }: Props) {
         {/* Mobile right-hand icons */}
         <div className="ml-auto flex items-center gap-0.5 lg:hidden">
           <IconButton href="#" label="Notifications" icon={Bell} />
-          <IconButton href="#" label="Cart" icon={ShoppingBag} />
+          <CartIconLink />
         </div>
       </div>
 
