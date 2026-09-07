@@ -7,6 +7,8 @@ import { getMyOrderDetail } from "@/lib/orders/get-my-order-detail";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { Badge } from "@/components/ui/Badge";
 import { BuyerOrderActionsClient } from "@/components/orders/BuyerOrderActionsClient";
+import { BuyerOrderReviewSection } from "@/components/orders/BuyerOrderReviewSection";
+import { getOrderReview } from "@/lib/reviews/get-order-review";
 import { getOrderStatusGuidance } from "@/lib/orders/order-status-copy";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
@@ -52,6 +54,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
   }
 
   const { order } = result;
+
+  const orderReviewResult = order.status === "completed" ? await getOrderReview(order.orderId) : null;
+  const orderReview = orderReviewResult?.status === "found" ? orderReviewResult.review : null;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
@@ -144,6 +149,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
         status={order.status}
         hasPendingCancellationRequest={order.pendingCancellationRequestId !== null}
       />
+
+      <BuyerOrderReviewSection orderPublicCode={order.orderPublicCode} status={order.status} review={orderReview} />
     </div>
   );
 }

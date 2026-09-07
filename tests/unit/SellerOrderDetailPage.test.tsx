@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { SellerOrderDetailResult, SellerOrderDetail } from "@/lib/seller/get-my-shop-order-detail";
+import type { OrderReviewResult } from "@/lib/reviews/get-order-review";
 
-const { getAuthUserMock, getMyShopOrderDetailMock, redirectMock, notFoundMock, refreshMock } = vi.hoisted(() => ({
+const { getAuthUserMock, getMyShopOrderDetailMock, getOrderReviewMock, redirectMock, notFoundMock, refreshMock } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getMyShopOrderDetailMock: vi.fn<(code: string) => Promise<SellerOrderDetailResult>>(),
+  getOrderReviewMock: vi.fn<(orderId: string) => Promise<OrderReviewResult>>(),
   redirectMock: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
@@ -21,6 +23,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/seller/get-my-shop-order-detail", () => ({
   getMyShopOrderDetail: getMyShopOrderDetailMock,
+}));
+
+vi.mock("@/lib/reviews/get-order-review", () => ({
+  getOrderReview: getOrderReviewMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -64,6 +70,7 @@ function sampleOrder(overrides: Partial<SellerOrderDetail> = {}): SellerOrderDet
 describe("SellerOrderDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getOrderReviewMock.mockResolvedValue({ status: "not_found" });
   });
 
   it("redirects a guest to sign-in with the order's own path preserved as next=", async () => {

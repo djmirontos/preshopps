@@ -3,12 +3,14 @@ import { render, screen } from "@testing-library/react";
 import type { ListingCardData } from "@/components/marketplace/ListingCard";
 import type { ShopDetail, ShopDetailResult } from "@/lib/marketplace/shop-detail";
 import type { ShopListingsResult } from "@/lib/marketplace/shop-listings";
+import type { GetShopReviewsResult } from "@/lib/reviews/get-shop-reviews";
 import type { AuthUser } from "@/lib/auth/session";
 import type { MyShop } from "@/lib/seller/get-my-shop";
 
-const { getShopDetailMock, getShopListingsMock, notFoundMock, permanentRedirectMock, getAuthUserMock, getMyShopMock } = vi.hoisted(() => ({
+const { getShopDetailMock, getShopListingsMock, getShopReviewsMock, notFoundMock, permanentRedirectMock, getAuthUserMock, getMyShopMock } = vi.hoisted(() => ({
   getShopDetailMock: vi.fn<(slug: string) => Promise<ShopDetailResult>>(),
   getShopListingsMock: vi.fn<() => Promise<ShopListingsResult>>(),
+  getShopReviewsMock: vi.fn<() => Promise<GetShopReviewsResult>>(),
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -25,6 +27,10 @@ vi.mock("@/lib/marketplace/shop-detail", () => ({
 
 vi.mock("@/lib/marketplace/shop-listings", () => ({
   getShopListings: getShopListingsMock,
+}));
+
+vi.mock("@/lib/reviews/get-shop-reviews", () => ({
+  getShopReviews: getShopReviewsMock,
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -81,6 +87,7 @@ describe("ShopPage", () => {
     vi.clearAllMocks();
     getAuthUserMock.mockResolvedValue(null);
     getMyShopMock.mockResolvedValue(null);
+    getShopReviewsMock.mockResolvedValue({ reviews: [], hadError: false, nextCursor: null });
   });
 
   it("renders the shop when found, with populated listings", async () => {

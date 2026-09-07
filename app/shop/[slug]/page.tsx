@@ -7,13 +7,16 @@ import { ShopFeaturedListing } from "@/components/shop/ShopFeaturedListing";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { ShopListingsClient } from "@/components/shop/ShopListingsClient";
 import { ShopMessageAction } from "@/components/shop/ShopMessageAction";
+import { ShopReviewsClient } from "@/components/shop/ShopReviewsClient";
 import { getShopDetail } from "@/lib/marketplace/shop-detail";
 import { getShopListings } from "@/lib/marketplace/shop-listings";
+import { getShopReviews, type ShopReviewsCursor } from "@/lib/reviews/get-shop-reviews";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 import type { BrowseCursor } from "@/lib/marketplace/search-params";
 
 const LISTINGS_LIMIT = 20;
+const REVIEWS_LIMIT = 10;
 const META_DESCRIPTION_LENGTH = 160;
 
 /**
@@ -81,11 +84,19 @@ export default async function ShopPage({ params }: ShopPageProps) {
     permanentRedirect(`/shop/${shop.slug}`);
   }
 
-  const listingsResult = await getShopListings(shop.id, LISTINGS_LIMIT);
+  const [listingsResult, reviewsResult] = await Promise.all([
+    getShopListings(shop.id, LISTINGS_LIMIT),
+    getShopReviews(shop.id, REVIEWS_LIMIT),
+  ]);
 
   async function loadMoreAction(cursor: BrowseCursor) {
     "use server";
     return getShopListings(shop.id, LISTINGS_LIMIT, cursor);
+  }
+
+  async function loadMoreReviewsAction(cursor: ShopReviewsCursor) {
+    "use server";
+    return getShopReviews(shop.id, REVIEWS_LIMIT, cursor);
   }
 
   // Matched against the shop's own already-fetched listings page -- never
@@ -152,6 +163,18 @@ export default async function ShopPage({ params }: ShopPageProps) {
 
       <div className="mt-8">
         <ShopDescription description={shop.description} />
+      </div>
+
+      <div id="reviews" className="mt-8 scroll-mt-20">
+        <h2 className="text-lg font-semibold text-ink">Reviews</h2>
+        <div className="mt-2">
+          <ShopReviewsClient
+            initialReviews={reviewsResult.reviews}
+            initialHadError={reviewsResult.hadError}
+            initialCursor={reviewsResult.nextCursor}
+            loadMore={loadMoreReviewsAction}
+          />
+        </div>
       </div>
     </div>
   );

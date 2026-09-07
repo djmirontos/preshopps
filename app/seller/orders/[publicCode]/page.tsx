@@ -3,6 +3,8 @@ import Link from "next/link";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShopOrderDetail } from "@/lib/seller/get-my-shop-order-detail";
 import { SellerOrderDetailClient } from "@/components/seller/SellerOrderDetailClient";
+import { SellerOrderReviewSection } from "@/components/seller/SellerOrderReviewSection";
+import { getOrderReview } from "@/lib/reviews/get-order-review";
 
 type PageProps = {
   params: Promise<{ publicCode: string }>;
@@ -44,6 +46,9 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
     );
   }
 
+  const orderReviewResult = result.order.status === "completed" ? await getOrderReview(result.order.orderId) : null;
+  const orderReview = orderReviewResult?.status === "found" ? orderReviewResult.review : null;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link href="/seller/orders" className="text-sm text-ink-secondary hover:text-ink">
@@ -51,6 +56,8 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
       </Link>
 
       <SellerOrderDetailClient initialOrder={result.order} />
+
+      <SellerOrderReviewSection review={orderReview} />
     </div>
   );
 }

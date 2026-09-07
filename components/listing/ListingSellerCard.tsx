@@ -59,10 +59,10 @@ export function ListingSellerCard({
 
       <p className="mt-2 flex items-center gap-1.5 text-sm text-ink-secondary">
         {reviewCount > 0 && averageRating !== null ? (
-          <>
+          <Link href={`/shop/${slug}#reviews`} className="flex items-center gap-1.5 rounded hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">
             <Star className="h-4 w-4 fill-current text-brand-link" aria-hidden="true" />
             {averageRating.toFixed(1)} · {reviewCount} review{reviewCount === 1 ? "" : "s"}
-          </>
+          </Link>
         ) : (
           "No reviews yet"
         )}
