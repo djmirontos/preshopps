@@ -360,6 +360,8 @@ Do not invent new public listing states without product approval.
 
 Visibility must follow architecture rules.
 
+Draft listings require only a non-blank title. Everything else may be incomplete: no description, no images, no price, no category, no condition, no fulfillment method, incomplete location, incomplete vehicle/rental info. Do not require publish-ready field completeness (beyond title) when implementing draft creation/save -- only validate that any value actually supplied is structurally/type valid and does not violate security/ownership rules. Enforce full completeness validation (all required fields including description, valid category/type/condition, valid price/stock, valid location, at least one fulfillment method where applicable, 1-8 uploaded images meeting the actual-item/reference rules, known-flaws for Fair, seller eligibility, required policy acceptance) only at the draft -> available (publish) transition.
+
 ---
 
 ## Order State Machine
@@ -491,7 +493,7 @@ Keep eligibility calculation centralized and testable.
 
 ## Images
 
-Listing photos:
+Listing photos (required at publish; a Draft may be saved with zero images):
 
 - 1–8
 - actual item photo required

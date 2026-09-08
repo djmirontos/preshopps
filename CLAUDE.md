@@ -244,6 +244,8 @@ Brand New listings automatically use brand-new condition.
 
 Fair condition requires known-flaws text.
 
+Draft listings require only a non-blank title. Do not require description, category, listing type, condition, price, stock, fulfillment method, images, or complete location/vehicle/rental info to create or save a Draft -- only validate that any value actually supplied is structurally/type valid and does not violate security/ownership rules. Enforce full completeness (title and description, all fields above, plus known-flaws for Fair, valid stock/price, 1-8 uploaded images meeting the actual-item/reference rules, seller eligibility, required policy acceptance) only when a listing moves from Draft to Available (publish).
+
 ### Inquiry-only categories
 
 These categories must never expose Add to Cart:
@@ -273,7 +275,7 @@ Eligible normal sale listings support:
 
 ## Image Rules
 
-Listing images:
+Listing images (required at publish time -- a Draft may be saved with zero images):
 
 - 1–8 images
 - at least one real photo of the actual item

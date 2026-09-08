@@ -310,7 +310,9 @@ Visibility:
 - `paused`: non-public
 - `sold`: direct URL remains accessible, hidden from normal discovery
 - `archived`: direct URL remains accessible as unavailable, hidden from normal discovery
-- `draft`: seller/admin only
+- `draft`: seller/admin only, never public, never reserves inventory, never in browse/search/shop
+
+Draft vs publish: title is the only required field to create/save a Draft (non-blank). Everything else may be incomplete (no description, no images/price/category/condition/fulfillment method, incomplete location/vehicle/rental info) -- anything supplied must still be valid, but nothing beyond title is required until publish. Full completeness validation (including description) applies only at the `draft` -> `available` transition, not at draft creation/save.
 
 Listing type:
 
@@ -395,7 +397,7 @@ No booking calendar in MVP.
 
 Listing images:
 
-- 1 to 8
+- 1 to 8, required at publish -- a Draft may have zero images
 - Preserve full original aspect ratio
 - No forced crop
 - Automatically resize/compress before upload
@@ -405,9 +407,9 @@ Listing images:
 - Seller can change cover
 - Seller can remove images if at least one valid actual-item image remains
 
-Actual-item rule:
+Actual-item rule (enforced at publish, not at Draft creation):
 
-- Every listing requires at least one real photo of the actual item
+- Every published listing requires at least one real photo of the actual item
 - Pre-loved: actual-item photos only
 - Brand New: may also include catalog/reference images
 - Reference images must be clearly labeled

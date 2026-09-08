@@ -472,6 +472,8 @@ Not required in MVP:
 
 Size, color, model, and similar details may be written in the title or description.
 
+The fields above are what a listing must have to be **published** (moved to Available -- see 10.6). Only **Product title** is required to create or save a Draft; every other field above, including Description, may be missing or incomplete until publish.
+
 ### 10.2 Listing status
 
 Listing states include:
@@ -532,20 +534,53 @@ Rules:
 - Lightweight duplicate detection/warnings may be added
 - Users can report Duplicate/Spam listings
 
+### 10.6 Draft vs Publish validation boundary
+
+**Draft listings may be incomplete, with one exception: Product title is always required.**
+
+A seller may create and save a Draft and return to finish it later. Draft creation requires only a non-blank title -- no other publish-ready field needs to already be present. A Draft may temporarily have:
+
+- No description
+- No images
+- No price
+- No category
+- No condition
+- No fulfillment method
+- Incomplete location
+- Incomplete optional vehicle/rental information
+
+Any value that **is** supplied while a listing is a Draft must still be structurally/type valid and must never violate security or ownership rules (for example: a supplied category must be a real category id; a supplied image path must belong to the seller).
+
+Strict completeness validation is enforced only at the Draft -> Available transition (publishing), not at Draft creation or while saving Draft edits. Before a listing may move from Draft to Available, it must have:
+
+- All required listing fields (10.1)
+- A valid category, listing type, and condition
+- A valid price and stock quantity
+- A valid location
+- At least one fulfillment method, where applicable
+- 1-8 successfully uploaded images, meeting the actual-item/reference-image rules (11.1, 11.2)
+- Known flaws text if condition is Fair (9.3)
+- Seller/account eligibility to publish
+- Any seller policy acceptance already required by canon before publishing (5.5)
+
+Draft is seller/admin only and is never publicly visible (10.3). A Draft never reserves inventory and never appears in public browse, search, or the public shop page. Publishing is the transition from Draft to Available.
+
 ---
 
 ## 11. Listing Images
 
 ### 11.1 Image count
 
-Each listing supports:
+Each **published** listing supports:
 
 - Minimum 1 photo
 - Maximum 8 photos
 
+This 1–8 requirement is enforced at publish time (10.6); a Draft may be saved with zero images.
+
 ### 11.2 Actual-item photo requirement
 
-Every listing must include at least one actual photo of the item being sold.
+Every **published** listing must include at least one actual photo of the item being sold. This requirement is enforced at publish time (10.6), not at Draft creation.
 
 For Pre-loved listings:
 

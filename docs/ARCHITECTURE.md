@@ -452,7 +452,13 @@ Public discovery behavior:
 - `paused`: hidden publicly.
 - `sold`: hidden from normal discovery; direct URL remains accessible.
 - `archived`: hidden from normal discovery; direct URL remains accessible with unavailable state.
-- `draft`: seller/admin only.
+- `draft`: seller/admin only, never publicly visible; never reserves inventory; never appears in browse/search/shop listings.
+
+### Draft vs publish validation boundary
+
+Draft listings may be incomplete, except title: a non-blank title is always required to create/save a Draft. Draft creation/save must not require any other publish-ready field (description, category, type, condition, price, stock, location, fulfillment method, images, vehicle/rental detail) to already be present -- only that any value actually supplied is structurally/type valid and does not violate security/ownership rules. Description becomes required at publish.
+
+Full completeness validation (all required fields, valid category/type/condition, valid price/stock, valid location, at least one fulfillment method where applicable, 1-8 successfully uploaded images meeting the actual-item/reference rules, known-flaws for Fair, seller eligibility, required policy acceptance) is enforced only at the `draft` -> `available` transition (publish), never at draft creation or draft edit.
 
 ### Listing type
 
@@ -502,7 +508,7 @@ Free listings still use normal order/request flow when category allows ordering.
 
 ### Listing images
 
-- 1 to 8 images.
+- 1 to 8 images, required at publish time -- a Draft may have zero images.
 - First/selected image is cover image.
 - Seller can reorder images.
 - Seller can change cover image.
@@ -513,7 +519,7 @@ Free listings still use normal order/request flow when category allows ordering.
 
 ### Actual-item rule
 
-Every listing must contain at least one actual-item photo.
+Every **published** listing must contain at least one actual-item photo. Enforced at publish time, not at Draft creation.
 
 Pre-loved:
 
