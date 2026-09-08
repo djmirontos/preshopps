@@ -10,7 +10,7 @@ import { ShopMessageAction } from "@/components/shop/ShopMessageAction";
 import { ShopReviewsClient } from "@/components/shop/ShopReviewsClient";
 import { getShopDetail } from "@/lib/marketplace/shop-detail";
 import { getShopListings } from "@/lib/marketplace/shop-listings";
-import { getShopReviews, type ShopReviewsCursor } from "@/lib/reviews/get-shop-reviews";
+import { getShopReviews, type ShopReviewsCursor, type ReviewRatingFilter, type ReviewSortMode } from "@/lib/reviews/get-shop-reviews";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 import type { BrowseCursor } from "@/lib/marketplace/search-params";
@@ -94,9 +94,16 @@ export default async function ShopPage({ params }: ShopPageProps) {
     return getShopListings(shop.id, LISTINGS_LIMIT, cursor);
   }
 
-  async function loadMoreReviewsAction(cursor: ShopReviewsCursor) {
+  // Serves both "Load more" (cursor supplied, current filter/sort resent)
+  // and a filter/sort change (cursor null -- ShopReviewsClient resets
+  // pagination and requests page 1 under the new selection).
+  async function fetchReviewsAction(
+    cursor: ShopReviewsCursor | null,
+    ratingFilter: ReviewRatingFilter,
+    sortMode: ReviewSortMode,
+  ) {
     "use server";
-    return getShopReviews(shop.id, REVIEWS_LIMIT, cursor);
+    return getShopReviews(shop.id, REVIEWS_LIMIT, cursor ?? undefined, ratingFilter, sortMode);
   }
 
   // Matched against the shop's own already-fetched listings page -- never
@@ -172,7 +179,7 @@ export default async function ShopPage({ params }: ShopPageProps) {
             initialReviews={reviewsResult.reviews}
             initialHadError={reviewsResult.hadError}
             initialCursor={reviewsResult.nextCursor}
-            loadMore={loadMoreReviewsAction}
+            fetchReviews={fetchReviewsAction}
           />
         </div>
       </div>
