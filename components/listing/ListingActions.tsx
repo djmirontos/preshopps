@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
+import { ReportButton } from "@/components/moderation/ReportButton";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
 import { cn } from "@/lib/cn";
 import type { ListingStatus } from "@/lib/marketplace/listing-detail";
@@ -122,6 +123,15 @@ export function ListingActions({
           onClose={() => setIsComposeOpen(false)}
         />
       )}
+
+      <ReportButton
+        targetType="listing"
+        targetId={listingId}
+        targetLabel="listing"
+        isAuthenticated={isAuthenticated}
+        hidden={isOwnListing}
+        next={next}
+      />
     </div>
   );
 }

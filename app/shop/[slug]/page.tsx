@@ -7,6 +7,7 @@ import { ShopFeaturedListing } from "@/components/shop/ShopFeaturedListing";
 import { ShopHeader } from "@/components/shop/ShopHeader";
 import { ShopListingsClient } from "@/components/shop/ShopListingsClient";
 import { ShopMessageAction } from "@/components/shop/ShopMessageAction";
+import { ShopReportAction } from "@/components/shop/ShopReportAction";
 import { ShopReviewsClient } from "@/components/shop/ShopReviewsClient";
 import { getShopDetail } from "@/lib/marketplace/shop-detail";
 import { getShopListings } from "@/lib/marketplace/shop-listings";
@@ -144,6 +145,13 @@ export default async function ShopPage({ params }: ShopPageProps) {
       />
 
       <ShopMessageAction
+        shopId={shop.id}
+        shopSlug={shop.slug}
+        isAuthenticated={Boolean(user)}
+        isOwnShop={myShop?.id === shop.id}
+      />
+
+      <ShopReportAction
         shopId={shop.id}
         shopSlug={shop.slug}
         isAuthenticated={Boolean(user)}
