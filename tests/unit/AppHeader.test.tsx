@@ -95,6 +95,16 @@ describe("AppHeader", () => {
     expect(screen.getByRole("button", { name: /sell/i })).toBeInTheDocument();
   });
 
+  it("authenticated without a shop: Sell links to /seller/shop", () => {
+    render(<AppHeader user={{ id: "u1", email: "seller@example.com" }} hasShop={false} />);
+    expect(screen.getByRole("link", { name: /sell/i })).toHaveAttribute("href", "/seller/shop");
+  });
+
+  it("authenticated with a shop: Sell links directly to /sell", () => {
+    render(<AppHeader user={{ id: "u1", email: "seller@example.com" }} hasShop />);
+    expect(screen.getByRole("link", { name: /sell/i })).toHaveAttribute("href", "/sell");
+  });
+
   it("renders an accessible search input", () => {
     render(<AppHeader user={null} />);
     expect(screen.getAllByRole("textbox", { name: /search for anything/i }).length).toBeGreaterThan(0);

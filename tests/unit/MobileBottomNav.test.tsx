@@ -78,4 +78,19 @@ describe("MobileBottomNav", () => {
     const activeLabel = screen.getByText("Home");
     expect(activeLabel.className).toContain("text-brand-link");
   });
+
+  it("authenticated without a shop: Sell links to /seller/shop", () => {
+    render(<MobileBottomNav user={{ id: "u1", email: "seller@example.com" }} hasShop={false} />);
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/seller/shop");
+  });
+
+  it("authenticated with a shop: Sell links directly to /sell", () => {
+    render(<MobileBottomNav user={{ id: "u1", email: "seller@example.com" }} hasShop />);
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/sell");
+  });
+
+  it("defaults hasShop to false when omitted, so an authenticated caller with no shop data still gets a safe destination", () => {
+    render(<MobileBottomNav user={{ id: "u1", email: "seller@example.com" }} />);
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/seller/shop");
+  });
 });

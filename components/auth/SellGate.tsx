@@ -1,32 +1,38 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { cn } from "@/lib/cn";
 
 type Props = {
   isAuthenticated: boolean;
+  /** Whether the caller's account already has a shop -- sourced from the
+   * same root-layout-level getMyShop() call the header/nav already use for
+   * other auth-aware state, never a new query of its own. Ignored for a
+   * guest (irrelevant until they sign in). */
+  hasShop: boolean;
   className: string;
   children: React.ReactNode;
 };
 
 /**
  * Shared behavior for every Sell entry point (header, hero, mobile nav
- * tab) -- there is no sell route yet, so this never navigates anywhere:
- * a guest sees the auth gate, and an authenticated user sees an honest
- * disabled state (matching the same "don't pretend it works yet" pattern
- * already established on ListingActions) rather than a dead link.
+ * tab). A guest sees the existing auth gate. An authenticated account
+ * without a shop yet is sent to /seller/shop first -- a listing always
+ * belongs to a shop, so /sell itself would otherwise redirect there
+ * anyway; going straight there avoids an extra hop. An authenticated
+ * account that already has a shop goes straight to /sell.
  */
-export function SellGate({ isAuthenticated, className, children }: Props) {
+export function SellGate({ isAuthenticated, hasShop, className, children }: Props) {
   const pathname = usePathname();
   const [isGateOpen, setIsGateOpen] = useState(false);
 
   if (isAuthenticated) {
     return (
-      <button type="button" disabled aria-disabled="true" className={cn(className, "opacity-60 cursor-not-allowed")}>
+      <Link href={hasShop ? "/sell" : "/seller/shop"} className={className}>
         {children}
-      </button>
+      </Link>
     );
   }
 

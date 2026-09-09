@@ -11,6 +11,7 @@ import { getMyFavoriteListingIds } from "@/lib/favorites/get-my-favorite-ids";
 import { CartProvider } from "@/components/cart/CartProvider";
 import { getMyCartQuantities } from "@/lib/cart/get-my-cart";
 import { getMyNotificationUnreadCount } from "@/lib/notifications/get-my-notification-unread-count";
+import { getMyShop } from "@/lib/seller/get-my-shop";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -25,20 +26,26 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // getAuthUser is React cache()-memoized, so getMyFavoriteListingIds',
-  // getMyCartQuantities', and getMyNotificationUnreadCount's internal
-  // calls to it reuse the same in-flight request rather than extra
-  // getUser() round trips; getMyCartQuantities' own get_my_cart() RPC call
-  // is itself cache()-shared with the /cart page (see
+  // getMyCartQuantities', getMyNotificationUnreadCount's, and getMyShop's
+  // internal calls to it reuse the same in-flight request rather than
+  // extra getUser() round trips; getMyCartQuantities' own get_my_cart()
+  // RPC call is itself cache()-shared with the /cart page (see
   // lib/cart/get-my-cart.ts). getMyNotificationUnreadCount is the one
   // root-level unread-count query this task's own instruction explicitly
   // allows ("a single root-level unread-count query is acceptable if
   // already supported cleanly") -- exactly one extra scalar RPC call per
-  // request, never per-notification, never polled.
-  const [user, favoritedIds, cartLines, unreadNotificationCount] = await Promise.all([
+  // request, never per-notification, never polled. getMyShop is the same
+  // narrow {id, slug, name} read already used elsewhere (lib/seller/
+  // get-my-shop.ts) for exactly this "does this account have a shop"
+  // question -- reused here, not a new query, so SellGate (via AppHeader/
+  // MobileBottomNav) can route an authenticated seller to /sell vs
+  // /seller/shop without a page-level round trip of its own.
+  const [user, favoritedIds, cartLines, unreadNotificationCount, myShop] = await Promise.all([
     getAuthUser(),
     getMyFavoriteListingIds(),
     getMyCartQuantities(),
     getMyNotificationUnreadCount(),
+    getMyShop(),
   ]);
 
   return (
@@ -47,10 +54,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <AuthStatusProvider isAuthenticated={Boolean(user)}>
           <FavoritesProvider favoritedIds={favoritedIds}>
             <CartProvider initialLines={cartLines} isAuthenticated={Boolean(user)}>
-              <AppHeader user={user} unreadNotificationCount={unreadNotificationCount} />
+              <AppHeader user={user} unreadNotificationCount={unreadNotificationCount} hasShop={Boolean(myShop)} />
               <main className="flex-1">{children}</main>
               <Footer />
-              <MobileBottomNav user={user} />
+              <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
             </CartProvider>
           </FavoritesProvider>
         </AuthStatusProvider>

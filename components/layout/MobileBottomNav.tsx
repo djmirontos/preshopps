@@ -10,6 +10,12 @@ import type { AuthUser } from "@/lib/auth/session";
 
 type Props = {
   user: AuthUser | null;
+  /** Sourced from one root-layout-level getMyShop() call, same convention
+   * as AppHeader's unreadNotificationCount -- defaults to false so every
+   * existing call site/test that doesn't pass it keeps rendering exactly
+   * as before for a guest (the only case that default is ever visible in,
+   * since SellGate ignores hasShop entirely when signed out). */
+  hasShop?: boolean;
 };
 
 const TAB_CLASS =
@@ -44,7 +50,7 @@ function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
  * (matching Search's own always-linked convention) -- the page itself
  * redirects a guest to sign-in, so no auth branching is needed here.
  */
-export function MobileBottomNav({ user }: Props) {
+export function MobileBottomNav({ user, hasShop = false }: Props) {
   const pathname = usePathname();
   const isAuthenticated = Boolean(user);
   const currentPath = pathname || "/";
@@ -79,7 +85,7 @@ export function MobileBottomNav({ user }: Props) {
         </li>
 
         <li className="flex-1">
-          <SellGate isAuthenticated={isAuthenticated} className={TAB_CLASS}>
+          <SellGate isAuthenticated={isAuthenticated} hasShop={hasShop} className={TAB_CLASS}>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-action text-brand-action-text">
               <CirclePlus className="h-5 w-5" aria-hidden="true" />
             </span>

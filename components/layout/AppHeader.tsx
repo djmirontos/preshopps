@@ -16,6 +16,9 @@ type Props = {
    * 0 so every existing call site (and every existing test) that doesn't
    * pass it keeps rendering exactly as before. */
   unreadNotificationCount?: number;
+  /** Sourced from one root-layout-level getMyShop() call, same convention
+   * as unreadNotificationCount above -- defaults to false. */
+  hasShop?: boolean;
 };
 
 /**
@@ -33,7 +36,7 @@ type Props = {
  * backend (see NotificationBellLink) -- unlike Messages, which has no
  * equivalent cheap count RPC and therefore stays badge-less.
  */
-export function AppHeader({ user, unreadNotificationCount = 0 }: Props) {
+export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }: Props) {
   const isAuthenticated = Boolean(user);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface">
@@ -97,6 +100,7 @@ export function AppHeader({ user, unreadNotificationCount = 0 }: Props) {
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
           <SellGate
             isAuthenticated={isAuthenticated}
+            hasShop={hasShop}
             className="ml-2 inline-flex h-10 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
           >
             <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />

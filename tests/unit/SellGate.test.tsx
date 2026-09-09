@@ -10,7 +10,7 @@ import { SellGate } from "@/components/auth/SellGate";
 describe("SellGate", () => {
   it("guest click opens the auth gate with Sell-specific copy", () => {
     render(
-      <SellGate isAuthenticated={false} className="test-class">
+      <SellGate isAuthenticated={false} hasShop={false} className="test-class">
         Sell
       </SellGate>,
     );
@@ -20,7 +20,7 @@ describe("SellGate", () => {
 
   it("guest gate carries the current path as next", () => {
     render(
-      <SellGate isAuthenticated={false} className="test-class">
+      <SellGate isAuthenticated={false} hasShop={false} className="test-class">
         Sell
       </SellGate>,
     );
@@ -31,23 +31,30 @@ describe("SellGate", () => {
     );
   });
 
-  it("authenticated user sees an honest disabled control, not a fake sell destination", () => {
+  it("authenticated without a shop links to /seller/shop -- a listing always needs a shop first", () => {
     render(
-      <SellGate isAuthenticated className="test-class">
+      <SellGate isAuthenticated hasShop={false} className="test-class">
         Sell
       </SellGate>,
     );
-    const control = screen.getByRole("button", { name: "Sell" });
-    expect(control).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/seller/shop");
   });
 
-  it("does not open a gate for an authenticated user", () => {
+  it("authenticated with a shop links directly to /sell", () => {
     render(
-      <SellGate isAuthenticated className="test-class">
+      <SellGate isAuthenticated hasShop className="test-class">
         Sell
       </SellGate>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sell" }));
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/sell");
+  });
+
+  it("never shows the auth gate for an authenticated user, regardless of shop state", () => {
+    render(
+      <SellGate isAuthenticated hasShop={false} className="test-class">
+        Sell
+      </SellGate>,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
