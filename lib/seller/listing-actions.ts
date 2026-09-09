@@ -442,3 +442,184 @@ export async function replaceListingImages(
     return { ok: false, code: "UNKNOWN" };
   }
 }
+
+// ============================================================
+// publishListing (publish_listing)
+// ============================================================
+
+/**
+ * Thin wrapper around publish_listing (0057/0058) -- same conventions as
+ * every other RPC wrapper here. The only parameter is the listing id;
+ * ownership, draft-only status, seller-policy acceptance, and every
+ * completeness rule are all re-derived/validated server-side, never
+ * trusted from the client. SELLER_POLICIES_NOT_ACCEPTED is a real,
+ * expected outcome (not an edge case) -- the caller is responsible for
+ * reacting to it by showing the consent flow and retrying, exactly like
+ * every other typed error code here; this wrapper does no special-casing.
+ */
+export type PublishListingErrorCode =
+  | "NOT_AUTHENTICATED"
+  | "SHOP_NOT_FOUND"
+  | "INTERACTION_BLOCKED"
+  | "LISTING_NOT_FOUND"
+  | "NOT_LISTING_OWNER"
+  | "LISTING_NOT_DRAFT"
+  | "SELLER_POLICIES_NOT_ACCEPTED"
+  | "TITLE_REQUIRED"
+  | "DESCRIPTION_REQUIRED"
+  | "CATEGORY_REQUIRED"
+  | "LISTING_TYPE_REQUIRED"
+  | "CONDITION_REQUIRED"
+  | "LISTING_TYPE_CONDITION_MISMATCH"
+  | "KNOWN_FLAWS_REQUIRED"
+  | "PRICE_REQUIRED"
+  | "STOCK_QUANTITY_INVALID"
+  | "PROVINCE_REQUIRED"
+  | "CITY_REQUIRED"
+  | "FULFILLMENT_REQUIRED"
+  | "IMAGE_REQUIRED"
+  | "TOO_MANY_LISTING_IMAGES"
+  | "REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED"
+  | "BRAND_NEW_REQUIRES_ACTUAL_IMAGE";
+
+const PUBLISH_LISTING_ERROR_CODES: ReadonlySet<string> = new Set<PublishListingErrorCode>([
+  "NOT_AUTHENTICATED",
+  "SHOP_NOT_FOUND",
+  "INTERACTION_BLOCKED",
+  "LISTING_NOT_FOUND",
+  "NOT_LISTING_OWNER",
+  "LISTING_NOT_DRAFT",
+  "SELLER_POLICIES_NOT_ACCEPTED",
+  "TITLE_REQUIRED",
+  "DESCRIPTION_REQUIRED",
+  "CATEGORY_REQUIRED",
+  "LISTING_TYPE_REQUIRED",
+  "CONDITION_REQUIRED",
+  "LISTING_TYPE_CONDITION_MISMATCH",
+  "KNOWN_FLAWS_REQUIRED",
+  "PRICE_REQUIRED",
+  "STOCK_QUANTITY_INVALID",
+  "PROVINCE_REQUIRED",
+  "CITY_REQUIRED",
+  "FULFILLMENT_REQUIRED",
+  "IMAGE_REQUIRED",
+  "TOO_MANY_LISTING_IMAGES",
+  "REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED",
+  "BRAND_NEW_REQUIRES_ACTUAL_IMAGE",
+]);
+
+export const PUBLISH_LISTING_ERROR_MESSAGES: ErrorMap<PublishListingErrorCode> = {
+  NOT_AUTHENTICATED: "Please sign in and try again.",
+  SHOP_NOT_FOUND: "Please set up your shop first.",
+  INTERACTION_BLOCKED: "You are not able to publish listings right now.",
+  LISTING_NOT_FOUND: "We couldn't find this listing. Please refresh and try again.",
+  NOT_LISTING_OWNER: "We couldn't find this listing. Please refresh and try again.",
+  LISTING_NOT_DRAFT: "Only Draft listings can be published.",
+  SELLER_POLICIES_NOT_ACCEPTED: "You must accept the Marketplace Rules and Prohibited Items Policy before publishing.",
+  TITLE_REQUIRED: "Please enter a title for your listing.",
+  DESCRIPTION_REQUIRED: "Please add a description before publishing.",
+  CATEGORY_REQUIRED: "Please choose a category before publishing.",
+  LISTING_TYPE_REQUIRED: "Please choose a listing type before publishing.",
+  CONDITION_REQUIRED: "Please choose a condition before publishing.",
+  LISTING_TYPE_CONDITION_MISMATCH: "That condition doesn't match the selected listing type.",
+  KNOWN_FLAWS_REQUIRED: "Please describe the known flaws for Fair condition.",
+  PRICE_REQUIRED: "Please enter a price before publishing.",
+  STOCK_QUANTITY_INVALID: "Stock quantity must be at least 1.",
+  PROVINCE_REQUIRED: "Please choose a province before publishing.",
+  CITY_REQUIRED: "Please choose a city or municipality before publishing.",
+  FULFILLMENT_REQUIRED: "Please select at least one fulfillment method before publishing.",
+  IMAGE_REQUIRED: "Please add at least one photo before publishing.",
+  TOO_MANY_LISTING_IMAGES: "A listing may have at most 8 photos.",
+  REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED:
+    "Pre-loved listings may only include actual-item photos. Remove or replace the reference/catalog photos in the Photos section, or switch to Brand New.",
+  BRAND_NEW_REQUIRES_ACTUAL_IMAGE: "Brand New listings need at least one actual-item photo. Mark a photo as Actual in the Photos section.",
+  UNKNOWN: "Something went wrong. Please try again.",
+};
+
+export type PublishListingResult =
+  | { ok: true; listingId: string; publicCode: string; slug: string; status: string; publishedAt: string }
+  | { ok: false; code: PublishListingErrorCode | "UNKNOWN" };
+
+type PublishListingRpcRow = { listing_id: string; public_code: string; slug: string; status: string; published_at: string };
+
+export async function publishListing(listingId: string): Promise<PublishListingResult> {
+  const supabase = createClient();
+
+  try {
+    const { data, error } = await supabase.rpc("publish_listing", {
+      p_listing_id: listingId,
+    });
+
+    if (error) {
+      console.error("publish_listing RPC failed:", error.message);
+      return { ok: false, code: toErrorCode<PublishListingErrorCode>((error as { details?: string }).details, PUBLISH_LISTING_ERROR_CODES) };
+    }
+
+    const row = ((data ?? []) as PublishListingRpcRow[])[0];
+    if (!row) {
+      return { ok: false, code: "UNKNOWN" };
+    }
+
+    return { ok: true, listingId: row.listing_id, publicCode: row.public_code, slug: row.slug, status: row.status, publishedAt: row.published_at };
+  } catch (err) {
+    console.error("publish_listing RPC threw:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "UNKNOWN" };
+  }
+}
+
+// ============================================================
+// acceptSellerPolicies (accept_seller_policies)
+// ============================================================
+
+/**
+ * Thin wrapper around accept_seller_policies (0058). No parameters -- the
+ * caller's identity comes exclusively from auth.uid() server-side, and the
+ * RPC is idempotent (accepting twice is a safe no-op that returns the
+ * original acceptance timestamp), so this wrapper never pre-reads or
+ * caches acceptance state; it is only ever called reactively, in direct
+ * response to publish_listing returning SELLER_POLICIES_NOT_ACCEPTED.
+ */
+export type AcceptSellerPoliciesErrorCode = "NOT_AUTHENTICATED" | "PROFILE_NOT_FOUND";
+
+const ACCEPT_SELLER_POLICIES_ERROR_CODES: ReadonlySet<string> = new Set<AcceptSellerPoliciesErrorCode>([
+  "NOT_AUTHENTICATED",
+  "PROFILE_NOT_FOUND",
+]);
+
+export const ACCEPT_SELLER_POLICIES_ERROR_MESSAGES: ErrorMap<AcceptSellerPoliciesErrorCode> = {
+  NOT_AUTHENTICATED: "Please sign in and try again.",
+  PROFILE_NOT_FOUND: "We couldn't find your profile. Please refresh and try again.",
+  UNKNOWN: "Something went wrong. Please try again.",
+};
+
+export type AcceptSellerPoliciesResult =
+  | { ok: true; acceptedAt: string }
+  | { ok: false; code: AcceptSellerPoliciesErrorCode | "UNKNOWN" };
+
+type AcceptSellerPoliciesRpcRow = { accepted_at: string };
+
+export async function acceptSellerPolicies(): Promise<AcceptSellerPoliciesResult> {
+  const supabase = createClient();
+
+  try {
+    const { data, error } = await supabase.rpc("accept_seller_policies");
+
+    if (error) {
+      console.error("accept_seller_policies RPC failed:", error.message);
+      return {
+        ok: false,
+        code: toErrorCode<AcceptSellerPoliciesErrorCode>((error as { details?: string }).details, ACCEPT_SELLER_POLICIES_ERROR_CODES),
+      };
+    }
+
+    const row = ((data ?? []) as AcceptSellerPoliciesRpcRow[])[0];
+    if (!row) {
+      return { ok: false, code: "UNKNOWN" };
+    }
+
+    return { ok: true, acceptedAt: row.accepted_at };
+  } catch (err) {
+    console.error("accept_seller_policies RPC threw:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "UNKNOWN" };
+  }
+}

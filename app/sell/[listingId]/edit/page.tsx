@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyListing } from "@/lib/seller/get-my-listing";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
-import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
+import { type ListingFieldValues } from "@/components/seller/ListingForm";
+import { ListingFormWithPublish } from "@/components/seller/ListingFormWithPublish";
 import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
 import { vehicleFieldValuesFromServer } from "@/components/seller/ListingVehicleFields";
 import { rentalFieldValuesFromServer } from "@/components/seller/ListingRentalFields";
@@ -126,9 +127,9 @@ export default async function SellListingEditPage({ params }: PageProps) {
       </div>
 
       <div className="mt-8">
-        <ListingForm
-          mode="edit"
+        <ListingFormWithPublish
           listingId={listing.listingId}
+          listingStatus={listing.status}
           categories={categories}
           provinces={provinces}
           initialCities={initialCities}

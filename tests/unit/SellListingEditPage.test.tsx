@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { GetMyListingResult, MyListing } from "@/lib/seller/get-my-listing";
 import type { CategoryRef, LocationRef } from "@/lib/marketplace/reference-data";
@@ -13,6 +13,9 @@ const {
   getBarangaysForCityMock,
   redirectMock,
   notFoundMock,
+  pushMock,
+  publishListingMock,
+  acceptSellerPoliciesMock,
 } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getMyListingMock: vi.fn<(listingId: string) => Promise<GetMyListingResult>>(),
@@ -26,7 +29,19 @@ const {
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  pushMock: vi.fn(),
+  publishListingMock: vi.fn(),
+  acceptSellerPoliciesMock: vi.fn(),
 }));
+
+vi.mock("@/lib/seller/listing-actions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/seller/listing-actions")>("@/lib/seller/listing-actions");
+  return {
+    ...actual,
+    publishListing: publishListingMock,
+    acceptSellerPolicies: acceptSellerPoliciesMock,
+  };
+});
 
 vi.mock("@/lib/auth/session", () => ({
   getAuthUser: getAuthUserMock,
@@ -50,7 +65,7 @@ vi.mock("@/lib/marketplace/listing-image-url", () => ({
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
   notFound: notFoundMock,
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock }),
 }));
 
 import SellListingEditPage from "@/app/sell/[listingId]/edit/page";
@@ -243,5 +258,70 @@ describe("SellListingEditPage", () => {
 
     render(await SellListingEditPage({ params: params("listing-1") }));
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  describe("Publish", () => {
+    it("shows the Publish action alongside Save Draft for a Draft listing", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByRole("button", { name: "Save Draft" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Publish Listing" })).toBeInTheDocument();
+    });
+
+    it("never shows Publish for a non-draft listing (only the not-editable state renders)", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.queryByRole("button", { name: "Publish Listing" })).not.toBeInTheDocument();
+    });
+
+    it("clicking Publish on the real page wiring calls publish_listing and navigates to the public listing on success", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+      publishListingMock.mockResolvedValue({
+        ok: true,
+        listingId: "listing-1",
+        publicCode: "PSL-ABC123",
+        slug: "nike-air-max-270",
+        status: "available",
+        publishedAt: "now",
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+      fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+      await waitFor(() => expect(publishListingMock).toHaveBeenCalledWith("listing-1"));
+      await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-ABC123"));
+    });
+
+    it("disables Publish with a clear message while the seller has unsaved Draft changes", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
+
+      expect(screen.getByRole("button", { name: "Publish Listing" })).toBeDisabled();
+      expect(screen.getByText(/save your draft changes before publishing/i)).toBeInTheDocument();
+      expect(publishListingMock).not.toHaveBeenCalled();
+    });
+
+    it("opens the seller-policy consent dialog reactively when publish_listing reports SELLER_POLICIES_NOT_ACCEPTED", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+      publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+      fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(acceptSellerPoliciesMock).not.toHaveBeenCalled();
+    });
   });
 });

@@ -894,3 +894,57 @@ describe("ListingForm -- vehicle/rental conditional fields", () => {
     expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
   });
 });
+
+describe("ListingForm -- onDirtyChange (unsaved-changes signal for a sibling Publish action)", () => {
+  it("reports not dirty right after mount, matching the just-loaded baseline", () => {
+    const onDirtyChange = vi.fn();
+    renderEditForm({ onDirtyChange });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports dirty as soon as a textual field changes from the baseline", () => {
+    const onDirtyChange = vi.fn();
+    renderEditForm({ onDirtyChange });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" }), { target: { value: "Adidas" } });
+
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("reports not dirty again once the field is changed back to the baseline value", () => {
+    const onDirtyChange = vi.fn();
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, brand: "Nike" }, onDirtyChange });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" }), { target: { value: "Adidas" } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" }), { target: { value: "Nike" } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports dirty for a vehicle/rental extension change too, not just top-level fields", () => {
+    const onDirtyChange = vi.fn();
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, categoryId: 2 }, onDirtyChange });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#vehicle-brand" }), { target: { value: "Toyota" } });
+
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("reports not dirty again after a successful Save Draft resets the baseline", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    const onDirtyChange = vi.fn();
+    renderEditForm({ onDirtyChange });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" }), { target: { value: "Adidas" } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+  });
+
+  it("never calls onDirtyChange when it isn't provided -- optional prop, no crash", () => {
+    expect(() => renderEditForm()).not.toThrow();
+  });
+});

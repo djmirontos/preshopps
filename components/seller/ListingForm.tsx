@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import {
@@ -102,6 +102,16 @@ type Props = {
    * Create mode ignores these and always starts empty. */
   initialVehicleDetails?: VehicleFieldValues;
   initialRentalDetails?: RentalFieldValues;
+  /** Edit mode only: fired whenever the form's textual/details state
+   * differs from its last-saved baseline (the same fields Save Draft's own
+   * patch diff already compares). This is the smallest signal the Publish
+   * button (a sibling component, not a child of this form) needs to know
+   * "there are unsaved changes -- publishing now would publish stale
+   * server data" without a broader shared-state overhaul. Images are
+   * excluded on purpose: ListingImagesPicker already persists every photo
+   * mutation immediately and independently, so it never contributes to
+   * this signal. */
+  onDirtyChange?: (isDirty: boolean) => void;
 };
 
 type FieldErrors = {
@@ -155,6 +165,7 @@ export function ListingForm({
   initialValues,
   initialVehicleDetails,
   initialRentalDetails,
+  onDirtyChange,
 }: Props) {
   const router = useRouter();
   const titleErrorId = useId();
@@ -433,6 +444,39 @@ export function ListingForm({
     // just-saved server truth regardless).
     router.refresh();
   }
+
+  // ===== dirty-state signal for a sibling Publish action (see onDirtyChange's own comment) =====
+  // Deliberately mirrors handleSubmit's own patch-diff predicates exactly,
+  // so "dirty" means precisely "Save Draft would send a non-empty patch" --
+  // no separate/divergent notion of unsaved changes is invented here.
+  const priceForDirtyCheck = parsePesosToCents(priceInput);
+  const originalPriceForDirtyCheck = parsePesosToCents(originalPriceInput);
+  const trimmedStockForDirtyCheck = stockQuantity.trim();
+  const stockValueForDirtyCheck = trimmedStockForDirtyCheck === "" ? null : Number(trimmedStockForDirtyCheck);
+
+  const isDirty =
+    title.trim() !== baseline.title ||
+    (description.trim().length > 0 ? description.trim() : null) !== baseline.description ||
+    (brand.trim().length > 0 ? brand.trim() : null) !== baseline.brand ||
+    categoryId !== baseline.categoryId ||
+    listingType !== baseline.listingType ||
+    condition !== baseline.condition ||
+    (priceForDirtyCheck.ok ? priceForDirtyCheck.cents : null) !== baseline.priceCents ||
+    (originalPriceForDirtyCheck.ok ? originalPriceForDirtyCheck.cents : null) !== baseline.originalPriceCents ||
+    isNegotiable !== baseline.isNegotiable ||
+    (knownFlaws.trim().length > 0 ? knownFlaws.trim() : null) !== baseline.knownFlaws ||
+    stockValueForDirtyCheck !== baseline.stockQuantity ||
+    (fulfillmentMethods.includes("meetup") && meetupNote.trim().length > 0 ? meetupNote.trim() : null) !== baseline.meetupNote ||
+    !fulfillmentSetsEqual(fulfillmentMethods, baseline.fulfillmentMethods) ||
+    location.provinceId !== baselineLocation.provinceId ||
+    location.cityId !== baselineLocation.cityId ||
+    location.barangayId !== baselineLocation.barangayId ||
+    !vehicleValuesEqual(vehicleValues, vehicleBaseline) ||
+    !rentalValuesEqual(rentalValues, rentalBaseline);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8" noValidate>
