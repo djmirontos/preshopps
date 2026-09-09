@@ -386,10 +386,20 @@ MVP categories:
 - Home & Living
 - Beauty & Personal Care
 - Sports & Hobbies
-- Cars
-- Motorcycles
-- For Rent
+- Cars (inquiry-only -- see 13.3)
+- Motorcycles (inquiry-only -- see 13.3)
+- For Rent (inquiry-only -- see 13.3)
+- Foods
+- Bicycle
+- Pet
 - Other
+
+16 categories total. Per 13.3 (Category-based transaction behavior), Cars,
+Motorcycles, and For Rent are inquiry-only: they never expose Add to
+Cart, use Message Seller/Favorite/Share/Negotiable instead, and are
+excluded from the normal cart/order-request flow. Every other category,
+including Foods, Bicycle, and Pet, uses the normal cart + order-request
+flow.
 
 Categories are admin-managed only.
 
