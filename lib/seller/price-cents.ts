@@ -23,3 +23,20 @@ export function parsePesosToCents(value: string): PesosParseResult {
   const cents = Number(wholePart) * 100 + Number(fractionPart.padEnd(2, "0").slice(0, 2));
   return { ok: true, cents };
 }
+
+/**
+ * The inverse of parsePesosToCents, for prefilling an edit form from a
+ * stored price -- also integer-only (no `cents / 100` float division used
+ * for display), so a value round-trips through parse -> format -> parse
+ * exactly. `null` (no price set) displays as an empty input, matching
+ * parsePesosToCents' own blank = null convention; ₱0 displays as "0.00",
+ * never blank, since it is a real, distinct, valid price.
+ */
+export function centsToPesosInput(cents: number | null): string {
+  if (cents === null) return "";
+  const pesos = Math.trunc(cents / 100);
+  const centavos = Math.abs(cents % 100)
+    .toString()
+    .padStart(2, "0");
+  return `${pesos}.${centavos}`;
+}

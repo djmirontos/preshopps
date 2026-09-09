@@ -158,3 +158,181 @@ export async function createListing(input: CreateListingInput): Promise<CreateLi
     return { ok: false, code: "UNKNOWN" };
   }
 }
+
+// ============================================================
+// updateListing (update_listing)
+// ============================================================
+
+/**
+ * Mirrors update_listing's own JSONB patch contract (0061/0062) exactly:
+ * a key absent from this object means "leave unchanged," a key present
+ * with `null` means "clear this field," and a key present with a real
+ * value means "set it." The caller (ListingForm) is responsible for only
+ * including keys for fields that actually changed from the loaded
+ * baseline -- this wrapper does not diff anything itself, it only ever
+ * forwards whatever patch object it is given as p_patch, unchanged. title
+ * and stock_quantity are typed as never-null here because update_listing
+ * itself rejects a null for either (TITLE_REQUIRED / STOCK_QUANTITY_INVALID)
+ * -- there is no valid patch shape that clears them.
+ */
+export type UpdateListingPatch = {
+  title?: string;
+  description?: string | null;
+  category_id?: number | null;
+  listing_type?: ListingTypeFilter | null;
+  condition?: (ListingCondition | "brand_new") | null;
+  price_cents?: number | null;
+  original_price_cents?: number | null;
+  is_negotiable?: boolean;
+  brand?: string | null;
+  known_flaws?: string | null;
+  stock_quantity?: number;
+  province_id?: number | null;
+  city_id?: number | null;
+  barangay_id?: number | null;
+  meetup_note?: string | null;
+  fulfillment_methods?: FulfillmentMethod[];
+};
+
+export type UpdateListingErrorCode =
+  | "NOT_AUTHENTICATED"
+  | "SHOP_NOT_FOUND"
+  | "INTERACTION_BLOCKED"
+  | "LISTING_NOT_FOUND"
+  | "NOT_LISTING_OWNER"
+  | "LISTING_NOT_DRAFT"
+  | "PATCH_INVALID"
+  | "TITLE_REQUIRED"
+  | "DESCRIPTION_INVALID"
+  | "CATEGORY_INVALID"
+  | "CATEGORY_NOT_FOUND"
+  | "LISTING_TYPE_INVALID"
+  | "CONDITION_INVALID"
+  | "LISTING_TYPE_CONDITION_MISMATCH"
+  | "KNOWN_FLAWS_INVALID"
+  | "KNOWN_FLAWS_REQUIRED"
+  | "PRICE_INVALID"
+  | "ORIGINAL_PRICE_INVALID"
+  | "IS_NEGOTIABLE_INVALID"
+  | "STOCK_QUANTITY_INVALID"
+  | "PROVINCE_INVALID"
+  | "CITY_INVALID"
+  | "BARANGAY_INVALID"
+  | "CITY_REQUIRES_PROVINCE"
+  | "BARANGAY_REQUIRES_CITY"
+  | "INVALID_CITY_FOR_PROVINCE"
+  | "INVALID_BARANGAY_FOR_CITY"
+  | "BRAND_INVALID"
+  | "MEETUP_NOTE_INVALID"
+  | "FULFILLMENT_INVALID"
+  | "VEHICLE_DETAILS_NOT_ALLOWED"
+  | "VEHICLE_DETAILS_INVALID"
+  | "RENTAL_DETAILS_NOT_ALLOWED"
+  | "RENTAL_DETAILS_INVALID";
+
+const UPDATE_LISTING_ERROR_CODES: ReadonlySet<string> = new Set<UpdateListingErrorCode>([
+  "NOT_AUTHENTICATED",
+  "SHOP_NOT_FOUND",
+  "INTERACTION_BLOCKED",
+  "LISTING_NOT_FOUND",
+  "NOT_LISTING_OWNER",
+  "LISTING_NOT_DRAFT",
+  "PATCH_INVALID",
+  "TITLE_REQUIRED",
+  "DESCRIPTION_INVALID",
+  "CATEGORY_INVALID",
+  "CATEGORY_NOT_FOUND",
+  "LISTING_TYPE_INVALID",
+  "CONDITION_INVALID",
+  "LISTING_TYPE_CONDITION_MISMATCH",
+  "KNOWN_FLAWS_INVALID",
+  "KNOWN_FLAWS_REQUIRED",
+  "PRICE_INVALID",
+  "ORIGINAL_PRICE_INVALID",
+  "IS_NEGOTIABLE_INVALID",
+  "STOCK_QUANTITY_INVALID",
+  "PROVINCE_INVALID",
+  "CITY_INVALID",
+  "BARANGAY_INVALID",
+  "CITY_REQUIRES_PROVINCE",
+  "BARANGAY_REQUIRES_CITY",
+  "INVALID_CITY_FOR_PROVINCE",
+  "INVALID_BARANGAY_FOR_CITY",
+  "BRAND_INVALID",
+  "MEETUP_NOTE_INVALID",
+  "FULFILLMENT_INVALID",
+  "VEHICLE_DETAILS_NOT_ALLOWED",
+  "VEHICLE_DETAILS_INVALID",
+  "RENTAL_DETAILS_NOT_ALLOWED",
+  "RENTAL_DETAILS_INVALID",
+]);
+
+export const UPDATE_LISTING_ERROR_MESSAGES: ErrorMap<UpdateListingErrorCode> = {
+  NOT_AUTHENTICATED: "Please sign in and try again.",
+  SHOP_NOT_FOUND: "Please set up your shop first.",
+  INTERACTION_BLOCKED: "You are not able to edit listings right now.",
+  LISTING_NOT_FOUND: "We couldn't find this listing. Please refresh and try again.",
+  NOT_LISTING_OWNER: "We couldn't find this listing. Please refresh and try again.",
+  LISTING_NOT_DRAFT: "Only Draft listings can be edited right now.",
+  PATCH_INVALID: "Something went wrong. Please try again.",
+  TITLE_REQUIRED: "Please enter a title for your listing.",
+  DESCRIPTION_INVALID: "Please review your description.",
+  CATEGORY_INVALID: "Please choose a category again.",
+  CATEGORY_NOT_FOUND: "That category no longer exists. Please choose again.",
+  LISTING_TYPE_INVALID: "Please choose a listing type again.",
+  CONDITION_INVALID: "Please choose a condition again.",
+  LISTING_TYPE_CONDITION_MISMATCH: "That condition doesn't match the selected listing type.",
+  KNOWN_FLAWS_INVALID: "Please review the known flaws text.",
+  KNOWN_FLAWS_REQUIRED: "Please describe the known flaws for Fair condition.",
+  PRICE_INVALID: "Please enter a valid price.",
+  ORIGINAL_PRICE_INVALID: "Original price must not be lower than the current price.",
+  IS_NEGOTIABLE_INVALID: "Please review the negotiable option.",
+  STOCK_QUANTITY_INVALID: "Stock quantity must be at least 1.",
+  PROVINCE_INVALID: "Please choose a province again.",
+  CITY_INVALID: "Please choose a city or municipality again.",
+  BARANGAY_INVALID: "Please choose a barangay again.",
+  CITY_REQUIRES_PROVINCE: "Please choose a province first.",
+  BARANGAY_REQUIRES_CITY: "Please choose a city or municipality first.",
+  INVALID_CITY_FOR_PROVINCE: "That city doesn't belong to the selected province. Please choose again.",
+  INVALID_BARANGAY_FOR_CITY: "That barangay doesn't belong to the selected city. Please choose again.",
+  BRAND_INVALID: "Please review the brand text.",
+  MEETUP_NOTE_INVALID: "Please review the meetup note.",
+  FULFILLMENT_INVALID: "Please review your selected fulfillment methods.",
+  VEHICLE_DETAILS_NOT_ALLOWED: "Vehicle details are only allowed for Cars/Motorcycles listings.",
+  VEHICLE_DETAILS_INVALID: "There was a problem with the vehicle details provided.",
+  RENTAL_DETAILS_NOT_ALLOWED: "Rental details are only allowed for For Rent listings.",
+  RENTAL_DETAILS_INVALID: "There was a problem with the rental details provided.",
+  UNKNOWN: "Something went wrong. Please try again.",
+};
+
+export type UpdateListingResult =
+  | { ok: true; listingId: string; publicCode: string; slug: string; status: string; updatedAt: string }
+  | { ok: false; code: UpdateListingErrorCode | "UNKNOWN" };
+
+type UpdateListingRpcRow = { listing_id: string; public_code: string; slug: string; status: string; updated_at: string };
+
+export async function updateListing(listingId: string, patch: UpdateListingPatch): Promise<UpdateListingResult> {
+  const supabase = createClient();
+
+  try {
+    const { data, error } = await supabase.rpc("update_listing", {
+      p_listing_id: listingId,
+      p_patch: patch,
+    });
+
+    if (error) {
+      console.error("update_listing RPC failed:", error.message);
+      return { ok: false, code: toErrorCode<UpdateListingErrorCode>((error as { details?: string }).details, UPDATE_LISTING_ERROR_CODES) };
+    }
+
+    const row = ((data ?? []) as UpdateListingRpcRow[])[0];
+    if (!row) {
+      return { ok: false, code: "UNKNOWN" };
+    }
+
+    return { ok: true, listingId: row.listing_id, publicCode: row.public_code, slug: row.slug, status: row.status, updatedAt: row.updated_at };
+  } catch (err) {
+    console.error("update_listing RPC threw:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "UNKNOWN" };
+  }
+}

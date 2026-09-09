@@ -3,8 +3,15 @@
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
-import { createListing, CREATE_LISTING_ERROR_MESSAGES, type CreateListingInput } from "@/lib/seller/listing-actions";
-import { parsePesosToCents } from "@/lib/seller/price-cents";
+import {
+  createListing,
+  updateListing,
+  CREATE_LISTING_ERROR_MESSAGES,
+  UPDATE_LISTING_ERROR_MESSAGES,
+  type CreateListingInput,
+  type UpdateListingPatch,
+} from "@/lib/seller/listing-actions";
+import { parsePesosToCents, centsToPesosInput } from "@/lib/seller/price-cents";
 import {
   LISTING_TYPE_LABELS,
   CONDITION_LABELS,
@@ -26,8 +33,34 @@ const EMPTY_LOCATION: ShopLocationValue = { provinceId: null, cityId: null, bara
 const PRELOVED_CONDITIONS = Object.keys(CONDITION_LABELS) as ListingCondition[];
 const FULFILLMENT_METHODS = Object.keys(FULFILLMENT_LABELS) as FulfillmentMethod[];
 
+/** The non-location field set shared by create and edit -- identical shape
+ * to CreateListingInput minus the location ids, which this form tracks
+ * separately (via ShopLocationFields' own ShopLocationValue) since that is
+ * the existing, already-tested convention. Reused as both the create-mode
+ * submission shape (spread together with location) and the edit-mode
+ * baseline/current values compared to build a patch. */
+export type ListingFieldValues = Omit<CreateListingInput, "provinceId" | "cityId" | "barangayId">;
+
+const CREATE_DEFAULTS: ListingFieldValues = {
+  title: "",
+  description: null,
+  categoryId: null,
+  listingType: null,
+  condition: null,
+  priceCents: null,
+  originalPriceCents: null,
+  isNegotiable: false,
+  brand: null,
+  knownFlaws: null,
+  stockQuantity: 1,
+  meetupNote: null,
+  fulfillmentMethods: [],
+};
+
 type Props = {
-  mode: "create";
+  mode: "create" | "edit";
+  /** Required when mode === "edit" -- the listing being edited. */
+  listingId?: string;
   categories: CategoryRef[];
   provinces: LocationRef[];
   initialCities: LocationRef[];
@@ -35,6 +68,10 @@ type Props = {
   loadCities: (provinceId: number) => Promise<LocationRef[]>;
   loadBarangays: (cityId: number) => Promise<LocationRef[]>;
   initialLocation?: ShopLocationValue;
+  /** Edit mode only: the listing's current saved values, used both to
+   * prefill the form and as the diff baseline for Save Draft's patch.
+   * Create mode ignores this and always starts from CREATE_DEFAULTS. */
+  initialValues?: ListingFieldValues;
 };
 
 type FieldErrors = {
@@ -44,29 +81,40 @@ type FieldErrors = {
   stockQuantity?: string;
 };
 
+function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): boolean {
+  return a.length === b.length && a.every((method) => b.includes(method));
+}
+
 /**
- * Shared Create/Edit listing form -- this first slice only implements
- * CREATE (mode is currently typed as the literal "create"; edit behavior
- * is a later slice, not stubbed in here half-built). Draft rule mirrors
- * create_listing's own canon exactly: TITLE is the only required field to
+ * Shared Create/Edit listing form. Draft rule mirrors create_listing/
+ * update_listing's own canon exactly: TITLE is the only required field to
  * Save Draft -- every other field, including known_flaws and condition,
  * may remain incomplete, and this form must never block Save Draft on any
  * of them. The only client-side guard kept for Save Draft is avoiding a
- * combination create_listing itself rejects unconditionally (not just at
- * publish): its cross-validation fires whenever BOTH listing_type and
- * condition are supplied and mismatched (LISTING_TYPE_CONDITION_MISMATCH),
- * so switching listing type away from a condition that would now conflict
- * clears that condition rather than leaving a doomed combination in state
- * -- it never forces a condition value into place. Confirmed live in
- * create_listing (0062): `if p_listing_type is not null and p_condition is
- * not null then ... end if` -- the check is skipped entirely whenever
- * either side is null, and the table's own listings_type_condition_check
- * CHECK constraint (0008) evaluates to NULL (satisfied) under the same
- * three-valued logic when condition is null, regardless of listing_type.
- * There is no DB/RPC constraint requiring listing_type='brand_new' to be
- * paired with a non-null condition at Draft time.
+ * combination the RPCs reject unconditionally (not just at publish): their
+ * cross-validation fires whenever BOTH listing_type and condition are
+ * supplied and mismatched (LISTING_TYPE_CONDITION_MISMATCH), so switching
+ * listing type clears a condition that would now conflict -- it never
+ * forces a condition value into place. Confirmed live in both
+ * create_listing and update_listing (0062): the check is skipped entirely
+ * whenever either side is null, and the table's own
+ * listings_type_condition_check CHECK constraint (0008) evaluates to NULL
+ * (satisfied) under the same three-valued logic when condition is null.
+ *
+ * Edit mode's Save Draft sends a JSONB patch matching update_listing's own
+ * omitted/set/clear contract exactly (0061/0062): a field left unchanged
+ * from the loaded baseline is omitted from the patch entirely; a field
+ * changed to a new non-null value is sent as that value; a nullable field
+ * the seller cleared back to empty is sent as an explicit `null`. This is
+ * implemented as a plain structural diff against the baseline captured at
+ * load time (or reset after a successful save) -- no sentinel values are
+ * invented anywhere; "unchanged" and "explicitly cleared" are distinguished
+ * purely by whether the current value differs from the baseline, which is
+ * exactly what update_listing itself needs to see.
  */
 export function ListingForm({
+  mode,
+  listingId,
   categories,
   provinces,
   initialCities,
@@ -74,6 +122,7 @@ export function ListingForm({
   loadCities,
   loadBarangays,
   initialLocation = EMPTY_LOCATION,
+  initialValues,
 }: Props) {
   const router = useRouter();
   const titleErrorId = useId();
@@ -81,35 +130,46 @@ export function ListingForm({
   const originalPriceErrorId = useId();
   const stockErrorId = useId();
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [brand, setBrand] = useState("");
-  const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [listingType, setListingType] = useState<ListingTypeFilter | null>(null);
-  const [condition, setCondition] = useState<ListingCondition | "brand_new" | null>(null);
-  const [knownFlaws, setKnownFlaws] = useState("");
-  const [priceInput, setPriceInput] = useState("");
-  const [originalPriceInput, setOriginalPriceInput] = useState("");
-  const [isNegotiable, setIsNegotiable] = useState(false);
-  const [stockQuantity, setStockQuantity] = useState("1");
+  const baselineValues = initialValues ?? CREATE_DEFAULTS;
+
+  const [baseline, setBaseline] = useState<ListingFieldValues>(baselineValues);
+  const [baselineLocation, setBaselineLocation] = useState<ShopLocationValue>(initialLocation);
+
+  const [title, setTitle] = useState(baselineValues.title);
+  const [description, setDescription] = useState(baselineValues.description ?? "");
+  const [brand, setBrand] = useState(baselineValues.brand ?? "");
+  const [categoryId, setCategoryId] = useState<number | null>(baselineValues.categoryId);
+  const [listingType, setListingType] = useState<ListingTypeFilter | null>(baselineValues.listingType);
+  const [condition, setCondition] = useState<ListingCondition | "brand_new" | null>(baselineValues.condition);
+  const [knownFlaws, setKnownFlaws] = useState(baselineValues.knownFlaws ?? "");
+  const [priceInput, setPriceInput] = useState(centsToPesosInput(baselineValues.priceCents));
+  const [originalPriceInput, setOriginalPriceInput] = useState(centsToPesosInput(baselineValues.originalPriceCents));
+  const [isNegotiable, setIsNegotiable] = useState(baselineValues.isNegotiable);
+  const [stockQuantity, setStockQuantity] = useState(
+    baselineValues.stockQuantity !== null ? String(baselineValues.stockQuantity) : "1",
+  );
   const [location, setLocation] = useState<ShopLocationValue>(initialLocation);
-  const [fulfillmentMethods, setFulfillmentMethods] = useState<FulfillmentMethod[]>([]);
-  const [meetupNote, setMeetupNote] = useState("");
+  const [fulfillmentMethods, setFulfillmentMethods] = useState<FulfillmentMethod[]>(baselineValues.fulfillmentMethods);
+  const [meetupNote, setMeetupNote] = useState(baselineValues.meetupNote ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleListingTypeChange(rawValue: string) {
     const next = rawValue === "" ? null : (rawValue as ListingTypeFilter);
     setListingType(next);
     // Never auto-fill a condition -- only clear one that would now conflict
-    // with the new type (create_listing rejects a mismatched pair outright
+    // with the new type (both RPCs reject a mismatched pair outright
     // whenever both are supplied, Draft included; a null condition never
-    // triggers that check, so leaving it null is always safe here). A
-    // preloved condition value can never coexist with "brand_new" in state
-    // by construction (the preloved select never offers "brand_new" as an
-    // option), so only this one direction needs guarding.
-    if (next === "brand_new" && condition !== null) {
+    // triggers that check, so leaving it null is always safe here). Edit
+    // mode can load a listing whose saved condition is already "brand_new"
+    // (a fully valid prior state), so both directions need guarding here,
+    // unlike a fresh create-mode form where "brand_new" can never appear
+    // in state except via this same guard.
+    if (next === "brand_new" && condition !== null && condition !== "brand_new") {
+      setCondition(null);
+    } else if (next !== "brand_new" && condition === "brand_new") {
       setCondition(null);
     }
   }
@@ -121,6 +181,7 @@ export function ListingForm({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitError(null);
+    setSaveStatus("idle");
 
     const errors: FieldErrors = {};
     if (title.trim().length === 0) {
@@ -147,17 +208,24 @@ export function ListingForm({
       errors.originalPrice = "Original price must not be lower than the current price.";
     }
 
+    // Stock quantity can never be cleared once a listing exists: create_listing
+    // is happy to default a blank value to 1, but update_listing's patch
+    // contract rejects an explicit null for it outright (STOCK_QUANTITY_INVALID)
+    // -- so in edit mode a blank stock field is invalid, not "leave unchanged."
     const trimmedStock = stockQuantity.trim();
     const stockValue = trimmedStock === "" ? null : Number(trimmedStock);
-    if (stockValue !== null && (!Number.isInteger(stockValue) || stockValue < 1)) {
+    if (stockValue === null) {
+      if (mode === "edit") {
+        errors.stockQuantity = "Stock quantity must be at least 1.";
+      }
+    } else if (!Number.isInteger(stockValue) || stockValue < 1) {
       errors.stockQuantity = "Stock quantity must be at least 1.";
     }
 
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
-    setIsSubmitting(true);
-    const input: CreateListingInput = {
+    const currentValues: ListingFieldValues = {
       title: title.trim(),
       description: description.trim().length > 0 ? description.trim() : null,
       categoryId,
@@ -169,22 +237,76 @@ export function ListingForm({
       brand: brand.trim().length > 0 ? brand.trim() : null,
       knownFlaws: knownFlaws.trim().length > 0 ? knownFlaws.trim() : null,
       stockQuantity: stockValue,
-      provinceId: location.provinceId,
-      cityId: location.cityId,
-      barangayId: location.barangayId,
       meetupNote: fulfillmentMethods.includes("meetup") && meetupNote.trim().length > 0 ? meetupNote.trim() : null,
       fulfillmentMethods,
     };
 
-    const result = await createListing(input);
-    setIsSubmitting(false);
+    if (mode === "create") {
+      setIsSubmitting(true);
+      const input: CreateListingInput = {
+        ...currentValues,
+        provinceId: location.provinceId,
+        cityId: location.cityId,
+        barangayId: location.barangayId,
+      };
+      const result = await createListing(input);
+      setIsSubmitting(false);
 
-    if (!result.ok) {
-      setSubmitError(CREATE_LISTING_ERROR_MESSAGES[result.code]);
+      if (!result.ok) {
+        setSubmitError(CREATE_LISTING_ERROR_MESSAGES[result.code]);
+        return;
+      }
+
+      router.push(`/sell/${result.listingId}/edit`);
       return;
     }
 
-    router.push(`/sell/${result.listingId}/edit`);
+    // ===== edit mode: build a patch containing only what actually changed =====
+    const patch: UpdateListingPatch = {};
+
+    if (currentValues.title !== baseline.title) patch.title = currentValues.title;
+    if (currentValues.description !== baseline.description) patch.description = currentValues.description;
+    if (currentValues.categoryId !== baseline.categoryId) patch.category_id = currentValues.categoryId;
+    if (currentValues.listingType !== baseline.listingType) patch.listing_type = currentValues.listingType;
+    if (currentValues.condition !== baseline.condition) patch.condition = currentValues.condition;
+    if (currentValues.priceCents !== baseline.priceCents) patch.price_cents = currentValues.priceCents;
+    if (currentValues.originalPriceCents !== baseline.originalPriceCents) {
+      patch.original_price_cents = currentValues.originalPriceCents;
+    }
+    if (currentValues.isNegotiable !== baseline.isNegotiable) patch.is_negotiable = currentValues.isNegotiable;
+    if (currentValues.brand !== baseline.brand) patch.brand = currentValues.brand;
+    if (currentValues.knownFlaws !== baseline.knownFlaws) patch.known_flaws = currentValues.knownFlaws;
+    // Guarded above: stockValue is never null when mode === "edit" reaches here.
+    if (currentValues.stockQuantity !== baseline.stockQuantity) patch.stock_quantity = currentValues.stockQuantity!;
+    if (currentValues.meetupNote !== baseline.meetupNote) patch.meetup_note = currentValues.meetupNote;
+
+    if (location.provinceId !== baselineLocation.provinceId) patch.province_id = location.provinceId;
+    if (location.cityId !== baselineLocation.cityId) patch.city_id = location.cityId;
+    if (location.barangayId !== baselineLocation.barangayId) patch.barangay_id = location.barangayId;
+
+    if (!fulfillmentSetsEqual(currentValues.fulfillmentMethods, baseline.fulfillmentMethods)) {
+      patch.fulfillment_methods = currentValues.fulfillmentMethods;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      setSaveStatus("no_changes");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const result = await updateListing(listingId!, patch);
+    setIsSubmitting(false);
+
+    if (!result.ok) {
+      setSubmitError(UPDATE_LISTING_ERROR_MESSAGES[result.code]);
+      return;
+    }
+
+    // Reset the baseline to what was just saved, so an immediate second
+    // Save Draft with no further edits correctly detects no changes.
+    setBaseline(currentValues);
+    setBaselineLocation(location);
+    setSaveStatus("saved");
   }
 
   return (
@@ -295,7 +417,7 @@ export function ListingForm({
             ) : (
               <select
                 id="listing-condition"
-                value={condition ?? ""}
+                value={condition === "brand_new" ? "" : (condition ?? "")}
                 onChange={(event) => setCondition(event.target.value === "" ? null : (event.target.value as ListingCondition))}
                 disabled={listingType === null}
                 className={SELECT_CLASS}
@@ -417,7 +539,9 @@ export function ListingForm({
 
       <section>
         <h2 className="text-sm font-semibold text-ink">Location</h2>
-        <p className="mt-1 text-xs text-ink-muted">Defaults to your shop&rsquo;s location -- change it if this item is elsewhere.</p>
+        <p className="mt-1 text-xs text-ink-muted">
+          {mode === "create" ? "Defaults to your shop’s location -- change it if this item is elsewhere." : "Change any level, or clear it back to unset."}
+        </p>
         <div className="mt-3">
           <ShopLocationFields
             provinces={provinces}
@@ -466,6 +590,8 @@ export function ListingForm({
       </section>
 
       {submitError && <p className="text-sm text-danger">{submitError}</p>}
+      {saveStatus === "saved" && <p className="text-sm text-success">Draft saved</p>}
+      {saveStatus === "no_changes" && <p className="text-sm text-ink-muted">No changes to save</p>}
 
       <div className="flex items-center gap-3">
         <button

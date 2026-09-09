@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, createListingMock } = vi.hoisted(() => ({
+const { pushMock, createListingMock, updateListingMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   createListingMock: vi.fn(),
+  updateListingMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -15,15 +16,32 @@ vi.mock("@/lib/seller/listing-actions", async () => {
   return {
     ...actual,
     createListing: createListingMock,
+    updateListing: updateListingMock,
   };
 });
 
-import { ListingForm } from "@/components/seller/ListingForm";
+import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
 
 const CATEGORIES = [{ id: 1, slug: "women", name: "Women" }];
 const PROVINCES = [{ id: 1, name: "Misamis Occidental" }];
 const CITIES = [{ id: 10, name: "Tangub City" }];
 const BARANGAYS = [{ id: 100, name: "Barangay Uno" }];
+
+const EMPTY_VALUES: ListingFieldValues = {
+  title: "Existing Title",
+  description: null,
+  categoryId: null,
+  listingType: null,
+  condition: null,
+  priceCents: null,
+  originalPriceCents: null,
+  isNegotiable: false,
+  brand: null,
+  knownFlaws: null,
+  stockQuantity: 1,
+  meetupNote: null,
+  fulfillmentMethods: [],
+};
 
 function renderForm(overrides: Partial<React.ComponentProps<typeof ListingForm>> = {}) {
   return render(
@@ -35,6 +53,23 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof ListingForm>>
       initialBarangays={[]}
       loadCities={vi.fn().mockResolvedValue(CITIES)}
       loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+      {...overrides}
+    />,
+  );
+}
+
+function renderEditForm(overrides: Partial<React.ComponentProps<typeof ListingForm>> = {}) {
+  return render(
+    <ListingForm
+      mode="edit"
+      listingId="listing-1"
+      categories={CATEGORIES}
+      provinces={PROVINCES}
+      initialCities={[]}
+      initialBarangays={[]}
+      loadCities={vi.fn().mockResolvedValue(CITIES)}
+      loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+      initialValues={EMPTY_VALUES}
       {...overrides}
     />,
   );
@@ -330,5 +365,281 @@ describe("ListingForm -- create mode", () => {
     expect(screen.getByLabelText(/^price \(optional\)/i)).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Save Draft" });
     expect(submit.className).toContain("h-11");
+  });
+});
+
+describe("ListingForm -- edit mode: patch-diff semantics", () => {
+  it("prefills every field from initialValues", () => {
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, title: "Nike Air Max 270", description: "Great shoes", brand: "Nike", stockQuantity: 3 },
+    });
+
+    expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
+    expect(screen.getByLabelText(/description/i)).toHaveValue("Great shoes");
+    expect(screen.getByLabelText(/brand/i)).toHaveValue("Nike");
+    expect(screen.getByLabelText(/stock quantity/i)).toHaveValue("3");
+  });
+
+  it("does not call update_listing when nothing changed -- shows 'No changes to save' instead", async () => {
+    renderEditForm();
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("No changes to save")).toBeInTheDocument();
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("sends only the changed field in the patch, omitting every untouched key", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { brand: "Adidas" }));
+  });
+
+  it("sends an explicit null when a previously-set nullable field is cleared", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, brand: "Nike" } });
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { brand: null }));
+  });
+
+  it("sends a changed price as cents, and omits price entirely when unchanged", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, priceCents: 1000 } });
+
+    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "19.99" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { price_cents: 1999 }));
+  });
+
+  it("clears a previously-set price back to null when blanked", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, priceCents: 1999 } });
+
+    expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("19.99");
+    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { price_cents: null }));
+  });
+
+  it("an unchanged blank price is omitted from the patch entirely", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Something" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { brand: "Something" }));
+    const [, patch] = updateListingMock.mock.calls[0];
+    expect(patch).not.toHaveProperty("price_cents");
+  });
+
+  it("preserves the original-price relational error using the current values", async () => {
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, priceCents: 1000 } });
+
+    fireEvent.change(screen.getByLabelText(/original price/i), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Original price must not be lower than the current price.")).toBeInTheDocument();
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("title cannot be cleared -- blanking it blocks Save Draft client-side", async () => {
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Please enter a title for your listing.")).toBeInTheDocument();
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("stock quantity cannot be blanked in edit mode -- a blank field is invalid, not 'leave unchanged'", async () => {
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, stockQuantity: 5 } });
+
+    fireEvent.change(screen.getByLabelText(/stock quantity/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Stock quantity must be at least 1.")).toBeInTheDocument();
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("sends a changed stock quantity", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, stockQuantity: 5 } });
+
+    fireEvent.change(screen.getByLabelText(/stock quantity/i), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { stock_quantity: 8 }));
+  });
+
+  it("fulfillment methods unchanged: omitted from the patch", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, fulfillmentMethods: ["meetup"], brand: "changed-anchor" } });
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Something else" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalled());
+    const [, patch] = updateListingMock.mock.calls[0];
+    expect(patch).not.toHaveProperty("fulfillment_methods");
+  });
+
+  it("fulfillment methods changed to empty: sends an explicit empty array", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, fulfillmentMethods: ["meetup"] } });
+
+    fireEvent.click(screen.getByLabelText("Meetup"));
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { fulfillment_methods: [] }));
+  });
+
+  it("fulfillment methods replaced with a new selection: sends the new array", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, fulfillmentMethods: ["meetup"] } });
+
+    fireEvent.click(screen.getByLabelText("Shipping"));
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { fulfillment_methods: expect.arrayContaining(["meetup", "shipping"]) }),
+    );
+  });
+
+  it("clearing barangay alone sends only barangay_id: null", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialCities: CITIES,
+      initialBarangays: BARANGAYS,
+      initialLocation: { provinceId: 1, cityId: 10, barangayId: 100 },
+    });
+
+    fireEvent.change(screen.getByLabelText(/barangay/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { barangay_id: null }));
+  });
+
+  it("clearing city sends city_id: null and cascades barangay_id: null too", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialCities: CITIES,
+      initialBarangays: BARANGAYS,
+      initialLocation: { provinceId: 1, cityId: 10, barangayId: 100 },
+    });
+
+    fireEvent.change(screen.getByLabelText("City / Municipality"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { city_id: null, barangay_id: null }));
+  });
+
+  it("clearing province sends province_id: null and cascades city_id/barangay_id: null too", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialCities: CITIES,
+      initialBarangays: BARANGAYS,
+      initialLocation: { provinceId: 1, cityId: 10, barangayId: 100 },
+    });
+
+    fireEvent.change(screen.getByLabelText("Province"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { province_id: null, city_id: null, barangay_id: null }),
+    );
+  });
+
+  it("selecting a new coherent province/city sends both changed ids", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    const loadCities = vi.fn().mockResolvedValue([{ id: 20, name: "Ozamiz City" }]);
+    renderEditForm({
+      initialCities: CITIES,
+      initialLocation: { provinceId: 1, cityId: 10, barangayId: null },
+      loadCities,
+    });
+
+    fireEvent.change(screen.getByLabelText("Province"), { target: { value: "1" } });
+    await waitFor(() => expect(screen.getByRole("option", { name: "Ozamiz City" })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("City / Municipality"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { city_id: 20 }));
+  });
+
+  it("shows 'Draft saved' after a successful save, and does not redirect away", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Draft saved")).toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("resets the baseline after a successful save -- an immediate second Save with no further edits sends no patch", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("No changes to save")).toBeInTheDocument();
+    expect(updateListingMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps an update_listing failure to a friendly message without redirecting", async () => {
+    updateListingMock.mockResolvedValue({ ok: false, code: "LISTING_NOT_DRAFT" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("never calls create_listing in edit mode", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalled());
+    expect(createListingMock).not.toHaveBeenCalled();
+  });
+
+  it("renders no Publish button and no image/vehicle/rental UI in edit mode either", () => {
+    renderEditForm();
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/upload.*photo/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/mileage/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/rental price/i)).not.toBeInTheDocument();
+  });
+
+  it("loading a listing with condition already 'brand_new' and then switching listing type away clears the now-conflicting condition", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, listingType: "brand_new", condition: "brand_new" } });
+
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "preloved", condition: null }),
+    );
   });
 });
