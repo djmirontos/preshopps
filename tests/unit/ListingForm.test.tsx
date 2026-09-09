@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, createListingMock, updateListingMock } = vi.hoisted(() => ({
+const { pushMock, refreshMock, createListingMock, updateListingMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
+  refreshMock: vi.fn(),
   createListingMock: vi.fn(),
   updateListingMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, refresh: refreshMock }),
 }));
 
 vi.mock("@/lib/seller/listing-actions", async () => {
@@ -380,12 +381,13 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     expect(screen.getByLabelText(/stock quantity/i)).toHaveValue("3");
   });
 
-  it("does not call update_listing when nothing changed -- shows 'No changes to save' instead", async () => {
+  it("does not call update_listing when nothing changed -- shows 'No changes to save' instead, and never refreshes", async () => {
     renderEditForm();
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updateListingMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("sends only the changed field in the patch, omitting every untouched key", async () => {
@@ -576,7 +578,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { city_id: 20 }));
   });
 
-  it("shows 'Draft saved' after a successful save, and does not redirect away", async () => {
+  it("shows 'Draft saved' after a successful save, refreshes the page, and does not redirect away", async () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm();
 
@@ -585,23 +587,29 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
 
     expect(await screen.findByText("Draft saved")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+    // router.refresh() re-reads server data for the route -- it must never
+    // itself trigger another update_listing call.
+    expect(updateListingMock).toHaveBeenCalledTimes(1);
   });
 
-  it("resets the baseline after a successful save -- an immediate second Save with no further edits sends no patch", async () => {
+  it("resets the baseline after a successful save -- an immediate second Save with no further edits sends no patch and does not refresh again", async () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm();
 
     fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updateListingMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it("maps an update_listing failure to a friendly message without redirecting", async () => {
+  it("maps an update_listing failure to a friendly message without redirecting or refreshing", async () => {
     updateListingMock.mockResolvedValue({ ok: false, code: "LISTING_NOT_DRAFT" });
     renderEditForm();
 
@@ -610,6 +618,44 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
 
     expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("Pre-loved -> Brand New -> Save Draft: saves the new type/condition and refreshes so sibling server data (e.g. the images picker) picks up the change", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, listingType: "preloved", condition: "good" } });
+
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "brand_new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "brand_new", condition: null }),
+    );
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("Brand New -> Pre-loved -> Save Draft: saves the new type/condition and refreshes so sibling server data picks up the change", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, listingType: "brand_new", condition: "brand_new" } });
+
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "preloved", condition: null }),
+    );
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("create mode never calls router.refresh() on success -- only router.push()", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-99", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sell/listing-99/edit"));
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("never calls create_listing in edit mode", async () => {

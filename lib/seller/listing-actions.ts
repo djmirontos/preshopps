@@ -336,3 +336,95 @@ export async function updateListing(listingId: string, patch: UpdateListingPatch
     return { ok: false, code: "UNKNOWN" };
   }
 }
+
+// ============================================================
+// replaceListingImages (replace_listing_images)
+// ============================================================
+
+/**
+ * Thin wrapper around replace_listing_images (0060), same conventions as
+ * every other RPC wrapper here. Always sends the COMPLETE desired ordered
+ * image set -- position is the array index (position 0 is the cover by
+ * construction) and `referenceFlags` is a parallel array of equal length,
+ * exactly matching the RPC's own contract. The caller (ListingImagesPicker)
+ * is responsible for only ever including ready/uploaded paths -- this
+ * wrapper does not filter or reorder anything itself.
+ */
+export type ReplaceListingImagesErrorCode =
+  | "NOT_AUTHENTICATED"
+  | "SHOP_NOT_FOUND"
+  | "INTERACTION_BLOCKED"
+  | "LISTING_NOT_FOUND"
+  | "NOT_LISTING_OWNER"
+  | "LISTING_NOT_DRAFT"
+  | "TOO_MANY_LISTING_IMAGES"
+  | "IMAGE_ARRAYS_LENGTH_MISMATCH"
+  | "LISTING_IMAGE_PATH_INVALID"
+  | "DUPLICATE_LISTING_IMAGE_PATH";
+
+const REPLACE_LISTING_IMAGES_ERROR_CODES: ReadonlySet<string> = new Set<ReplaceListingImagesErrorCode>([
+  "NOT_AUTHENTICATED",
+  "SHOP_NOT_FOUND",
+  "INTERACTION_BLOCKED",
+  "LISTING_NOT_FOUND",
+  "NOT_LISTING_OWNER",
+  "LISTING_NOT_DRAFT",
+  "TOO_MANY_LISTING_IMAGES",
+  "IMAGE_ARRAYS_LENGTH_MISMATCH",
+  "LISTING_IMAGE_PATH_INVALID",
+  "DUPLICATE_LISTING_IMAGE_PATH",
+]);
+
+export const REPLACE_LISTING_IMAGES_ERROR_MESSAGES: ErrorMap<ReplaceListingImagesErrorCode> = {
+  NOT_AUTHENTICATED: "Please sign in and try again.",
+  SHOP_NOT_FOUND: "Please set up your shop first.",
+  INTERACTION_BLOCKED: "You are not able to edit listings right now.",
+  LISTING_NOT_FOUND: "We couldn't find this listing. Please refresh and try again.",
+  NOT_LISTING_OWNER: "We couldn't find this listing. Please refresh and try again.",
+  LISTING_NOT_DRAFT: "Only Draft listings can be edited right now.",
+  TOO_MANY_LISTING_IMAGES: "A listing may have at most 8 photos.",
+  IMAGE_ARRAYS_LENGTH_MISMATCH: "Something went wrong with your photos. Please try again.",
+  LISTING_IMAGE_PATH_INVALID: "There was a problem with one of your photos. Please try again.",
+  DUPLICATE_LISTING_IMAGE_PATH: "The same photo was added more than once.",
+  UNKNOWN: "Something went wrong. Please try again.",
+};
+
+export type ReplaceListingImagesResult =
+  | { ok: true; listingId: string; imageCount: number; coverImageId: string | null }
+  | { ok: false; code: ReplaceListingImagesErrorCode | "UNKNOWN" };
+
+type ReplaceListingImagesRpcRow = { listing_id: string; image_count: number; cover_image_id: string | null };
+
+export async function replaceListingImages(
+  listingId: string,
+  imagePaths: string[],
+  referenceFlags: boolean[],
+): Promise<ReplaceListingImagesResult> {
+  const supabase = createClient();
+
+  try {
+    const { data, error } = await supabase.rpc("replace_listing_images", {
+      p_listing_id: listingId,
+      p_image_paths: imagePaths,
+      p_reference_flags: referenceFlags,
+    });
+
+    if (error) {
+      console.error("replace_listing_images RPC failed:", error.message);
+      return {
+        ok: false,
+        code: toErrorCode<ReplaceListingImagesErrorCode>((error as { details?: string }).details, REPLACE_LISTING_IMAGES_ERROR_CODES),
+      };
+    }
+
+    const row = ((data ?? []) as ReplaceListingImagesRpcRow[])[0];
+    if (!row) {
+      return { ok: false, code: "UNKNOWN" };
+    }
+
+    return { ok: true, listingId: row.listing_id, imageCount: row.image_count, coverImageId: row.cover_image_id };
+  } catch (err) {
+    console.error("replace_listing_images RPC threw:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "UNKNOWN" };
+  }
+}

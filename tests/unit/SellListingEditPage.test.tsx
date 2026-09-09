@@ -43,6 +43,10 @@ vi.mock("@/lib/marketplace/reference-data", () => ({
   getBarangaysForCity: getBarangaysForCityMock,
 }));
 
+vi.mock("@/lib/marketplace/listing-image-url", () => ({
+  getListingImageUrl: (path: string | null) => (path ? `https://example.supabase.co/storage/v1/object/public/${path}` : undefined),
+}));
+
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
   notFound: notFoundMock,
@@ -129,6 +133,30 @@ describe("SellListingEditPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Edit Draft" })).toBeInTheDocument();
     expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
     expect(screen.getByRole("button", { name: "Save Draft" })).toBeInTheDocument();
+  });
+
+  it("renders the images picker showing the listing's existing photos", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+    getMyListingMock.mockResolvedValue({
+      status: "found",
+      listing: sampleListing({
+        images: [{ id: "img-1", storagePath: "listing-images/u1/listing-1/a.jpg", position: 0, isReferenceImage: false }],
+      }),
+    });
+
+    render(await SellListingEditPage({ params: params("listing-1") }));
+
+    expect(screen.getByText("1 of 8 photos")).toBeInTheDocument();
+    expect(screen.getByText("Cover")).toBeInTheDocument();
+  });
+
+  it("renders the images picker in a zero-photo state for a listing with no images yet", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ images: [] }) });
+
+    render(await SellListingEditPage({ params: params("listing-1") }));
+
+    expect(screen.getByText("0 of 8 photos")).toBeInTheDocument();
   });
 
   it("prefills an incomplete Draft's blank/null fields as empty, without crashing", async () => {

@@ -4,6 +4,8 @@ import { getAuthUser } from "@/lib/auth/session";
 import { getMyListing } from "@/lib/seller/get-my-listing";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
+import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
+import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 
 export const metadata = { title: "Edit Draft | Preshopps" };
 
@@ -107,6 +109,21 @@ export default async function SellListingEditPage({ params }: PageProps) {
       <p className="mt-1 text-sm text-ink-secondary">Only a title is required -- fill in the rest whenever you&rsquo;re ready.</p>
 
       <div className="mt-6">
+        <ListingImagesPicker
+          listingId={listing.listingId}
+          ownerUserId={user.id}
+          listingType={listing.listingType}
+          initialImages={listing.images.map((image) => ({
+            id: image.id,
+            storagePath: image.storagePath,
+            position: image.position,
+            isReferenceImage: image.isReferenceImage,
+            url: getListingImageUrl(image.storagePath) ?? "",
+          }))}
+        />
+      </div>
+
+      <div className="mt-8">
         <ListingForm
           mode="edit"
           listingId={listing.listingId}

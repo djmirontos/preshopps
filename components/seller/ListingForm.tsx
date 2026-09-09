@@ -307,6 +307,21 @@ export function ListingForm({
     setBaseline(currentValues);
     setBaselineLocation(location);
     setSaveStatus("saved");
+
+    // Re-fetch the page's own server data (get_my_listing) so sibling
+    // Server Components on this same route -- specifically
+    // ListingImagesPicker's `listingType` prop -- pick up whatever the
+    // seller just changed here (e.g. Pre-loved -> Brand New) without a
+    // manual reload. router.refresh() only re-runs the Server Component
+    // tree for the current route; it does not re-submit this form, call
+    // update_listing again, or navigate anywhere, and only ever runs after
+    // a confirmed successful save (the no-change and failure paths above
+    // both return before reaching this point). ListingForm's own fields
+    // are unaffected -- its state is seeded from props once at mount, not
+    // resubscribed to prop changes, so the fresh props this triggers never
+    // overwrite what the seller is looking at (which already matches the
+    // just-saved server truth regardless).
+    router.refresh();
   }
 
   return (
