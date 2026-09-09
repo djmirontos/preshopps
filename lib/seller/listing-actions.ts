@@ -623,3 +623,92 @@ export async function acceptSellerPolicies(): Promise<AcceptSellerPoliciesResult
     return { ok: false, code: "UNKNOWN" };
   }
 }
+
+// ============================================================
+// updateListingStatus (update_listing_status)
+// ============================================================
+
+/**
+ * Thin wrapper around update_listing_status (0064) -- the seller's only
+ * status-mutation path (pause/resume/mark sold/archive). Draft -> Available
+ * remains publish_listing's exclusive job; 'draft' and 'reserved' are never
+ * valid targets here (TARGET_STATUS_NOT_ALLOWED), matching the RPC's own
+ * structural rejection. The RPC is idempotent (was_already_in_status), and
+ * itself re-derives ownership/reservation state from the locked row --
+ * this wrapper never sends more than listing id + target status.
+ */
+export type SellerListingStatus = "available" | "paused" | "sold" | "archived";
+
+export type UpdateListingStatusErrorCode =
+  | "NOT_AUTHENTICATED"
+  | "SHOP_NOT_FOUND"
+  | "INTERACTION_BLOCKED"
+  | "LISTING_NOT_FOUND"
+  | "NOT_LISTING_OWNER"
+  | "TARGET_STATUS_NOT_ALLOWED"
+  | "LISTING_HAS_ACTIVE_RESERVATION"
+  | "INVALID_STATUS_TRANSITION";
+
+const UPDATE_LISTING_STATUS_ERROR_CODES: ReadonlySet<string> = new Set<UpdateListingStatusErrorCode>([
+  "NOT_AUTHENTICATED",
+  "SHOP_NOT_FOUND",
+  "INTERACTION_BLOCKED",
+  "LISTING_NOT_FOUND",
+  "NOT_LISTING_OWNER",
+  "TARGET_STATUS_NOT_ALLOWED",
+  "LISTING_HAS_ACTIVE_RESERVATION",
+  "INVALID_STATUS_TRANSITION",
+]);
+
+export const UPDATE_LISTING_STATUS_ERROR_MESSAGES: ErrorMap<UpdateListingStatusErrorCode> = {
+  NOT_AUTHENTICATED: "Please sign in and try again.",
+  SHOP_NOT_FOUND: "Please set up your shop first.",
+  INTERACTION_BLOCKED: "You are not able to manage listings right now.",
+  LISTING_NOT_FOUND: "We couldn't find this listing. Please refresh and try again.",
+  NOT_LISTING_OWNER: "We couldn't find this listing. Please refresh and try again.",
+  TARGET_STATUS_NOT_ALLOWED: "That status cannot be set directly.",
+  LISTING_HAS_ACTIVE_RESERVATION: "This listing has an active order reservation and can't be changed right now.",
+  INVALID_STATUS_TRANSITION: "That status change isn't allowed from the listing's current status.",
+  UNKNOWN: "Something went wrong. Please try again.",
+};
+
+export type UpdateListingStatusResult =
+  | { ok: true; listingId: string; status: SellerListingStatus; wasAlreadyInStatus: boolean; updatedAt: string }
+  | { ok: false; code: UpdateListingStatusErrorCode | "UNKNOWN" };
+
+type UpdateListingStatusRpcRow = { listing_id: string; status: SellerListingStatus; was_already_in_status: boolean; updated_at: string };
+
+export async function updateListingStatus(listingId: string, status: SellerListingStatus): Promise<UpdateListingStatusResult> {
+  const supabase = createClient();
+
+  try {
+    const { data, error } = await supabase.rpc("update_listing_status", {
+      p_listing_id: listingId,
+      p_status: status,
+    });
+
+    if (error) {
+      console.error("update_listing_status RPC failed:", error.message);
+      return {
+        ok: false,
+        code: toErrorCode<UpdateListingStatusErrorCode>((error as { details?: string }).details, UPDATE_LISTING_STATUS_ERROR_CODES),
+      };
+    }
+
+    const row = ((data ?? []) as UpdateListingStatusRpcRow[])[0];
+    if (!row) {
+      return { ok: false, code: "UNKNOWN" };
+    }
+
+    return {
+      ok: true,
+      listingId: row.listing_id,
+      status: row.status,
+      wasAlreadyInStatus: row.was_already_in_status,
+      updatedAt: row.updated_at,
+    };
+  } catch (err) {
+    console.error("update_listing_status RPC threw:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "UNKNOWN" };
+  }
+}

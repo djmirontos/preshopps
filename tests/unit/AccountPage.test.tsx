@@ -70,6 +70,13 @@ describe("AccountPage", () => {
     expect(screen.getByRole("link", { name: "My Shop" })).toHaveAttribute("href", "/seller/shop");
   });
 
+  it("renders a My Listings link pointing at /seller/listings for an authenticated user", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+    render(await AccountPage());
+
+    expect(screen.getByRole("link", { name: "My Listings" })).toHaveAttribute("href", "/seller/listings");
+  });
+
   it("never renders account content before the server auth check resolves negatively", async () => {
     getAuthUserMock.mockResolvedValue(null);
     await expect(AccountPage()).rejects.toThrow();
