@@ -5,6 +5,8 @@ import { getMyListing } from "@/lib/seller/get-my-listing";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
 import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
+import { vehicleFieldValuesFromServer } from "@/components/seller/ListingVehicleFields";
+import { rentalFieldValuesFromServer } from "@/components/seller/ListingRentalFields";
 import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 
 export const metadata = { title: "Edit Draft | Preshopps" };
@@ -135,6 +137,8 @@ export default async function SellListingEditPage({ params }: PageProps) {
           loadBarangays={loadBarangaysAction}
           initialLocation={{ provinceId: listing.provinceId, cityId: listing.cityId, barangayId: listing.barangayId }}
           initialValues={initialValues}
+          initialVehicleDetails={vehicleFieldValuesFromServer(listing.vehicleDetails)}
+          initialRentalDetails={rentalFieldValuesFromServer(listing.rentalDetails)}
         />
       </div>
     </div>

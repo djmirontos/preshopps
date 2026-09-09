@@ -21,6 +21,24 @@ import {
 } from "@/lib/marketplace/search-params";
 import type { ListingCondition } from "@/components/marketplace/ListingCard";
 import type { CategoryRef, LocationRef } from "@/lib/marketplace/reference-data";
+import {
+  ListingVehicleFields,
+  EMPTY_VEHICLE_VALUES,
+  isVehicleValuesEmpty,
+  vehicleValuesEqual,
+  validateVehicleValues,
+  buildVehicleDetailsJson,
+  type VehicleFieldValues,
+} from "@/components/seller/ListingVehicleFields";
+import {
+  ListingRentalFields,
+  EMPTY_RENTAL_VALUES,
+  isRentalValuesEmpty,
+  rentalValuesEqual,
+  validateRentalValues,
+  buildRentalDetailsJson,
+  type RentalFieldValues,
+} from "@/components/seller/ListingRentalFields";
 
 const INPUT_CLASS =
   "mt-1.5 h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60";
@@ -33,13 +51,20 @@ const EMPTY_LOCATION: ShopLocationValue = { provinceId: null, cityId: null, bara
 const PRELOVED_CONDITIONS = Object.keys(CONDITION_LABELS) as ListingCondition[];
 const FULFILLMENT_METHODS = Object.keys(FULFILLMENT_LABELS) as FulfillmentMethod[];
 
-/** The non-location field set shared by create and edit -- identical shape
- * to CreateListingInput minus the location ids, which this form tracks
- * separately (via ShopLocationFields' own ShopLocationValue) since that is
- * the existing, already-tested convention. Reused as both the create-mode
- * submission shape (spread together with location) and the edit-mode
- * baseline/current values compared to build a patch. */
-export type ListingFieldValues = Omit<CreateListingInput, "provinceId" | "cityId" | "barangayId">;
+/** The non-location, non-extension field set shared by create and edit --
+ * identical shape to CreateListingInput minus the location ids (tracked
+ * separately via ShopLocationFields' own ShopLocationValue) and minus
+ * vehicleDetails/rentalDetails (tracked separately as raw form state --
+ * VehicleFieldValues/RentalFieldValues -- and only converted to the JSON
+ * shape CreateListingInput/UpdateListingPatch expect at submit time,
+ * mirroring how price fields already stay raw strings until submit).
+ * Reused as both the create-mode submission shape (spread together with
+ * location) and the edit-mode baseline/current values compared to build a
+ * patch. */
+export type ListingFieldValues = Omit<
+  CreateListingInput,
+  "provinceId" | "cityId" | "barangayId" | "vehicleDetails" | "rentalDetails"
+>;
 
 const CREATE_DEFAULTS: ListingFieldValues = {
   title: "",
@@ -72,6 +97,11 @@ type Props = {
    * prefill the form and as the diff baseline for Save Draft's patch.
    * Create mode ignores this and always starts from CREATE_DEFAULTS. */
   initialValues?: ListingFieldValues;
+  /** Edit mode only: the listing's current vehicle/rental extension row
+   * (if any), already converted to this form's raw-string field shape.
+   * Create mode ignores these and always starts empty. */
+  initialVehicleDetails?: VehicleFieldValues;
+  initialRentalDetails?: RentalFieldValues;
 };
 
 type FieldErrors = {
@@ -123,6 +153,8 @@ export function ListingForm({
   loadBarangays,
   initialLocation = EMPTY_LOCATION,
   initialValues,
+  initialVehicleDetails,
+  initialRentalDetails,
 }: Props) {
   const router = useRouter();
   const titleErrorId = useId();
@@ -155,6 +187,45 @@ export function ListingForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [vehicleBaseline, setVehicleBaseline] = useState<VehicleFieldValues>(initialVehicleDetails ?? EMPTY_VEHICLE_VALUES);
+  const [vehicleValues, setVehicleValues] = useState<VehicleFieldValues>(initialVehicleDetails ?? EMPTY_VEHICLE_VALUES);
+  const [vehicleErrors, setVehicleErrors] = useState<ReturnType<typeof validateVehicleValues>>({});
+  const [rentalBaseline, setRentalBaseline] = useState<RentalFieldValues>(initialRentalDetails ?? EMPTY_RENTAL_VALUES);
+  const [rentalValues, setRentalValues] = useState<RentalFieldValues>(initialRentalDetails ?? EMPTY_RENTAL_VALUES);
+  const [rentalErrors, setRentalErrors] = useState<ReturnType<typeof validateRentalValues>>({});
+
+  // Resolved fresh every render from live client state (categoryId +
+  // the categories prop already passed into this form) -- never a
+  // one-time prop snapshot, so changing the category select immediately
+  // shows/hides the right extension fields in the same render pass. This
+  // is deliberately unlike ListingImagesPicker's own `listingType` prop,
+  // which is a sibling Server Component's one-time read and needs a
+  // router.refresh() round trip to update (see this form's own
+  // handleSubmit for that fix) -- there is no such gap here because
+  // category/type/condition and vehicle/rental all live in this same
+  // component's client state already.
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const categorySlug = selectedCategory?.slug ?? null;
+  const isVehicleCategory = categorySlug === "cars" || categorySlug === "motorcycles";
+  const isRentalCategory = categorySlug === "for-rent";
+
+  function handleCategoryChange(rawValue: string) {
+    const nextId = rawValue === "" ? null : Number(rawValue);
+    setCategoryId(nextId);
+
+    // Clear the hidden extension state the instant the category leaves its
+    // eligible group -- canon requires this (no stale hidden data), and it
+    // is what lets the final-state comparison in handleSubmit correctly
+    // decide to send an explicit clear for edit mode below.
+    const nextCategory = categories.find((category) => category.id === nextId);
+    const nextSlug = nextCategory?.slug ?? null;
+    const nextIsVehicle = nextSlug === "cars" || nextSlug === "motorcycles";
+    const nextIsRental = nextSlug === "for-rent";
+
+    if (!nextIsVehicle) setVehicleValues(EMPTY_VEHICLE_VALUES);
+    if (!nextIsRental) setRentalValues(EMPTY_RENTAL_VALUES);
+  }
 
   function handleListingTypeChange(rawValue: string) {
     const next = rawValue === "" ? null : (rawValue as ListingTypeFilter);
@@ -222,8 +293,15 @@ export function ListingForm({
       errors.stockQuantity = "Stock quantity must be at least 1.";
     }
 
+    const nextVehicleErrors = validateVehicleValues(vehicleValues);
+    const nextRentalErrors = validateRentalValues(rentalValues);
+    setVehicleErrors(nextVehicleErrors);
+    setRentalErrors(nextRentalErrors);
+
     setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) return;
+    if (Object.keys(errors).length > 0 || Object.keys(nextVehicleErrors).length > 0 || Object.keys(nextRentalErrors).length > 0) {
+      return;
+    }
 
     const currentValues: ListingFieldValues = {
       title: title.trim(),
@@ -248,6 +326,14 @@ export function ListingForm({
         provinceId: location.provinceId,
         cityId: location.cityId,
         barangayId: location.barangayId,
+        // Category eligibility already guarantees these are empty whenever
+        // the category isn't vehicle/rental-eligible (handleCategoryChange
+        // clears them the instant the category leaves that group), so no
+        // extra category gate is needed here -- "omit/null when nothing is
+        // filled in" and "never send for the wrong category" collapse into
+        // the same isXValuesEmpty check.
+        vehicleDetails: isVehicleValuesEmpty(vehicleValues) ? null : buildVehicleDetailsJson(vehicleValues),
+        rentalDetails: isRentalValuesEmpty(rentalValues) ? null : buildRentalDetailsJson(rentalValues),
       };
       const result = await createListing(input);
       setIsSubmitting(false);
@@ -288,6 +374,28 @@ export function ListingForm({
       patch.fulfillment_methods = currentValues.fulfillmentMethods;
     }
 
+    // Vehicle/rental extensions: the top-level key follows the usual
+    // omit/set/clear contract, but once "set" the RPC treats the object as
+    // a full replacement of the row's sub-fields (any sub-field absent
+    // from the object is reset to NULL server-side) -- so whenever
+    // anything changed, the COMPLETE current object is sent, never a
+    // partial diff of just the touched sub-fields.
+    const vehicleEmpty = isVehicleValuesEmpty(vehicleValues);
+    const baselineVehicleEmpty = isVehicleValuesEmpty(vehicleBaseline);
+    if (vehicleEmpty && !baselineVehicleEmpty) {
+      patch.vehicle_details = null;
+    } else if (!vehicleEmpty && (baselineVehicleEmpty || !vehicleValuesEqual(vehicleValues, vehicleBaseline))) {
+      patch.vehicle_details = buildVehicleDetailsJson(vehicleValues);
+    }
+
+    const rentalEmpty = isRentalValuesEmpty(rentalValues);
+    const baselineRentalEmpty = isRentalValuesEmpty(rentalBaseline);
+    if (rentalEmpty && !baselineRentalEmpty) {
+      patch.rental_details = null;
+    } else if (!rentalEmpty && (baselineRentalEmpty || !rentalValuesEqual(rentalValues, rentalBaseline))) {
+      patch.rental_details = buildRentalDetailsJson(rentalValues);
+    }
+
     if (Object.keys(patch).length === 0) {
       setSaveStatus("no_changes");
       return;
@@ -306,6 +414,8 @@ export function ListingForm({
     // Save Draft with no further edits correctly detects no changes.
     setBaseline(currentValues);
     setBaselineLocation(location);
+    setVehicleBaseline(vehicleValues);
+    setRentalBaseline(rentalValues);
     setSaveStatus("saved");
 
     // Re-fetch the page's own server data (get_my_listing) so sibling
@@ -390,7 +500,7 @@ export function ListingForm({
             <select
               id="listing-category"
               value={categoryId ?? ""}
-              onChange={(event) => setCategoryId(event.target.value === "" ? null : Number(event.target.value))}
+              onChange={(event) => handleCategoryChange(event.target.value)}
               className={SELECT_CLASS}
             >
               <option value="">No category yet</option>
@@ -465,6 +575,26 @@ export function ListingForm({
           )}
         </div>
       </section>
+
+      {isVehicleCategory && (
+        <section>
+          <h2 className="text-sm font-semibold text-ink">Vehicle details</h2>
+          <p className="mt-1 text-xs text-ink-muted">Optional while Draft.</p>
+          <div className="mt-3">
+            <ListingVehicleFields value={vehicleValues} onChange={setVehicleValues} errors={vehicleErrors} />
+          </div>
+        </section>
+      )}
+
+      {isRentalCategory && (
+        <section>
+          <h2 className="text-sm font-semibold text-ink">Rental details</h2>
+          <p className="mt-1 text-xs text-ink-muted">Optional while Draft.</p>
+          <div className="mt-3">
+            <ListingRentalFields value={rentalValues} onChange={setRentalValues} errors={rentalErrors} />
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-sm font-semibold text-ink">Price &amp; stock</h2>

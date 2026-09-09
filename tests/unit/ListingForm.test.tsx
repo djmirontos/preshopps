@@ -22,8 +22,15 @@ vi.mock("@/lib/seller/listing-actions", async () => {
 });
 
 import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
+import { EMPTY_VEHICLE_VALUES } from "@/components/seller/ListingVehicleFields";
+import { EMPTY_RENTAL_VALUES } from "@/components/seller/ListingRentalFields";
 
-const CATEGORIES = [{ id: 1, slug: "women", name: "Women" }];
+const CATEGORIES = [
+  { id: 1, slug: "women", name: "Women" },
+  { id: 2, slug: "cars", name: "Cars" },
+  { id: 3, slug: "motorcycles", name: "Motorcycles" },
+  { id: 4, slug: "for-rent", name: "For Rent" },
+];
 const PROVINCES = [{ id: 1, name: "Misamis Occidental" }];
 const CITIES = [{ id: 10, name: "Tangub City" }];
 const BARANGAYS = [{ id: 100, name: "Barangay Uno" }];
@@ -114,6 +121,8 @@ describe("ListingForm -- create mode", () => {
         barangayId: null,
         meetupNote: null,
         fulfillmentMethods: [],
+        vehicleDetails: null,
+        rentalDetails: null,
       }),
     );
   });
@@ -687,5 +696,201 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     await waitFor(() =>
       expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "preloved", condition: null }),
     );
+  });
+});
+
+describe("ListingForm -- vehicle/rental conditional fields", () => {
+  it("shows vehicle fields only for Cars/Motorcycles categories", () => {
+    renderForm();
+    expect(screen.queryByRole("heading", { name: "Vehicle details" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    expect(screen.getByRole("heading", { name: "Vehicle details" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "3" } });
+    expect(screen.getByRole("heading", { name: "Vehicle details" })).toBeInTheDocument();
+  });
+
+  it("shows rental fields only for For Rent category", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "4" } });
+    expect(screen.getByRole("heading", { name: "Rental details" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Vehicle details" })).not.toBeInTheDocument();
+  });
+
+  it("shows neither vehicle nor rental fields for an ordinary category, or no category at all", () => {
+    renderForm();
+    expect(screen.queryByRole("heading", { name: "Vehicle details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Rental details" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
+    expect(screen.queryByRole("heading", { name: "Vehicle details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Rental details" })).not.toBeInTheDocument();
+  });
+
+  it("category changes update the conditional fields immediately, in the same render -- no server round trip needed", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    expect(screen.getByRole("heading", { name: "Vehicle details" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "4" } });
+    expect(screen.queryByRole("heading", { name: "Vehicle details" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rental details" })).toBeInTheDocument();
+  });
+
+  it("every vehicle/rental field remains optional -- Save Draft succeeds with the category chosen but nothing else filled in", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ vehicleDetails: null, rentalDetails: null })));
+  });
+
+  it("create mode builds the vehicle_details JSON from filled-in fields", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#vehicle-brand" }), { target: { value: "Toyota" } });
+    fireEvent.change(screen.getByLabelText(/^year/i), { target: { value: "2020" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(createListingMock).toHaveBeenCalledWith(
+        expect.objectContaining({ vehicleDetails: { brand: "Toyota", year: 2020 }, rentalDetails: null }),
+      ),
+    );
+  });
+
+  it("create mode builds the rental_details JSON from filled-in fields", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText(/rental price/i), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(createListingMock).toHaveBeenCalledWith(
+        expect.objectContaining({ vehicleDetails: null, rentalDetails: { rental_price_cents: 50000 } }),
+      ),
+    );
+  });
+
+  it("edit mode prefills vehicle details from initialVehicleDetails", () => {
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota", year: "2020" },
+    });
+
+    expect(screen.getByLabelText(/^brand/i, { selector: "#vehicle-brand" })).toHaveValue("Toyota");
+    expect(screen.getByLabelText(/^year/i)).toHaveValue("2020");
+  });
+
+  it("edit mode prefills rental details from initialRentalDetails", () => {
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 4 },
+      initialRentalDetails: { ...EMPTY_RENTAL_VALUES, priceInput: "19.99", period: "daily" },
+    });
+
+    expect(screen.getByLabelText(/^rental price/i)).toHaveValue("19.99");
+    expect(screen.getByLabelText(/^rental period/i)).toHaveValue("daily");
+  });
+
+  it("unchanged vehicle_details is omitted from the patch", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" }), { target: { value: "Something else" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalled());
+    const [, patch] = updateListingMock.mock.calls[0];
+    expect(patch).not.toHaveProperty("vehicle_details");
+    expect(patch).toHaveProperty("brand", "Something else");
+  });
+
+  it("a changed vehicle_details field sends the COMPLETE current object, not just the changed sub-field", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota", model: "Vios" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^year/i), { target: { value: "2020" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", {
+        vehicle_details: { brand: "Toyota", model: "Vios", year: 2020 },
+      }),
+    );
+  });
+
+  it("clearing every vehicle field sends vehicle_details: null", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^brand/i, { selector: "#vehicle-brand" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { vehicle_details: null }));
+  });
+
+  it("clearing every rental field sends rental_details: null", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 4 },
+      initialRentalDetails: { ...EMPTY_RENTAL_VALUES, priceInput: "500" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^rental price/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { rental_details: null }));
+  });
+
+  it("changing category away from Cars sends an explicit vehicle_details: null clear for the old incompatible extension", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() =>
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { category_id: 1, vehicle_details: null }),
+    );
+  });
+
+  it("no stale hidden vehicle state survives a category change back and forth -- fields start empty again, not restored", () => {
+    renderEditForm({
+      initialValues: { ...EMPTY_VALUES, categoryId: 2 },
+      initialVehicleDetails: { ...EMPTY_VEHICLE_VALUES, brand: "Toyota" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+
+    expect(screen.getByLabelText(/^brand/i, { selector: "#vehicle-brand" })).toHaveValue("");
+  });
+
+  it("never introduces Publish behavior alongside vehicle/rental fields", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
   });
 });

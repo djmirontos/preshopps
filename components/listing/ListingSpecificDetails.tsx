@@ -1,34 +1,10 @@
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
-import type {
-  RentalAvailability,
-  RentalDetails,
-  RentalPeriod,
-  VehicleDetails,
-  VehicleRegistrationStatus,
-} from "@/lib/marketplace/listing-detail";
+import type { RentalDetails, VehicleDetails } from "@/lib/marketplace/listing-detail";
+import { REGISTRATION_LABELS, RENTAL_PERIOD_LABELS, RENTAL_AVAILABILITY_LABELS } from "@/lib/marketplace/vehicle-rental-labels";
 
 type Props = {
   vehicle: VehicleDetails | null;
   rental: RentalDetails | null;
-};
-
-const REGISTRATION_LABELS: Record<VehicleRegistrationStatus, string> = {
-  registered: "Registered",
-  expired_registration: "Expired Registration",
-  for_renewal: "For Renewal",
-};
-
-const RENTAL_PERIOD_LABELS: Record<RentalPeriod, string> = {
-  daily: "day",
-  weekly: "week",
-  monthly: "month",
-  other: "period",
-};
-
-const RENTAL_AVAILABILITY_LABELS: Record<RentalAvailability, string> = {
-  available: "Available",
-  unavailable: "Unavailable",
-  paused: "Paused",
 };
 
 type Row = { label: string; value: string };

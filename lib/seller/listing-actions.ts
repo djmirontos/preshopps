@@ -8,9 +8,9 @@ import type { ListingCondition } from "@/components/marketplace/ListingCard";
  * identity is always derived server-side from auth.uid(), no owner/shop id
  * is ever sent from the client, and every failure mode maps to a typed
  * code + safe copy rather than a raw Postgres error ever reaching the UI.
- * This first frontend slice never supplies p_image_paths/p_vehicle_details/
- * p_rental_details -- those remain null, exactly like every other
- * not-yet-built field group.
+ * Images remain out of scope here (p_image_paths stays null) -- vehicle/
+ * rental JSON objects are built by ListingVehicleFields/ListingRentalFields
+ * (components/seller/) and passed straight through unchanged.
  */
 
 type ErrorMap<Code extends string> = Record<Code | "UNKNOWN", string>;
@@ -36,6 +36,12 @@ export type CreateListingInput = {
   barangayId: number | null;
   meetupNote: string | null;
   fulfillmentMethods: FulfillmentMethod[];
+  /** Built by buildVehicleDetailsJson (ListingVehicleFields) -- null when
+   * empty or the category isn't vehicle-eligible. */
+  vehicleDetails: Record<string, unknown> | null;
+  /** Built by buildRentalDetailsJson (ListingRentalFields) -- null when
+   * empty or the category isn't rental-eligible. */
+  rentalDetails: Record<string, unknown> | null;
 };
 
 export type CreateListingErrorCode =
@@ -138,8 +144,8 @@ export async function createListing(input: CreateListingInput): Promise<CreateLi
       p_meetup_note: input.meetupNote,
       p_fulfillment_methods: input.fulfillmentMethods,
       p_image_paths: null,
-      p_vehicle_details: null,
-      p_rental_details: null,
+      p_vehicle_details: input.vehicleDetails,
+      p_rental_details: input.rentalDetails,
     });
 
     if (error) {
@@ -192,6 +198,14 @@ export type UpdateListingPatch = {
   barangay_id?: number | null;
   meetup_note?: string | null;
   fulfillment_methods?: FulfillmentMethod[];
+  /** Built by buildVehicleDetailsJson (ListingVehicleFields) when the
+   * extension changed and now has values; `null` to explicitly delete the
+   * row (the seller cleared every field, or the category changed away
+   * from Cars/Motorcycles); omitted entirely to leave it untouched. */
+  vehicle_details?: Record<string, unknown> | null;
+  /** Same tri-state contract as vehicle_details, for
+   * listing_rental_details / For Rent. */
+  rental_details?: Record<string, unknown> | null;
 };
 
 export type UpdateListingErrorCode =
