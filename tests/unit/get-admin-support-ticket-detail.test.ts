@@ -20,6 +20,7 @@ function row(overrides: Record<string, unknown> = {}) {
     message: "Please delete my account.",
     user_id: "user-1",
     user_display_name: "Jane D.",
+    user_deleted_at: null,
     created_at: "2026-01-05T00:00:00.000Z",
     ...overrides,
   };
@@ -47,9 +48,19 @@ describe("getAdminSupportTicketDetail", () => {
         message: "Please delete my account.",
         userId: "user-1",
         userDisplayName: "Jane D.",
+        userDeletedAt: null,
         createdAt: "2026-01-05T00:00:00.000Z",
       },
     });
+  });
+
+  it("maps a non-null user_deleted_at through unchanged", async () => {
+    rpcMock.mockResolvedValue({ data: [row({ user_deleted_at: "2026-02-01T00:00:00.000Z", user_display_name: "Deleted user" })], error: null });
+    const result = await getAdminSupportTicketDetail("ticket-1");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.ticket.userDeletedAt).toBe("2026-02-01T00:00:00.000Z");
+    expect(result.ticket.userDisplayName).toBe("Deleted user");
   });
 
   it("returns not_admin for NOT_ADMIN", async () => {

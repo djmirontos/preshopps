@@ -11,6 +11,7 @@ export type GetAdminSupportTicketDetailRow = {
   message: string;
   user_id: string;
   user_display_name: string;
+  user_deleted_at: string | null;
   created_at: string;
 };
 
@@ -20,6 +21,7 @@ export type AdminSupportTicketDetail = {
   message: string;
   userId: string;
   userDisplayName: string;
+  userDeletedAt: string | null;
   createdAt: string;
 };
 
@@ -36,6 +38,7 @@ function mapRow(row: GetAdminSupportTicketDetailRow): AdminSupportTicketDetail {
     message: row.message,
     userId: row.user_id,
     userDisplayName: row.user_display_name,
+    userDeletedAt: row.user_deleted_at,
     createdAt: row.created_at,
   };
 }

@@ -25,6 +25,7 @@ vi.mock("@/lib/admin/get-admin-support-ticket-detail", () => ({
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
   notFound: notFoundMock,
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 import AdminSupportTicketDetailPage from "@/app/admin/support/[ticketId]/page";
@@ -36,6 +37,7 @@ function makeTicket(overrides: Partial<AdminSupportTicketDetail> = {}): AdminSup
     message: "Please delete my account.",
     userId: "user-1",
     userDisplayName: "Jane D.",
+    userDeletedAt: null,
     createdAt: "2026-01-05T00:00:00.000Z",
     ...overrides,
   };
@@ -77,7 +79,7 @@ describe("AdminSupportTicketDetailPage", () => {
     expect(screen.getByText(/unable to load this support ticket/i)).toBeInTheDocument();
   });
 
-  it("renders the ticket for an admin, with no action buttons", async () => {
+  it("renders the ticket for an admin", async () => {
     getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
     getAdminSupportTicketDetailMock.mockResolvedValue({ status: "found", ticket: makeTicket() });
 
@@ -86,6 +88,39 @@ describe("AdminSupportTicketDetailPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Account issue" })).toBeInTheDocument();
     expect(screen.getByText("Please delete my account.")).toBeInTheDocument();
     expect(screen.getByText(/Jane D\./)).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("shows the Anonymize Account action for a not-yet-anonymized account issue ticket", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
+    getAdminSupportTicketDetailMock.mockResolvedValue({ status: "found", ticket: makeTicket() });
+
+    render(await AdminSupportTicketDetailPage(params()));
+
+    expect(screen.getByRole("button", { name: "Anonymize Account" })).toBeInTheDocument();
+  });
+
+  it("does not show the action for a general inquiry ticket", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
+    getAdminSupportTicketDetailMock.mockResolvedValue({
+      status: "found",
+      ticket: makeTicket({ category: "general_inquiry" }),
+    });
+
+    render(await AdminSupportTicketDetailPage(params()));
+
+    expect(screen.queryByRole("button", { name: "Anonymize Account" })).not.toBeInTheDocument();
+  });
+
+  it("shows an anonymized state, not an active action, once the account is already anonymized", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
+    getAdminSupportTicketDetailMock.mockResolvedValue({
+      status: "found",
+      ticket: makeTicket({ userDeletedAt: "2026-02-01T00:00:00.000Z", userDisplayName: "Deleted user" }),
+    });
+
+    render(await AdminSupportTicketDetailPage(params()));
+
+    expect(screen.queryByRole("button", { name: "Anonymize Account" })).not.toBeInTheDocument();
+    expect(screen.getByText("Account anonymized")).toBeInTheDocument();
   });
 });

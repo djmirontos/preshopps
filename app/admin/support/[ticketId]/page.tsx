@@ -4,6 +4,7 @@ import { getAuthUser } from "@/lib/auth/session";
 import { getAdminSupportTicketDetail } from "@/lib/admin/get-admin-support-ticket-detail";
 import { SUPPORT_CATEGORY_LABELS } from "@/lib/support/submit-support-ticket";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
+import { AnonymizeAccountAction } from "@/components/admin/AnonymizeAccountAction";
 
 export const metadata = { title: "Support Ticket | Admin | Preshopps" };
 
@@ -14,9 +15,12 @@ type PageProps = {
 /**
  * Admin-only support ticket detail. Same authorization posture as
  * /admin/reports/[reportId]: a non-admin caller gets notFound(), never a
- * distinguishable error. Read-only -- no action buttons exist here on
- * purpose, since canon does not require a mutable ticket status/workflow
- * and this task explicitly says not to invent one.
+ * distinguishable error. Read-only except for one explicit action: on an
+ * "Account issue" ticket for a not-yet-anonymized user, AnonymizeAccountAction
+ * (PRD 5.4) offers the MVP account-deletion fulfillment path -- gated on
+ * category and current anonymization state, never automatic just because
+ * such a ticket exists. No other mutable ticket status/workflow is
+ * invented here.
  */
 export default async function AdminSupportTicketDetailPage({ params }: PageProps) {
   const { ticketId } = await params;
@@ -54,6 +58,8 @@ export default async function AdminSupportTicketDetailPage({ params }: PageProps
       </p>
 
       <div className="mt-6 whitespace-pre-wrap rounded-[14px] border border-border bg-surface p-4 text-sm text-ink">{ticket.message}</div>
+
+      <AnonymizeAccountAction userId={ticket.userId} category={ticket.category} userDeletedAt={ticket.userDeletedAt} />
     </div>
   );
 }

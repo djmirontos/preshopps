@@ -1,0 +1,38 @@
+-- Account deletion/anonymization MVP (PRD 5.4, 33, 34.6, 41, 43): adds the
+-- one new admin_audit_action_enum value this feature needs. Split into its
+-- own migration, deliberately not combined with the RPC/constraint that
+-- uses it (0081) -- PostgreSQL cannot reference a newly-added enum value
+-- (in a CHECK constraint or a DML statement) within the same transaction
+-- that added it, exactly the same reason 0073/0074 split
+-- notification_type_enum's dispute_opened/dispute_resolved additions from
+-- the RPCs that use them.
+--
+-- Pre-inspection findings (read-only, immediately before writing this file)
+-- -----------------------------------------------------------------------
+-- Migration history ends at 0079_fix_plpgsql_output_column_collisions
+-- (confirmed live, no drift). public.admin_audit_action_enum currently has
+-- exactly 'admin_role_granted', 'admin_role_changed', 'admin_role_revoked'
+-- (0077) -- no 'account_anonymized' or similar value exists anywhere.
+--
+-- Why admin_audit_logs, not moderation_actions, and why one more enum
+-- value rather than a new table
+-- -----------------------------------------------------------------------
+-- moderation_actions.restriction_id is NOT NULL (0066) -- account
+-- anonymization is not itself a restriction-application event (a separate
+-- restriction IS applied as part of the same transaction, 0081, and that
+-- already gets its own moderation_actions row via apply_user_restriction,
+-- 0067, unchanged) -- overloading moderation_actions' own action_type for
+-- "the account was anonymized" would misuse a table whose shape is
+-- specifically restriction-centric, the exact reasoning already rejected
+-- for admin-role changes in 0077's own header. admin_audit_logs is
+-- PRD 41's own named general admin-audit mechanism (also independently
+-- named in ARCHITECTURE.md's Moderation domain list, S10) and PRD 41's own
+-- example list literally includes "User suspension" alongside "Admin role
+-- change" -- account anonymization is the same class of broad,
+-- user-targeting administrative action already living in this table, not
+-- a new concept. One more enum value (matching the exact "ALTER TYPE ...
+-- ADD VALUE, exactly like notification_type_enum did for disputes"
+-- extension point 0077's own header already anticipated) is the smallest
+-- addition; no new table is created.
+
+alter type public.admin_audit_action_enum add value 'account_anonymized';
