@@ -3,9 +3,10 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { AdminSupportTicketSummary, GetAdminSupportTicketsResult } from "@/lib/admin/get-admin-support-tickets";
 
-const { getAuthUserMock, getAdminSupportTicketsMock, redirectMock, notFoundMock } = vi.hoisted(() => ({
+const { getAuthUserMock, getAdminSupportTicketsMock, getMyAdminRoleMock, redirectMock, notFoundMock } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getAdminSupportTicketsMock: vi.fn<() => Promise<GetAdminSupportTicketsResult>>(),
+  getMyAdminRoleMock: vi.fn<() => Promise<"admin" | "super_admin" | null>>(),
   redirectMock: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
@@ -20,6 +21,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/admin/get-admin-support-tickets", () => ({
   getAdminSupportTickets: getAdminSupportTicketsMock,
+}));
+
+vi.mock("@/lib/admin/get-my-admin-role", () => ({
+  getMyAdminRole: getMyAdminRoleMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -44,6 +49,7 @@ function makeTicket(overrides: Partial<AdminSupportTicketSummary> = {}): AdminSu
 describe("AdminSupportTicketsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getMyAdminRoleMock.mockResolvedValue("admin");
   });
 
   it("redirects a guest to sign-in with next=/admin/support before checking admin status", async () => {
@@ -95,5 +101,25 @@ describe("AdminSupportTicketsPage", () => {
     render(await AdminSupportTicketsPage());
 
     expect(screen.getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/admin");
+  });
+
+  it("does not show the Admins nav link for an ordinary admin", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
+    getAdminSupportTicketsMock.mockResolvedValue({ tickets: [], hadError: false, notAdmin: false, nextCursor: null });
+    getMyAdminRoleMock.mockResolvedValue("admin");
+
+    render(await AdminSupportTicketsPage());
+
+    expect(screen.queryByRole("link", { name: "Admins" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Admins nav link for a super_admin", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "super-1", email: "super@example.com" });
+    getAdminSupportTicketsMock.mockResolvedValue({ tickets: [], hadError: false, notAdmin: false, nextCursor: null });
+    getMyAdminRoleMock.mockResolvedValue("super_admin");
+
+    render(await AdminSupportTicketsPage());
+
+    expect(screen.getByRole("link", { name: "Admins" })).toHaveAttribute("href", "/admin/admins");
   });
 });

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getAdminReports, type ReportStatus } from "@/lib/admin/get-admin-reports";
+import { getMyAdminRole } from "@/lib/admin/get-my-admin-role";
 import { AdminReportsListClient } from "@/components/admin/AdminReportsListClient";
 
 export const metadata = { title: "Admin | Preshopps" };
@@ -50,6 +51,8 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
     notFound();
   }
 
+  const myRole = await getMyAdminRole();
+
   async function loadMoreAction(cursor: { createdAt: string; id: string }) {
     "use server";
     return getAdminReports(REPORTS_LIMIT, status, cursor);
@@ -80,6 +83,14 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
         >
           Disputes
         </Link>
+        {myRole === "super_admin" && (
+          <Link
+            href="/admin/admins"
+            className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
+          >
+            Admins
+          </Link>
+        )}
       </div>
 
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">

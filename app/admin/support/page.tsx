@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getAdminSupportTickets } from "@/lib/admin/get-admin-support-tickets";
+import { getMyAdminRole } from "@/lib/admin/get-my-admin-role";
 import { AdminSupportTicketsListClient } from "@/components/admin/AdminSupportTicketsListClient";
 
 export const metadata = { title: "Support | Admin | Preshopps" };
@@ -28,6 +29,8 @@ export default async function AdminSupportTicketsPage() {
   if (result.notAdmin) {
     notFound();
   }
+
+  const myRole = await getMyAdminRole();
 
   async function loadMoreAction(cursor: { createdAt: string; id: string }) {
     "use server";
@@ -59,6 +62,14 @@ export default async function AdminSupportTicketsPage() {
         >
           Disputes
         </Link>
+        {myRole === "super_admin" && (
+          <Link
+            href="/admin/admins"
+            className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
+          >
+            Admins
+          </Link>
+        )}
       </div>
 
       <div className="mt-6">

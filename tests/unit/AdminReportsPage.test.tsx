@@ -3,9 +3,10 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { AdminReportSummary, GetAdminReportsResult } from "@/lib/admin/get-admin-reports";
 
-const { getAuthUserMock, getAdminReportsMock, redirectMock, notFoundMock } = vi.hoisted(() => ({
+const { getAuthUserMock, getAdminReportsMock, getMyAdminRoleMock, redirectMock, notFoundMock } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getAdminReportsMock: vi.fn<() => Promise<GetAdminReportsResult>>(),
+  getMyAdminRoleMock: vi.fn<() => Promise<"admin" | "super_admin" | null>>(),
   redirectMock: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
@@ -20,6 +21,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/admin/get-admin-reports", () => ({
   getAdminReports: getAdminReportsMock,
+}));
+
+vi.mock("@/lib/admin/get-my-admin-role", () => ({
+  getMyAdminRole: getMyAdminRoleMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -49,6 +54,7 @@ function params(searchParams: Record<string, string> = {}) {
 describe("AdminReportsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getMyAdminRoleMock.mockResolvedValue("admin");
   });
 
   it("redirects a guest to sign-in with next=/admin before checking admin status", async () => {
@@ -100,5 +106,25 @@ describe("AdminReportsPage", () => {
     render(await AdminReportsPage(params()));
 
     expect(screen.getByText("No reports yet.")).toBeInTheDocument();
+  });
+
+  it("does not show the Admins nav link for an ordinary admin", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "admin-1", email: "admin@example.com" });
+    getAdminReportsMock.mockResolvedValue({ reports: [], hadError: false, notAdmin: false, nextCursor: null });
+    getMyAdminRoleMock.mockResolvedValue("admin");
+
+    render(await AdminReportsPage(params()));
+
+    expect(screen.queryByRole("link", { name: "Admins" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Admins nav link for a super_admin", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "super-1", email: "super@example.com" });
+    getAdminReportsMock.mockResolvedValue({ reports: [], hadError: false, notAdmin: false, nextCursor: null });
+    getMyAdminRoleMock.mockResolvedValue("super_admin");
+
+    render(await AdminReportsPage(params()));
+
+    expect(screen.getByRole("link", { name: "Admins" })).toHaveAttribute("href", "/admin/admins");
   });
 });
