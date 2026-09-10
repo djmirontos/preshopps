@@ -22,12 +22,22 @@ const INPUT_CLASS =
  * form branches on the actual response rather than assuming either way,
  * per instruction, since that toggle isn't something this task can
  * change or directly inspect.
+ *
+ * PRD 5.5 signup-time Terms of Use / Privacy Policy acceptance: one
+ * unchecked-by-default combined checkbox gates the submit button and is
+ * re-checked in handleSubmit itself (defense in depth, same pattern as
+ * the password-mismatch check above it). Checking it only ever sends
+ * `policies_accepted: true` in signUp()'s metadata -- never a client
+ * timestamp; the server-side handle_new_user() trigger (0071) is the
+ * actual enforcement and the only writer of terms_accepted_at/
+ * privacy_accepted_at, both stamped with its own now().
  */
 export function SignUpForm({ next }: Props) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkEmailAddress, setCheckEmailAddress] = useState<string | null>(null);
@@ -41,12 +51,25 @@ export function SignUpForm({ next }: Props) {
       return;
     }
 
+    if (!policiesAccepted) {
+      setError("Please agree to the Terms of Use and Privacy Policy to continue.");
+      return;
+    }
+
     setIsSubmitting(true);
     const supabase = createClient();
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${getAppUrl()}/auth/confirm` },
+      options: {
+        emailRedirectTo: `${getAppUrl()}/auth/confirm`,
+        // Server-side handle_new_user() (0071) is the actual enforcement --
+        // this is the explicit consent signal it reads from
+        // raw_user_meta_data, never a client-supplied timestamp. Absence or
+        // any value other than a checked box (which always sends `true`)
+        // makes the trigger reject the signup outright.
+        data: { policies_accepted: true },
+      },
     });
 
     if (signUpError) {
@@ -139,6 +162,36 @@ export function SignUpForm({ next }: Props) {
         />
       </div>
 
+      <label className="flex items-start gap-2 text-sm text-ink">
+        <input
+          type="checkbox"
+          checked={policiesAccepted}
+          onChange={(event) => setPoliciesAccepted(event.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-action focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        />
+        <span>
+          I agree to the{" "}
+          <Link
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            Terms of Use
+          </Link>{" "}
+          and{" "}
+          <Link
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            Privacy Policy
+          </Link>
+          .
+        </span>
+      </label>
+
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -147,7 +200,7 @@ export function SignUpForm({ next }: Props) {
 
       <button
         type="submit"
-        disabled={isSubmitting}
+        disabled={isSubmitting || !policiesAccepted}
         className="h-12 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
       >
         {isSubmitting ? "Creating account…" : "Create account"}
