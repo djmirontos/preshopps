@@ -188,6 +188,8 @@ export default async function ShopPage({ params }: ShopPageProps) {
             initialHadError={reviewsResult.hadError}
             initialCursor={reviewsResult.nextCursor}
             fetchReviews={fetchReviewsAction}
+            isAuthenticated={Boolean(user)}
+            next={`/shop/${shop.slug}`}
           />
         </div>
       </div>

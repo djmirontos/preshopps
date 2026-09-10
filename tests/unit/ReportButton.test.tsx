@@ -127,3 +127,47 @@ describe("ReportButton -- authenticated submission flow", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
+
+describe("ReportButton -- iconOnly (conversation header placement)", () => {
+  it("renders a bare icon button with an accessible label, no visible 'Report' text", () => {
+    renderButton({ targetType: "conversation", targetId: "conv-1", targetLabel: "conversation", iconOnly: true });
+    const button = screen.getByRole("button", { name: "Report conversation" });
+    expect(button).toBeInTheDocument();
+    expect(button).not.toHaveTextContent("Report");
+  });
+
+  it("still opens the same dialog and submits with the conversation target exactly like the default variant", async () => {
+    submitReportMock.mockResolvedValue({ ok: true, reportId: "report-1", createdAt: "now" });
+    renderButton({ targetType: "conversation", targetId: "conv-1", targetLabel: "conversation", iconOnly: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Report conversation" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "harassment" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Submit report" }));
+
+    await waitFor(() => expect(submitReportMock).toHaveBeenCalledWith("conversation", "conv-1", "harassment", null));
+  });
+
+  it("shows the existing AuthGate for a guest, exactly like the default variant", () => {
+    renderButton({ targetType: "conversation", targetId: "conv-1", targetLabel: "conversation", isAuthenticated: false, iconOnly: true });
+    fireEvent.click(screen.getByRole("button", { name: "Report conversation" }));
+    expect(screen.getByRole("dialog", { name: /sign in to report/i })).toBeInTheDocument();
+  });
+
+  it("collapses to a dismissed icon (no lingering button) after a successful submission", async () => {
+    submitReportMock.mockResolvedValue({ ok: true, reportId: "report-1", createdAt: "now" });
+    renderButton({ targetType: "conversation", targetId: "conv-1", targetLabel: "conversation", iconOnly: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Report conversation" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "spam" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Submit report" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Report conversation" })).not.toBeInTheDocument());
+  });
+
+  it("the default (non-iconOnly) variant is unaffected -- still shows visible 'Report' text", () => {
+    renderButton();
+    expect(screen.getByRole("button", { name: /report/i })).toHaveTextContent("Report");
+  });
+});

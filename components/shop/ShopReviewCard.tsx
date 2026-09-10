@@ -1,13 +1,31 @@
 import Image from "next/image";
 import { User } from "lucide-react";
 import { StarRatingDisplay } from "@/components/reviews/StarRatingDisplay";
+import { ReportButton } from "@/components/moderation/ReportButton";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import type { ShopReviewItem } from "@/lib/reviews/get-shop-reviews";
 
-/** One review row on the shop page -- reviewer identity, rating, body,
- * purchased-item context, photos (if any), and the seller's reply
- * (visually subordinate, indented in a muted panel) if present. */
-export function ShopReviewCard({ review }: { review: ShopReviewItem }) {
+type Props = {
+  review: ShopReviewItem;
+  isAuthenticated: boolean;
+  /** Safe internal path to return to after sign-in. */
+  next: string;
+};
+
+/**
+ * One review row on the shop page -- reviewer identity, rating, body,
+ * purchased-item context, photos (if any), the seller's reply (visually
+ * subordinate, indented in a muted panel) if present, and a restrained
+ * Report affordance (PRD 31). get_shop_reviews (0034/0053) is
+ * deliberately guest-safe and never returns buyer_id -- unlike
+ * ListingActions/ShopReportAction's isOwnListing/isOwnShop, there is no
+ * reviewer identity available client-side to compare against the viewer
+ * and hide the action for one's own review; submit_report's own
+ * SELF_REPORT_NOT_ALLOWED check (0067) remains the actual, authoritative
+ * guard regardless, surfaced through the same friendly error message
+ * ReportButton already shows for every other target type.
+ */
+export function ShopReviewCard({ review, isAuthenticated, next }: Props) {
   return (
     <div className="rounded-[14px] border border-border bg-surface p-4">
       <div className="flex items-center gap-2.5">
@@ -50,6 +68,15 @@ export function ShopReviewCard({ review }: { review: ShopReviewItem }) {
           <p className="mt-1 text-sm text-ink">{review.replyBody}</p>
         </div>
       )}
+
+      <ReportButton
+        targetType="review"
+        targetId={review.reviewId}
+        targetLabel="review"
+        isAuthenticated={isAuthenticated}
+        next={next}
+        className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-ink-muted hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      />
     </div>
   );
 }

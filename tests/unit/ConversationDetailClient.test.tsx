@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { ConversationMessage } from "@/lib/messaging/get-conversation-messages";
 
@@ -9,12 +10,18 @@ const {
   markConversationUnreadMock,
   setConversationArchivedMock,
   setConversationMutedMock,
+  submitReportMock,
+  blockUserMock,
+  unblockUserMock,
 } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
   markConversationReadIfUnreadMock: vi.fn(),
   markConversationUnreadMock: vi.fn(),
   setConversationArchivedMock: vi.fn(),
   setConversationMutedMock: vi.fn(),
+  submitReportMock: vi.fn(),
+  blockUserMock: vi.fn(),
+  unblockUserMock: vi.fn(),
 }));
 
 vi.mock("@/lib/messaging/send-message", async () => {
@@ -28,6 +35,16 @@ vi.mock("@/lib/messaging/conversation-state", () => ({
   setConversationArchived: setConversationArchivedMock,
   setConversationMuted: setConversationMutedMock,
 }));
+
+vi.mock("@/lib/moderation/report-actions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/moderation/report-actions")>("@/lib/moderation/report-actions");
+  return { ...actual, submitReport: submitReportMock };
+});
+
+vi.mock("@/lib/messaging/block-actions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/messaging/block-actions")>("@/lib/messaging/block-actions");
+  return { ...actual, blockUser: blockUserMock, unblockUser: unblockUserMock };
+});
 
 import { ConversationDetailClient } from "@/components/messaging/ConversationDetailClient";
 
@@ -60,6 +77,24 @@ function sampleMessage(overrides: Partial<ConversationMessage> = {}): Conversati
 
 const loadEarlierMock = vi.fn();
 
+/** Every previously-passing test keeps working unchanged behaviorally --
+ * this just supplies the two new required block-related props
+ * (otherPartyId/initialIsBlocked) with sane defaults so each existing
+ * `render(...)` call site doesn't have to be individually retyped. */
+function renderConversation(overrides: Partial<ComponentProps<typeof ConversationDetailClient>> = {}) {
+  return render(
+    <ConversationDetailClient
+      context={sampleContext()}
+      initialMessages={[]}
+      initialCursor={null}
+      loadEarlier={loadEarlierMock}
+      otherPartyId="other-user-1"
+      initialIsBlocked={false}
+      {...overrides}
+    />,
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   loadEarlierMock.mockReset();
@@ -68,13 +103,13 @@ beforeEach(() => {
 
 describe("ConversationDetailClient -- composer", () => {
   it("disables Send while the draft is empty", () => {
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("sends a message and appends it on a confirmed response", async () => {
     sendMessageMock.mockResolvedValue({ ok: true, messageId: "msg-new", createdAt: "2026-02-01T11:00:00.000Z" });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -86,14 +121,14 @@ describe("ConversationDetailClient -- composer", () => {
   });
 
   it("blocks sending an empty/whitespace-only message", () => {
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "   " } });
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it("enforces the 4000-character max via the textarea's own maxLength", () => {
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "x".repeat(5000) } });
     expect(textarea.value.length).toBe(4000);
@@ -102,7 +137,7 @@ describe("ConversationDetailClient -- composer", () => {
   it("guards against duplicate rapid clicks -- Send is disabled while a send is pending", async () => {
     let resolveSend: (value: unknown) => void = () => {};
     sendMessageMock.mockReturnValue(new Promise((resolve) => (resolveSend = resolve)));
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -116,7 +151,7 @@ describe("ConversationDetailClient -- composer", () => {
 
   it("shows a safe error message when send_message fails", async () => {
     sendMessageMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -125,7 +160,7 @@ describe("ConversationDetailClient -- composer", () => {
   });
 
   it("hides the composer entirely and shows a restrained message when canSend is false", () => {
-    render(<ConversationDetailClient context={sampleContext({ canSend: false })} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation({ context: sampleContext({ canSend: false }) });
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
     expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
   });
@@ -133,26 +168,15 @@ describe("ConversationDetailClient -- composer", () => {
 
 describe("ConversationDetailClient -- message history", () => {
   it("renders existing history, preserved even in a blocked conversation", () => {
-    render(
-      <ConversationDetailClient
-        context={sampleContext({ canSend: false })}
-        initialMessages={[sampleMessage({ body: "This is history from before the block." })]}
-        initialCursor={null}
-        loadEarlier={loadEarlierMock}
-      />,
-    );
+    renderConversation({
+      context: sampleContext({ canSend: false }),
+      initialMessages: [sampleMessage({ body: "This is history from before the block." })],
+    });
     expect(screen.getByText("This is history from before the block.")).toBeInTheDocument();
   });
 
   it("shows the external-link safety warning under a message containing a URL, in plain text (never a clickable link)", () => {
-    render(
-      <ConversationDetailClient
-        context={sampleContext()}
-        initialMessages={[sampleMessage({ body: "Check this out: https://example.com/deal" })]}
-        initialCursor={null}
-        loadEarlier={loadEarlierMock}
-      />,
-    );
+    renderConversation({ initialMessages: [sampleMessage({ body: "Check this out: https://example.com/deal" })] });
     expect(screen.getByText(/external link — open carefully/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /example\.com/i })).not.toBeInTheDocument();
   });
@@ -163,14 +187,10 @@ describe("ConversationDetailClient -- message history", () => {
       hadError: false,
       nextCursor: null,
     });
-    render(
-      <ConversationDetailClient
-        context={sampleContext()}
-        initialMessages={[sampleMessage({ messageId: "recent-1", body: "A recent message" })]}
-        initialCursor={{ createdAt: "2026-02-01T09:00:00.000Z", id: "recent-1" }}
-        loadEarlier={loadEarlierMock}
-      />,
-    );
+    renderConversation({
+      initialMessages: [sampleMessage({ messageId: "recent-1", body: "A recent message" })],
+      initialCursor: { createdAt: "2026-02-01T09:00:00.000Z", id: "recent-1" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /load earlier/i }));
     await waitFor(() => expect(screen.getByText("An older message")).toBeInTheDocument());
@@ -181,7 +201,7 @@ describe("ConversationDetailClient -- message history", () => {
 describe("ConversationDetailClient -- state controls", () => {
   it("toggles archive via a direct conversation_user_states update, not an RPC", async () => {
     setConversationArchivedMock.mockResolvedValue({ ok: true });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.click(screen.getByRole("button", { name: "Archive conversation" }));
     await waitFor(() => expect(setConversationArchivedMock).toHaveBeenCalledWith("conv-1", true));
@@ -189,7 +209,7 @@ describe("ConversationDetailClient -- state controls", () => {
 
   it("toggles mute via a direct conversation_user_states update", async () => {
     setConversationMutedMock.mockResolvedValue({ ok: true });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
     await waitFor(() => expect(setConversationMutedMock).toHaveBeenCalledWith("conv-1", true));
@@ -197,14 +217,14 @@ describe("ConversationDetailClient -- state controls", () => {
 
   it("marks the conversation unread via a direct conversation_user_states update", async () => {
     markConversationUnreadMock.mockResolvedValue({ ok: true });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
     await waitFor(() => expect(markConversationUnreadMock).toHaveBeenCalledWith("conv-1"));
   });
 
   it("labels every state control for accessibility", () => {
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
     expect(screen.getByRole("button", { name: "Mute conversation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive conversation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark as unread" })).toBeInTheDocument();
@@ -213,14 +233,12 @@ describe("ConversationDetailClient -- state controls", () => {
 
 describe("ConversationDetailClient -- mark-read-on-open", () => {
   it("calls markConversationReadIfUnread with this conversation's id on mount", async () => {
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
   });
 
   it("calls it only once for the same mounted conversation, even across re-renders", async () => {
-    const { rerender } = render(
-      <ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />,
-    );
+    const { rerender } = renderConversation();
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledTimes(1));
 
     // A re-render with the same conversationId (e.g. after sending a
@@ -232,26 +250,33 @@ describe("ConversationDetailClient -- mark-read-on-open", () => {
         initialMessages={[{ messageId: "m1", isMine: true, body: "hi", createdAt: "2026-02-01T10:00:00.000Z" }]}
         initialCursor={null}
         loadEarlier={loadEarlierMock}
+        otherPartyId="other-user-1"
+        initialIsBlocked={false}
       />,
     );
     expect(markConversationReadIfUnreadMock).toHaveBeenCalledTimes(1);
   });
 
   it("calls it again when navigating to a different conversation (new conversationId)", async () => {
-    const { rerender } = render(
-      <ConversationDetailClient context={sampleContext({ conversationId: "conv-1" })} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />,
-    );
+    const { rerender } = renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
 
     rerender(
-      <ConversationDetailClient context={sampleContext({ conversationId: "conv-2" })} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />,
+      <ConversationDetailClient
+        context={sampleContext({ conversationId: "conv-2" })}
+        initialMessages={[]}
+        initialCursor={null}
+        loadEarlier={loadEarlierMock}
+        otherPartyId="other-user-1"
+        initialIsBlocked={false}
+      />,
     );
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-2"));
     expect(markConversationReadIfUnreadMock).toHaveBeenCalledTimes(2);
   });
 
   it("never sends a message and never touches archive/mute as a side effect of opening", async () => {
-    render(<ConversationDetailClient context={sampleContext({ isArchived: true, isMuted: true })} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation({ context: sampleContext({ isArchived: true, isMuted: true }) });
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalled());
 
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -263,14 +288,10 @@ describe("ConversationDetailClient -- mark-read-on-open", () => {
   });
 
   it("still opens and marks read a blocked (can_send: false) conversation, with history visible", async () => {
-    render(
-      <ConversationDetailClient
-        context={sampleContext({ canSend: false })}
-        initialMessages={[{ messageId: "m1", isMine: false, body: "Old message before block", createdAt: "2026-01-01T00:00:00.000Z" }]}
-        initialCursor={null}
-        loadEarlier={loadEarlierMock}
-      />,
-    );
+    renderConversation({
+      context: sampleContext({ canSend: false }),
+      initialMessages: [{ messageId: "m1", isMine: false, body: "Old message before block", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
 
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
     expect(screen.getByText("Old message before block")).toBeInTheDocument();
@@ -279,11 +300,180 @@ describe("ConversationDetailClient -- mark-read-on-open", () => {
 
   it("manual Mark unread still works after the mount auto-mark-read call", async () => {
     markConversationUnreadMock.mockResolvedValue({ ok: true });
-    render(<ConversationDetailClient context={sampleContext()} initialMessages={[]} initialCursor={null} loadEarlier={loadEarlierMock} />);
+    renderConversation();
 
     await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
 
     fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
     await waitFor(() => expect(markConversationUnreadMock).toHaveBeenCalledWith("conv-1"));
+  });
+});
+
+describe("ConversationDetailClient -- conversation report (PRD 31)", () => {
+  it("renders a single restrained Report action in the header, targeting this exact conversation", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-77" }) });
+    expect(screen.getByRole("button", { name: "Report conversation" })).toBeInTheDocument();
+  });
+
+  it("submits with targetType conversation and the exact conversation id -- never a message id", async () => {
+    submitReportMock.mockResolvedValue({ ok: true, reportId: "report-1", createdAt: "now" });
+    renderConversation({ context: sampleContext({ conversationId: "conv-77" }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Report conversation" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "harassment" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Submit report" }));
+
+    await waitFor(() => expect(submitReportMock).toHaveBeenCalledWith("conversation", "conv-77", "harassment", null));
+  });
+
+  it("is always treated as authenticated -- this page already redirects a guest before ever mounting", () => {
+    renderConversation();
+    fireEvent.click(screen.getByRole("button", { name: "Report conversation" }));
+    // An authenticated caller goes straight to the reason dialog, never the sign-in gate.
+    expect(screen.getByLabelText("Reason")).toBeInTheDocument();
+  });
+
+  it("does not add a report affordance beside every message -- exactly one appears, in the header", () => {
+    renderConversation({
+      initialMessages: [sampleMessage({ messageId: "m1" }), sampleMessage({ messageId: "m2" }), sampleMessage({ messageId: "m3" })],
+    });
+    expect(screen.getAllByRole("button", { name: "Report conversation" })).toHaveLength(1);
+  });
+});
+
+describe("ConversationDetailClient -- Block / Unblock (PRD 30)", () => {
+  it("shows a Block action when not currently blocked", () => {
+    renderConversation({ initialIsBlocked: false });
+    expect(screen.getByRole("button", { name: /^Block this/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Block this/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows an Unblock action when already blocked", () => {
+    renderConversation({ initialIsBlocked: true });
+    expect(screen.getByRole("button", { name: /^Unblock this/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Unblock this/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("labels the action using the other party's role -- 'seller' when viewing as the initiator", () => {
+    renderConversation({ context: sampleContext({ viewerRole: "initiator" }), initialIsBlocked: false });
+    expect(screen.getByRole("button", { name: "Block this seller" })).toBeInTheDocument();
+  });
+
+  it("labels the action using the other party's role -- 'buyer' when viewing as the seller", () => {
+    renderConversation({ context: sampleContext({ viewerRole: "seller" }), initialIsBlocked: false });
+    expect(screen.getByRole("button", { name: "Block this buyer" })).toBeInTheDocument();
+  });
+
+  it("Block requires confirmation -- clicking it opens a dialog rather than calling block_user immediately", () => {
+    renderConversation({ initialIsBlocked: false });
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(blockUserMock).not.toHaveBeenCalled();
+  });
+
+  it("confirming Block calls block_user with the other party's id and flips the UI to Unblock", async () => {
+    blockUserMock.mockResolvedValue({ ok: true, blockedId: "other-user-1", createdAt: "now" });
+    renderConversation({ otherPartyId: "other-user-1", initialIsBlocked: false });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Block" }));
+
+    await waitFor(() => expect(blockUserMock).toHaveBeenCalledWith("other-user-1"));
+    expect(await screen.findByRole("button", { name: /^Unblock this/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("Cancel on the block confirmation closes the dialog without calling block_user", () => {
+    renderConversation({ initialIsBlocked: false });
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(blockUserMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a friendly error and keeps the confirmation dialog open if block_user fails", async () => {
+    blockUserMock.mockResolvedValue({ ok: false, code: "USER_NOT_FOUND" });
+    renderConversation({ initialIsBlocked: false });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Block" }));
+
+    expect(await screen.findByText(/couldn't find this user/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("Unblock is direct -- no confirmation dialog -- and calls unblock_user immediately", async () => {
+    unblockUserMock.mockResolvedValue({ ok: true });
+    renderConversation({ otherPartyId: "other-user-1", initialIsBlocked: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unblock this/ }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(unblockUserMock).toHaveBeenCalledWith("other-user-1"));
+    expect(await screen.findByRole("button", { name: /^Block this/ })).toBeInTheDocument();
+  });
+
+  it("shows a friendly error, without a dialog, if unblock_user fails", async () => {
+    unblockUserMock.mockResolvedValue({ ok: false, code: "NOT_AUTHENTICATED" });
+    renderConversation({ initialIsBlocked: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unblock this/ }));
+
+    expect(await screen.findByText(/please sign in/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("existing message history remains visible immediately after blocking -- no history is cleared client-side", async () => {
+    blockUserMock.mockResolvedValue({ ok: true, blockedId: "other-user-1", createdAt: "now" });
+    renderConversation({
+      initialMessages: [sampleMessage({ body: "A message from before the block" })],
+      initialIsBlocked: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
+
+    await waitFor(() => expect(blockUserMock).toHaveBeenCalled());
+    expect(screen.getByText("A message from before the block")).toBeInTheDocument();
+  });
+
+  it("the composer hides immediately after a confirmed Block, even though context.canSend was true at page load", async () => {
+    blockUserMock.mockResolvedValue({ ok: true, blockedId: "other-user-1", createdAt: "now" });
+    renderConversation({ context: sampleContext({ canSend: true }), initialIsBlocked: false });
+
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("Message")).not.toBeInTheDocument());
+    expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
+  });
+
+  it("the composer reappears after Unblock restores allowed interaction, when the original context already allowed sending", async () => {
+    unblockUserMock.mockResolvedValue({ ok: true });
+    renderConversation({ context: sampleContext({ canSend: true }), initialIsBlocked: true });
+
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unblock this/ }));
+
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeInTheDocument());
+  });
+
+  it("never calls submitReport as a side effect of blocking -- blocking is not an automatic report", async () => {
+    blockUserMock.mockResolvedValue({ ok: true, blockedId: "other-user-1", createdAt: "now" });
+    renderConversation({ initialIsBlocked: false });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Block this/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Block" }));
+
+    await waitFor(() => expect(blockUserMock).toHaveBeenCalled());
+    expect(submitReportMock).not.toHaveBeenCalled();
   });
 });

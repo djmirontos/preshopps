@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getConversationContext } from "@/lib/messaging/get-conversation-context";
 import { getConversationMessages } from "@/lib/messaging/get-conversation-messages";
+import { getConversationBlockState } from "@/lib/messaging/get-conversation-block-state";
 import { ConversationDetailClient } from "@/components/messaging/ConversationDetailClient";
 import type { MessagesCursor } from "@/lib/messaging/get-conversation-messages";
 
@@ -54,7 +55,10 @@ export default async function ConversationDetailPage({ params }: PageProps) {
     );
   }
 
-  const messagesResult = await getConversationMessages(conversationId, MESSAGES_LIMIT);
+  const [messagesResult, blockStateResult] = await Promise.all([
+    getConversationMessages(conversationId, MESSAGES_LIMIT),
+    getConversationBlockState(conversationId),
+  ]);
 
   async function loadEarlierAction(id: string, cursor: MessagesCursor) {
     "use server";
@@ -69,6 +73,14 @@ export default async function ConversationDetailPage({ params }: PageProps) {
     );
   }
 
+  // get_conversation_block_state uses the exact same participant-
+  // resolution logic as get_conversation_context (0072's own header), so
+  // a "found" contextResult should always pair with a "found" block
+  // state too; a soft fallback (block/unblock simply unavailable this
+  // load) is kept only for the structurally-shouldn't-happen case,
+  // rather than failing the whole conversation view over it.
+  const blockState = blockStateResult.status === "found" ? blockStateResult.state : null;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <ConversationDetailClient
@@ -76,6 +88,8 @@ export default async function ConversationDetailPage({ params }: PageProps) {
         initialMessages={messagesResult.messages}
         initialCursor={messagesResult.nextCursor}
         loadEarlier={loadEarlierAction}
+        otherPartyId={blockState?.otherPartyId ?? ""}
+        initialIsBlocked={blockState?.isBlockedByViewer ?? false}
       />
     </div>
   );

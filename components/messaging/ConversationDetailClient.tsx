@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Archive, ArchiveRestore, MailOpen, Package, Volume2, VolumeX } from "lucide-react";
+import { Archive, ArchiveRestore, MailOpen, Package, UserCheck, UserX, Volume2, VolumeX } from "lucide-react";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { containsExternalLink } from "@/lib/messaging/detect-link";
 import { sendMessage, SEND_MESSAGE_ERROR_MESSAGES } from "@/lib/messaging/send-message";
@@ -13,6 +13,9 @@ import {
   setConversationArchived,
   setConversationMuted,
 } from "@/lib/messaging/conversation-state";
+import { blockUser, unblockUser, BLOCK_USER_ERROR_MESSAGES, UNBLOCK_USER_ERROR_MESSAGES } from "@/lib/messaging/block-actions";
+import { ReportButton } from "@/components/moderation/ReportButton";
+import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { ConversationMessage, MessagesCursor } from "@/lib/messaging/get-conversation-messages";
 
@@ -29,6 +32,10 @@ type Props = {
   initialMessages: ConversationMessage[];
   initialCursor: MessagesCursor | null;
   loadEarlier: (conversationId: string, cursor: MessagesCursor) => Promise<LoadEarlierResult>;
+  /** The other participant's own profile id, resolved server-side by
+   * get_conversation_block_state (0072) -- never guessed/typed client-side. */
+  otherPartyId: string;
+  initialIsBlocked: boolean;
 };
 
 /**
@@ -43,10 +50,15 @@ type Props = {
  * instruction). No image/file attachments, no rich text, no edit/delete --
  * messages are immutable, matching PRD 25.4.
  */
-export function ConversationDetailClient({ context, initialMessages, initialCursor, loadEarlier }: Props) {
+export function ConversationDetailClient({ context, initialMessages, initialCursor, loadEarlier, otherPartyId, initialIsBlocked }: Props) {
   const [isArchived, setIsArchived] = useState(context.isArchived);
   const [isMuted, setIsMuted] = useState(context.isMuted);
   const [markedUnreadFeedback, setMarkedUnreadFeedback] = useState(false);
+
+  const [isBlocked, setIsBlocked] = useState(initialIsBlocked);
+  const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false);
+  const [isBlockPending, setIsBlockPending] = useState(false);
+  const [blockError, setBlockError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState(initialMessages);
   const [earlierCursor, setEarlierCursor] = useState(initialCursor);
@@ -124,6 +136,51 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
     if (result.ok) setMarkedUnreadFeedback(true);
   }
 
+  /** Block requires confirmation (a consequential, cross-cutting PRD 30
+   * action); Unblock is direct, matching this component's own existing
+   * mute/archive toggles. Both trust the RPC's own confirmed result as
+   * authoritative -- never optimistic-only -- so effectiveCanSend below
+   * only ever reflects a server-confirmed block state change. */
+  async function handleConfirmBlock() {
+    setIsBlockPending(true);
+    setBlockError(null);
+
+    const result = await blockUser(otherPartyId);
+    setIsBlockPending(false);
+
+    if (!result.ok) {
+      setBlockError(BLOCK_USER_ERROR_MESSAGES[result.code]);
+      return;
+    }
+
+    setIsBlockConfirmOpen(false);
+    setIsBlocked(true);
+  }
+
+  async function handleUnblock() {
+    setIsBlockPending(true);
+    setBlockError(null);
+
+    const result = await unblockUser(otherPartyId);
+    setIsBlockPending(false);
+
+    if (!result.ok) {
+      setBlockError(UNBLOCK_USER_ERROR_MESSAGES[result.code]);
+      return;
+    }
+
+    setIsBlocked(false);
+  }
+
+  const otherPartyLabel = context.viewerRole === "seller" ? "buyer" : "seller";
+  // context.canSend is get_conversation_context's own page-load snapshot
+  // (bidirectional block + restriction check, per 0046); combining it with
+  // the viewer's own just-confirmed block action keeps the composer's
+  // availability authoritative without a full page refresh. send_message
+  // remains the sole real enforcement point regardless, per 0046's own
+  // documented "UI convenience only" design.
+  const effectiveCanSend = context.canSend && !isBlocked;
+
   return (
     <div>
       <div className="border-b border-divider pb-3">
@@ -185,8 +242,28 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
             >
               <MailOpen className="h-4 w-4" aria-hidden="true" />
             </button>
+            <button
+              type="button"
+              onClick={() => (isBlocked ? void handleUnblock() : setIsBlockConfirmOpen(true))}
+              disabled={isBlockPending}
+              aria-label={isBlocked ? `Unblock this ${otherPartyLabel}` : `Block this ${otherPartyLabel}`}
+              aria-pressed={isBlocked}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+            >
+              {isBlocked ? <UserCheck className="h-4 w-4" aria-hidden="true" /> : <UserX className="h-4 w-4" aria-hidden="true" />}
+            </button>
+            <ReportButton
+              targetType="conversation"
+              targetId={context.conversationId}
+              targetLabel="conversation"
+              isAuthenticated={true}
+              next={`/messages/${context.conversationId}`}
+              iconOnly
+            />
           </div>
         </div>
+
+        {blockError && !isBlockConfirmOpen && <p className="mt-2 text-right text-xs text-danger">{blockError}</p>}
 
         {context.listingId && (
           <Link
@@ -250,7 +327,7 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
       </div>
 
       <div className="border-t border-divider pt-3">
-        {context.canSend ? (
+        {effectiveCanSend ? (
           <div className="flex items-end gap-2">
             <label htmlFor="message-composer" className="sr-only">
               Message
@@ -280,6 +357,19 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
         )}
         {sendError && <p className="mt-2 text-sm text-danger">{sendError}</p>}
       </div>
+
+      {isBlockConfirmOpen && (
+        <ConfirmDialog
+          title={`Block this ${otherPartyLabel}?`}
+          description="You won't be able to message each other or start new order requests. Your existing message history stays visible to you both."
+          confirmLabel="Block"
+          destructive
+          isPending={isBlockPending}
+          errorMessage={blockError}
+          onConfirm={() => void handleConfirmBlock()}
+          onClose={() => setIsBlockConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 }

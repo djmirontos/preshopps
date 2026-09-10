@@ -26,6 +26,10 @@ type Props = {
     ratingFilter: ReviewRatingFilter,
     sortMode: ReviewSortMode,
   ) => Promise<FetchReviewsResult>;
+  isAuthenticated: boolean;
+  /** Safe internal path to return to after sign-in, passed through to each
+   * review's Report action. */
+  next: string;
 };
 
 const RATING_FILTERS: ReviewRatingFilter[] = [null, 5, 4, 3, 2, 1];
@@ -58,7 +62,7 @@ function ratingFilterLabel(value: ReviewRatingFilter): string {
  * "Load more" always resends the currently selected filter/sort alongside
  * its cursor.
  */
-export function ShopReviewsClient({ initialReviews, initialHadError, initialCursor, fetchReviews }: Props) {
+export function ShopReviewsClient({ initialReviews, initialHadError, initialCursor, fetchReviews, isAuthenticated, next }: Props) {
   const [ratingFilter, setRatingFilter] = useState<ReviewRatingFilter>(null);
   const [sortMode, setSortMode] = useState<ReviewSortMode>("newest");
   const [reviews, setReviews] = useState(initialReviews);
@@ -140,7 +144,7 @@ export function ShopReviewsClient({ initialReviews, initialHadError, initialCurs
           <>
             <div className="space-y-3">
               {reviews.map((review) => (
-                <ShopReviewCard key={review.reviewId} review={review} />
+                <ShopReviewCard key={review.reviewId} review={review} isAuthenticated={isAuthenticated} next={next} />
               ))}
             </div>
 

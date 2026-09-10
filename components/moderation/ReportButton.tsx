@@ -18,6 +18,13 @@ type Props = {
   /** Safe internal path to return to after sign-in. */
   next: string;
   className?: string;
+  /** Renders a bare circular icon button (no visible "Report" text) sized
+   * to match this codebase's other h-9 w-9 icon-only header controls (e.g.
+   * ConversationDetailClient's mute/archive/mark-unread row) -- for
+   * placement among other icon buttons where the default text+icon
+   * button would look inconsistent. Defaults to false; every existing
+   * call site (listing/shop pages) is unaffected. */
+  iconOnly?: boolean;
 };
 
 /**
@@ -28,7 +35,7 @@ type Props = {
  * authenticated non-owner gets the reason+description dialog and calls
  * submit_report directly.
  */
-export function ReportButton({ targetType, targetId, targetLabel, isAuthenticated, hidden, next, className }: Props) {
+export function ReportButton({ targetType, targetId, targetLabel, isAuthenticated, hidden, next, className, iconOnly }: Props) {
   const [isGateOpen, setIsGateOpen] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,22 +61,46 @@ export function ReportButton({ targetType, targetId, targetLabel, isAuthenticate
   }
 
   if (submitted) {
+    if (iconOnly) {
+      return (
+        <span
+          className={className ?? "flex h-9 w-9 items-center justify-center text-ink-muted"}
+          title="Report submitted. Thank you."
+        >
+          <Flag className="h-4 w-4" aria-hidden="true" />
+        </span>
+      );
+    }
     return <p className={className ?? "text-xs text-ink-muted"}>Report submitted. Thank you.</p>;
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => (isAuthenticated ? setIsDialogOpen(true) : setIsGateOpen(true))}
-        className={
-          className ??
-          "inline-flex items-center gap-1 text-xs font-medium text-ink-muted hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        }
-      >
-        <Flag className="h-3.5 w-3.5" aria-hidden="true" />
-        Report
-      </button>
+      {iconOnly ? (
+        <button
+          type="button"
+          onClick={() => (isAuthenticated ? setIsDialogOpen(true) : setIsGateOpen(true))}
+          aria-label={`Report ${targetLabel}`}
+          className={
+            className ??
+            "flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          }
+        >
+          <Flag className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => (isAuthenticated ? setIsDialogOpen(true) : setIsGateOpen(true))}
+          className={
+            className ??
+            "inline-flex items-center gap-1 text-xs font-medium text-ink-muted hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          }
+        >
+          <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+          Report
+        </button>
+      )}
 
       {isGateOpen && (
         <AuthGate

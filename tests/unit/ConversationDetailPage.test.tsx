@@ -3,11 +3,21 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { ConversationContext, ConversationContextResult } from "@/lib/messaging/get-conversation-context";
 import type { GetConversationMessagesResult } from "@/lib/messaging/get-conversation-messages";
+import type { ConversationBlockStateResult } from "@/lib/messaging/get-conversation-block-state";
 
-const { getAuthUserMock, getConversationContextMock, getConversationMessagesMock, redirectMock, notFoundMock, refreshMock } = vi.hoisted(() => ({
+const {
+  getAuthUserMock,
+  getConversationContextMock,
+  getConversationMessagesMock,
+  getConversationBlockStateMock,
+  redirectMock,
+  notFoundMock,
+  refreshMock,
+} = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getConversationContextMock: vi.fn<(id: string) => Promise<ConversationContextResult>>(),
   getConversationMessagesMock: vi.fn<() => Promise<GetConversationMessagesResult>>(),
+  getConversationBlockStateMock: vi.fn<(id: string) => Promise<ConversationBlockStateResult>>(),
   redirectMock: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
@@ -27,6 +37,10 @@ vi.mock("@/lib/messaging/get-conversation-context", () => ({
 
 vi.mock("@/lib/messaging/get-conversation-messages", () => ({
   getConversationMessages: getConversationMessagesMock,
+}));
+
+vi.mock("@/lib/messaging/get-conversation-block-state", () => ({
+  getConversationBlockState: getConversationBlockStateMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -66,6 +80,7 @@ describe("ConversationDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getConversationMessagesMock.mockResolvedValue({ messages: [], hadError: false, nextCursor: null });
+    getConversationBlockStateMock.mockResolvedValue({ status: "found", state: { otherPartyId: "other-user-1", isBlockedByViewer: false } });
   });
 
   it("redirects a guest to sign-in with the conversation's own path preserved as next=", async () => {
@@ -117,5 +132,23 @@ describe("ConversationDetailPage", () => {
     render(await ConversationDetailPage({ params }));
     expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
+  });
+
+  it("shows Unblock when get_conversation_block_state reports the viewer already blocked the other party", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+    getConversationContextMock.mockResolvedValue({ status: "found", context: sampleContext() });
+    getConversationBlockStateMock.mockResolvedValue({ status: "found", state: { otherPartyId: "other-user-1", isBlockedByViewer: true } });
+
+    render(await ConversationDetailPage({ params }));
+    expect(screen.getByRole("button", { name: /^Unblock this/ })).toBeInTheDocument();
+  });
+
+  it("shows Block (not Unblock) as a safe fallback if block-state resolution fails while context still succeeds", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+    getConversationContextMock.mockResolvedValue({ status: "found", context: sampleContext() });
+    getConversationBlockStateMock.mockResolvedValue({ status: "error" });
+
+    render(await ConversationDetailPage({ params }));
+    expect(screen.getByRole("button", { name: /^Block this/ })).toBeInTheDocument();
   });
 });

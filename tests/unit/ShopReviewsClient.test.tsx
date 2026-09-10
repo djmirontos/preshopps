@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import type { ShopReviewItem } from "@/lib/reviews/get-shop-reviews";
 import { ShopReviewsClient } from "@/components/shop/ShopReviewsClient";
+
+/** isAuthenticated/next are exercised directly in ShopReviewCard.test.tsx --
+ * this file's own tests are about the list/pagination shell, so a fixed
+ * default keeps every render call here focused on what it's actually
+ * testing. */
+function renderReviews(props: Omit<ComponentProps<typeof ShopReviewsClient>, "isAuthenticated" | "next">) {
+  return render(<ShopReviewsClient isAuthenticated={true} next="/shop/annes-closet" {...props} />);
+}
 
 function review(overrides: Partial<ShopReviewItem> = {}): ShopReviewItem {
   return {
@@ -24,25 +33,23 @@ function review(overrides: Partial<ShopReviewItem> = {}): ShopReviewItem {
 describe("ShopReviewsClient", () => {
   it("renders the server-provided initial results without calling fetchReviews", () => {
     const fetchReviews = vi.fn();
-    render(
-      <ShopReviewsClient initialReviews={[review()]} initialHadError={false} initialCursor={null} fetchReviews={fetchReviews} />,
-    );
+    renderReviews({ initialReviews: [review()], initialHadError: false, initialCursor: null, fetchReviews });
     expect(screen.getByText("Great seller!")).toBeInTheDocument();
     expect(fetchReviews).not.toHaveBeenCalled();
   });
 
   it("shows a plain empty message (never a 404) for a valid shop with zero reviews", () => {
-    render(<ShopReviewsClient initialReviews={[]} initialHadError={false} initialCursor={null} fetchReviews={vi.fn()} />);
+    renderReviews({ initialReviews: [], initialHadError: false, initialCursor: null, fetchReviews: vi.fn() });
     expect(screen.getByText("No reviews yet.")).toBeInTheDocument();
   });
 
   it("shows an error fallback when the initial fetch failed", () => {
-    render(<ShopReviewsClient initialReviews={[]} initialHadError initialCursor={null} fetchReviews={vi.fn()} />);
+    renderReviews({ initialReviews: [], initialHadError: true, initialCursor: null, fetchReviews: vi.fn() });
     expect(screen.getByText("Unable to load reviews right now.")).toBeInTheDocument();
   });
 
   it("renders exactly one rating filter chip group (All, 5, 4, 3, 2, 1) and a sort control, defaulting to All / Newest", () => {
-    render(<ShopReviewsClient initialReviews={[review()]} initialHadError={false} initialCursor={null} fetchReviews={vi.fn()} />);
+    renderReviews({ initialReviews: [review()], initialHadError: false, initialCursor: null, fetchReviews: vi.fn() });
     const group = screen.getByRole("radiogroup", { name: /filter by rating/i });
     expect(group).toBeInTheDocument();
     for (const label of ["All ratings", "5 stars", "4 stars", "3 stars", "2 stars", "1 star"]) {
@@ -53,7 +60,7 @@ describe("ShopReviewsClient", () => {
   });
 
   it("gives every rating chip and the sort select the shared disabled:opacity-60 visual treatment, matching the Load More button", () => {
-    render(<ShopReviewsClient initialReviews={[review()]} initialHadError={false} initialCursor={null} fetchReviews={vi.fn()} />);
+    renderReviews({ initialReviews: [review()], initialHadError: false, initialCursor: null, fetchReviews: vi.fn() });
     for (const label of ["All ratings", "5 stars", "4 stars", "3 stars", "2 stars", "1 star"]) {
       expect(screen.getByRole("radio", { name: label }).className).toContain("disabled:opacity-60");
     }
@@ -66,14 +73,12 @@ describe("ShopReviewsClient", () => {
       hadError: false,
       nextCursor: null,
     });
-    render(
-      <ShopReviewsClient
-        initialReviews={[review()]}
-        initialHadError={false}
-        initialCursor={{ createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 }}
-        fetchReviews={fetchReviews}
-      />,
-    );
+    renderReviews({
+      initialReviews: [review()],
+      initialHadError: false,
+      initialCursor: { createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 },
+      fetchReviews,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /load more/i }));
 
@@ -92,14 +97,12 @@ describe("ShopReviewsClient", () => {
       hadError: false,
       nextCursor: null,
     });
-    render(
-      <ShopReviewsClient
-        initialReviews={[review({ body: "Mixed rating review" })]}
-        initialHadError={false}
-        initialCursor={{ createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 }}
-        fetchReviews={fetchReviews}
-      />,
-    );
+    renderReviews({
+      initialReviews: [review({ body: "Mixed rating review" })],
+      initialHadError: false,
+      initialCursor: { createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 },
+      fetchReviews,
+    });
 
     fireEvent.click(screen.getByRole("radio", { name: "5 stars" }));
 
@@ -118,14 +121,7 @@ describe("ShopReviewsClient", () => {
       hadError: false,
       nextCursor: { createdAt: "2026-01-02T00:00:00.000Z", id: "review-top", rating: 5 },
     });
-    render(
-      <ShopReviewsClient
-        initialReviews={[review({ body: "Newest first" })]}
-        initialHadError={false}
-        initialCursor={null}
-        fetchReviews={fetchReviews}
-      />,
-    );
+    renderReviews({ initialReviews: [review({ body: "Newest first" })], initialHadError: false, initialCursor: null, fetchReviews });
 
     fireEvent.change(screen.getByRole("combobox", { name: /sort reviews/i }), { target: { value: "highest_rating" } });
 
@@ -136,9 +132,7 @@ describe("ShopReviewsClient", () => {
 
   it("a filtered result set that comes back empty shows a filter-aware empty message, not the generic one", async () => {
     const fetchReviews = vi.fn().mockResolvedValue({ reviews: [], hadError: false, nextCursor: null });
-    render(
-      <ShopReviewsClient initialReviews={[review()]} initialHadError={false} initialCursor={null} fetchReviews={fetchReviews} />,
-    );
+    renderReviews({ initialReviews: [review()], initialHadError: false, initialCursor: null, fetchReviews });
 
     fireEvent.click(screen.getByRole("radio", { name: "1 star" }));
 
@@ -147,14 +141,12 @@ describe("ShopReviewsClient", () => {
 
   it("shows a load-more error without discarding already-loaded results", async () => {
     const fetchReviews = vi.fn().mockResolvedValue({ reviews: [], hadError: true, nextCursor: null });
-    render(
-      <ShopReviewsClient
-        initialReviews={[review()]}
-        initialHadError={false}
-        initialCursor={{ createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 }}
-        fetchReviews={fetchReviews}
-      />,
-    );
+    renderReviews({
+      initialReviews: [review()],
+      initialHadError: false,
+      initialCursor: { createdAt: "2026-01-01T00:00:00.000Z", id: "review-1", rating: 5 },
+      fetchReviews,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /load more/i }));
     await waitFor(() => expect(screen.getByText(/unable to load more reviews right now/i)).toBeInTheDocument());
