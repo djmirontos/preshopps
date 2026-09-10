@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { X } from "lucide-react";
 
 type Props = {
@@ -17,12 +18,12 @@ type Props = {
  * focus return, visible close button), adapted with a required checkbox
  * instead of a required textarea. No new modal framework/dependency.
  *
- * Policy pages don't exist yet (confirmed by inspection -- no /policies,
- * /legal, /terms, or similar route anywhere in app/) -- per this task's own
- * instruction, this deliberately does not invent broken links; it names
- * both policies in plain text only. accept_seller_policies (0058) is
- * idempotent and combines both policies under one acceptance timestamp, so
- * this is a single checkbox, not two independent toggles.
+ * Marketplace Rules and Prohibited Items Policy now link to their real
+ * pages (/marketplace-rules, /prohibited-items), opened in a new tab so a
+ * seller mid-publish doesn't lose their in-progress form state.
+ * accept_seller_policies (0058) is unchanged -- still idempotent, still
+ * combines both policies under one acceptance timestamp, so this remains a
+ * single checkbox, not two independent toggles.
  */
 export function SellerPolicyConsentDialog({ isPending, errorMessage, onAccept, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -92,9 +93,7 @@ export function SellerPolicyConsentDialog({ isPending, errorMessage, onAccept, o
             </button>
           </div>
 
-          <p className="mt-1.5 text-sm text-ink-secondary">
-            Before publishing your first listing, you must accept the Marketplace Rules and the Prohibited Items Policy.
-          </p>
+          <p className="mt-1.5 text-sm text-ink-secondary">Before publishing your first listing, please review and accept both policies below.</p>
 
           <label className="mt-3 flex items-start gap-2 text-sm text-ink">
             <input
@@ -103,7 +102,27 @@ export function SellerPolicyConsentDialog({ isPending, errorMessage, onAccept, o
               onChange={(event) => setChecked(event.target.checked)}
               className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-action focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             />
-            <span>I have read and agree to the Marketplace Rules and the Prohibited Items Policy.</span>
+            <span>
+              I have read and agree to the{" "}
+              <Link
+                href="/marketplace-rules"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                Marketplace Rules
+              </Link>{" "}
+              and the{" "}
+              <Link
+                href="/prohibited-items"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                Prohibited Items Policy
+              </Link>
+              .
+            </span>
           </label>
 
           {errorMessage && <p className="mt-3 text-sm text-danger">{errorMessage}</p>}

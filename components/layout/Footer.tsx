@@ -1,11 +1,13 @@
 import Link from "next/link";
 
 const FOOTER_LINKS = [
-  { href: "#", label: "How It Works" },
-  { href: "#", label: "Safety Tips" },
-  { href: "#", label: "Terms" },
-  { href: "#", label: "Privacy" },
-  { href: "#", label: "Contact" },
+  { href: "/how-it-works", label: "How It Works" },
+  { href: "/safety", label: "Safety Tips" },
+  { href: "/terms", label: "Terms" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/marketplace-rules", label: "Marketplace Rules" },
+  { href: "/prohibited-items", label: "Prohibited Items" },
+  { href: "/support", label: "Contact" },
 ];
 
 /**
@@ -30,7 +32,12 @@ export function Footer() {
             ))}
           </ul>
         </nav>
-        <p className="text-xs text-ink-muted">&copy; {new Date().getFullYear()} Preshopps</p>
+        <div className="flex flex-col items-center gap-1 lg:items-end">
+          <a href="mailto:support@preshopps.com" className="rounded text-xs text-ink-secondary hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+            support@preshopps.com
+          </a>
+          <p className="text-xs text-ink-muted">&copy; {new Date().getFullYear()} Preshopps</p>
+        </div>
       </div>
     </footer>
   );

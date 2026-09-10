@@ -61,6 +61,22 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
       <p className="mt-1 text-sm text-ink-secondary">Moderation queue, newest first.</p>
 
       <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        <Link
+          href="/admin"
+          aria-current="page"
+          className="flex h-8 shrink-0 items-center rounded-full bg-brand-action px-3 text-xs font-semibold text-brand-action-text"
+        >
+          Reports
+        </Link>
+        <Link
+          href="/admin/support"
+          className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
+        >
+          Support
+        </Link>
+      </div>
+
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {STATUS_TABS.map((tab) => {
           const isActive = tab.value === status;
           const href = tab.value === null ? "/admin" : `/admin?status=${tab.value}`;
