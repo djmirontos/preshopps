@@ -3,19 +3,22 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { OrderDetailResult, OrderDetail } from "@/lib/orders/get-my-order-detail";
 import type { OrderReviewResult } from "@/lib/reviews/get-order-review";
+import type { GetOrderDisputeSummaryResult } from "@/lib/disputes/get-order-dispute-summary";
 
-const { getAuthUserMock, getMyOrderDetailMock, getOrderReviewMock, redirectMock, notFoundMock, refreshMock } = vi.hoisted(() => ({
-  getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
-  getMyOrderDetailMock: vi.fn<(code: string) => Promise<OrderDetailResult>>(),
-  getOrderReviewMock: vi.fn<(orderId: string) => Promise<OrderReviewResult>>(),
-  redirectMock: vi.fn((url: string) => {
-    throw new Error(`NEXT_REDIRECT:${url}`);
-  }),
-  notFoundMock: vi.fn(() => {
-    throw new Error("NEXT_NOT_FOUND");
-  }),
-  refreshMock: vi.fn(),
-}));
+const { getAuthUserMock, getMyOrderDetailMock, getOrderReviewMock, getOrderDisputeSummaryMock, redirectMock, notFoundMock, refreshMock } =
+  vi.hoisted(() => ({
+    getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
+    getMyOrderDetailMock: vi.fn<(code: string) => Promise<OrderDetailResult>>(),
+    getOrderReviewMock: vi.fn<(orderId: string) => Promise<OrderReviewResult>>(),
+    getOrderDisputeSummaryMock: vi.fn<(orderId: string) => Promise<GetOrderDisputeSummaryResult>>(),
+    redirectMock: vi.fn((url: string) => {
+      throw new Error(`NEXT_REDIRECT:${url}`);
+    }),
+    notFoundMock: vi.fn(() => {
+      throw new Error("NEXT_NOT_FOUND");
+    }),
+    refreshMock: vi.fn(),
+  }));
 
 vi.mock("@/lib/auth/session", () => ({
   getAuthUser: getAuthUserMock,
@@ -27,6 +30,10 @@ vi.mock("@/lib/orders/get-my-order-detail", () => ({
 
 vi.mock("@/lib/reviews/get-order-review", () => ({
   getOrderReview: getOrderReviewMock,
+}));
+
+vi.mock("@/lib/disputes/get-order-dispute-summary", () => ({
+  getOrderDisputeSummary: getOrderDisputeSummaryMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -73,6 +80,7 @@ describe("OrderDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getOrderReviewMock.mockResolvedValue({ status: "not_found" });
+    getOrderDisputeSummaryMock.mockResolvedValue({ status: "found", summary: null });
   });
 
   it("redirects a guest to sign-in with the order's own path preserved as next=", async () => {

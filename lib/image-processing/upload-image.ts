@@ -5,7 +5,7 @@ import { compressImage } from "@/lib/image-processing/compress-image";
  * Exactly the three buckets created by 0048_media_storage_foundation.sql.
  * Never invent a fourth without a matching migration.
  */
-export type MediaBucket = "listing-images" | "review-images" | "shop-images";
+export type MediaBucket = "listing-images" | "review-images" | "shop-images" | "dispute-images";
 
 const MAX_SOURCE_FILE_BYTES = 20 * 1024 * 1024;
 

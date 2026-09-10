@@ -53,6 +53,12 @@ export default async function AdminSupportTicketsPage() {
         >
           Support
         </Link>
+        <Link
+          href="/admin/disputes"
+          className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
+        >
+          Disputes
+        </Link>
       </div>
 
       <div className="mt-6">

@@ -4,7 +4,9 @@ import { getAuthUser } from "@/lib/auth/session";
 import { getMyShopOrderDetail } from "@/lib/seller/get-my-shop-order-detail";
 import { SellerOrderDetailClient } from "@/components/seller/SellerOrderDetailClient";
 import { SellerOrderReviewSection } from "@/components/seller/SellerOrderReviewSection";
+import { DisputeSection } from "@/components/disputes/DisputeSection";
 import { getOrderReview } from "@/lib/reviews/get-order-review";
+import { getOrderDisputeSummary } from "@/lib/disputes/get-order-dispute-summary";
 
 type PageProps = {
   params: Promise<{ publicCode: string }>;
@@ -49,6 +51,9 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
   const orderReviewResult = result.order.status === "completed" ? await getOrderReview(result.order.orderId) : null;
   const orderReview = orderReviewResult?.status === "found" ? orderReviewResult.review : null;
 
+  const disputeSummaryResult = await getOrderDisputeSummary(result.order.orderId);
+  const existingDispute = disputeSummaryResult.status === "found" ? disputeSummaryResult.summary : null;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link href="/seller/orders" className="text-sm text-ink-secondary hover:text-ink">
@@ -56,6 +61,13 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
       </Link>
 
       <SellerOrderDetailClient initialOrder={result.order} />
+
+      <DisputeSection
+        orderId={result.order.orderId}
+        orderStatus={result.order.status}
+        viewerUserId={user.id}
+        existingDispute={existingDispute}
+      />
 
       <SellerOrderReviewSection review={orderReview} />
     </div>

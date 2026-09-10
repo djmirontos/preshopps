@@ -1,24 +1,25 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
-import { getAdminReports, type ReportStatus } from "@/lib/admin/get-admin-reports";
-import { AdminReportsListClient } from "@/components/admin/AdminReportsListClient";
+import { getAdminDisputes } from "@/lib/admin/get-admin-disputes";
+import { AdminDisputesListClient } from "@/components/admin/AdminDisputesListClient";
+import type { DisputeStatus } from "@/lib/disputes/get-my-disputes";
 
-export const metadata = { title: "Admin | Preshopps" };
+export const metadata = { title: "Disputes | Admin | Preshopps" };
 
-const REPORTS_LIMIT = 20;
+const DISPUTES_LIMIT = 20;
 
-const STATUS_VALUES: ReadonlySet<string> = new Set<ReportStatus>(["pending", "resolved", "dismissed"]);
+const STATUS_VALUES: ReadonlySet<string> = new Set<DisputeStatus>(["opened", "under_review", "resolved"]);
 
-const STATUS_TABS: { value: ReportStatus | null; label: string }[] = [
+const STATUS_TABS: { value: DisputeStatus | null; label: string }[] = [
   { value: null, label: "All" },
-  { value: "pending", label: "Pending" },
+  { value: "opened", label: "Opened" },
+  { value: "under_review", label: "Under Review" },
   { value: "resolved", label: "Resolved" },
-  { value: "dismissed", label: "Dismissed" },
 ];
 
-function parseStatus(raw: string | undefined): ReportStatus | null {
-  return raw && STATUS_VALUES.has(raw) ? (raw as ReportStatus) : null;
+function parseStatus(raw: string | undefined): DisputeStatus | null {
+  return raw && STATUS_VALUES.has(raw) ? (raw as DisputeStatus) : null;
 }
 
 type PageProps = {
@@ -26,25 +27,23 @@ type PageProps = {
 };
 
 /**
- * Admin-only reports queue. Authorization is never decided client-side or
- * by this page itself -- get_admin_reports (0067) is the sole source of
- * truth, checked against public.user_roles server-side; a non-admin
- * caller (including a signed-in ordinary user) gets the exact same
- * notFound() an unauthenticated guest gets after the redirect, never a
- * distinguishable "access denied" page that would confirm this route's
- * existence to someone probing it.
+ * Admin-only dispute queue (PRD 34.4). Same authorization posture as
+ * /admin and /admin/support: get_admin_disputes (0075) is the sole
+ * source of truth, checked against public.user_roles server-side; a
+ * non-admin caller gets the same notFound() an unauthenticated guest
+ * gets after the redirect.
  */
-export default async function AdminReportsPage({ searchParams }: PageProps) {
+export default async function AdminDisputesPage({ searchParams }: PageProps) {
   const user = await getAuthUser();
 
   if (!user) {
-    redirect(`/sign-in?next=${encodeURIComponent("/admin")}`);
+    redirect(`/sign-in?next=${encodeURIComponent("/admin/disputes")}`);
   }
 
   const { status: rawStatus } = await searchParams;
   const status = parseStatus(rawStatus);
 
-  const result = await getAdminReports(REPORTS_LIMIT, status);
+  const result = await getAdminDisputes(DISPUTES_LIMIT, status);
 
   if (result.notAdmin) {
     notFound();
@@ -52,19 +51,18 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
 
   async function loadMoreAction(cursor: { createdAt: string; id: string }) {
     "use server";
-    return getAdminReports(REPORTS_LIMIT, status, cursor);
+    return getAdminDisputes(DISPUTES_LIMIT, status, cursor);
   }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-xl font-bold text-ink lg:text-2xl">Reports</h1>
-      <p className="mt-1 text-sm text-ink-secondary">Moderation queue, newest first.</p>
+      <h1 className="text-xl font-bold text-ink lg:text-2xl">Disputes</h1>
+      <p className="mt-1 text-sm text-ink-secondary">Dispute queue, newest first.</p>
 
       <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
         <Link
           href="/admin"
-          aria-current="page"
-          className="flex h-8 shrink-0 items-center rounded-full bg-brand-action px-3 text-xs font-semibold text-brand-action-text"
+          className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
         >
           Reports
         </Link>
@@ -76,7 +74,8 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
         </Link>
         <Link
           href="/admin/disputes"
-          className="flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-xs font-medium text-ink-secondary hover:border-brand-link hover:text-brand-link"
+          aria-current="page"
+          className="flex h-8 shrink-0 items-center rounded-full bg-brand-action px-3 text-xs font-semibold text-brand-action-text"
         >
           Disputes
         </Link>
@@ -85,7 +84,7 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {STATUS_TABS.map((tab) => {
           const isActive = tab.value === status;
-          const href = tab.value === null ? "/admin" : `/admin?status=${tab.value}`;
+          const href = tab.value === null ? "/admin/disputes" : `/admin/disputes?status=${tab.value}`;
           return (
             <Link
               key={tab.label}
@@ -104,8 +103,8 @@ export default async function AdminReportsPage({ searchParams }: PageProps) {
       </div>
 
       <div className="mt-6">
-        <AdminReportsListClient
-          initialReports={result.reports}
+        <AdminDisputesListClient
+          initialDisputes={result.disputes}
           initialHadError={result.hadError}
           initialCursor={result.nextCursor}
           loadMore={loadMoreAction}
