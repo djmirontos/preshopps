@@ -7,13 +7,12 @@ import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
 import { getAppUrl } from "@/lib/env";
 import { mergeGuestCartOnAuth } from "@/lib/cart/merge-guest-cart-on-auth";
+import { PasswordInput } from "@/components/auth/PasswordInput";
+import { AUTH_INPUT_CLASS, AUTH_BUTTON_CLASS } from "@/components/auth/auth-field-styles";
 
 type Props = {
   next: string;
 };
-
-const INPUT_CLASS =
-  "h-12 w-full rounded-[10px] border border-border bg-canvas px-3 text-base text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand";
 
 /**
  * After a successful signUp() call, Supabase returns EITHER an active
@@ -110,9 +109,9 @@ export function SignUpForm({ next }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-3">
       <div>
-        <label htmlFor="sign-up-email" className="mb-1.5 block text-sm font-medium text-ink">
+        <label htmlFor="sign-up-email" className="mb-1 block text-sm font-medium text-ink">
           Email
         </label>
         <input
@@ -123,44 +122,32 @@ export function SignUpForm({ next }: Props) {
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className={INPUT_CLASS}
+          className={AUTH_INPUT_CLASS}
         />
       </div>
 
-      <div>
-        <label htmlFor="sign-up-password" className="mb-1.5 block text-sm font-medium text-ink">
-          Password
-        </label>
-        <input
-          id="sign-up-password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={6}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className={INPUT_CLASS}
-        />
-        <p className="mt-1 text-xs text-ink-muted">At least 6 characters.</p>
-      </div>
+      <PasswordInput
+        id="sign-up-password"
+        name="password"
+        label="Password"
+        autoComplete="new-password"
+        required
+        minLength={6}
+        value={password}
+        onChange={setPassword}
+        helperText="At least 6 characters."
+      />
 
-      <div>
-        <label htmlFor="sign-up-confirm-password" className="mb-1.5 block text-sm font-medium text-ink">
-          Confirm password
-        </label>
-        <input
-          id="sign-up-confirm-password"
-          name="confirmPassword"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={6}
-          value={confirmPassword}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-          className={INPUT_CLASS}
-        />
-      </div>
+      <PasswordInput
+        id="sign-up-confirm-password"
+        name="confirmPassword"
+        label="Confirm password"
+        autoComplete="new-password"
+        required
+        minLength={6}
+        value={confirmPassword}
+        onChange={setConfirmPassword}
+      />
 
       <label className="flex items-start gap-2 text-sm text-ink">
         <input
@@ -198,11 +185,7 @@ export function SignUpForm({ next }: Props) {
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={isSubmitting || !policiesAccepted}
-        className="h-12 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-      >
+      <button type="submit" disabled={isSubmitting || !policiesAccepted} className={AUTH_BUTTON_CLASS}>
         {isSubmitting ? "Creating account…" : "Create account"}
       </button>
 

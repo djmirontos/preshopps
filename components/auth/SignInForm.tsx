@@ -6,13 +6,12 @@ import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
 import { mergeGuestCartOnAuth } from "@/lib/cart/merge-guest-cart-on-auth";
+import { PasswordInput } from "@/components/auth/PasswordInput";
+import { AUTH_INPUT_CLASS, AUTH_BUTTON_CLASS } from "@/components/auth/auth-field-styles";
 
 type Props = {
   next: string;
 };
-
-const INPUT_CLASS =
-  "h-12 w-full rounded-[10px] border border-border bg-canvas px-3 text-base text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand";
 
 export function SignInForm({ next }: Props) {
   const router = useRouter();
@@ -49,9 +48,9 @@ export function SignInForm({ next }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-3">
       <div>
-        <label htmlFor="sign-in-email" className="mb-1.5 block text-sm font-medium text-ink">
+        <label htmlFor="sign-in-email" className="mb-1 block text-sm font-medium text-ink">
           Email
         </label>
         <input
@@ -62,33 +61,27 @@ export function SignInForm({ next }: Props) {
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className={INPUT_CLASS}
+          className={AUTH_INPUT_CLASS}
         />
       </div>
 
-      <div>
-        <div className="mb-1.5 flex items-center justify-between">
-          <label htmlFor="sign-in-password" className="block text-sm font-medium text-ink">
-            Password
-          </label>
+      <PasswordInput
+        id="sign-in-password"
+        name="password"
+        label="Password"
+        autoComplete="current-password"
+        required
+        value={password}
+        onChange={setPassword}
+        labelRowEnd={
           <Link
             href="/forgot-password"
             className="rounded text-xs font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             Forgot password?
           </Link>
-        </div>
-        <input
-          id="sign-in-password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className={INPUT_CLASS}
-        />
-      </div>
+        }
+      />
 
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -96,11 +89,7 @@ export function SignInForm({ next }: Props) {
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="h-12 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-      >
+      <button type="submit" disabled={isSubmitting} className={AUTH_BUTTON_CLASS}>
         {isSubmitting ? "Signing in…" : "Sign in"}
       </button>
 

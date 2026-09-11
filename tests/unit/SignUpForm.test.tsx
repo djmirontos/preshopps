@@ -181,3 +181,80 @@ describe("SignUpForm -- Terms of Use / Privacy Policy consent (PRD 5.5)", () => 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"));
   });
 });
+
+describe("SignUpForm password visibility toggles", () => {
+  beforeEach(() => {
+    signUpMock.mockReset();
+    pushMock.mockReset();
+    refreshMock.mockReset();
+  });
+
+  it("password and confirm-password fields both start hidden", () => {
+    render(<SignUpForm next="/" />);
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("Confirm password")).toHaveAttribute("type", "password");
+  });
+
+  it("each field has its own accessible Show password toggle", () => {
+    render(<SignUpForm next="/" />);
+    expect(screen.getAllByRole("button", { name: "Show password" })).toHaveLength(2);
+  });
+
+  it("toggling the password field's visibility does not affect the confirm-password field", () => {
+    render(<SignUpForm next="/" />);
+    const [passwordToggle] = screen.getAllByRole("button", { name: "Show password" });
+
+    fireEvent.click(passwordToggle);
+
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Confirm password")).toHaveAttribute("type", "password");
+  });
+
+  it("toggling the confirm-password field's visibility does not affect the password field", () => {
+    render(<SignUpForm next="/" />);
+    const toggles = screen.getAllByRole("button", { name: "Show password" });
+    const confirmToggle = toggles[1];
+
+    fireEvent.click(confirmToggle);
+
+    expect(screen.getByLabelText("Confirm password")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+  });
+
+  it("revealed field switches its accessible label to Hide password", () => {
+    render(<SignUpForm next="/" />);
+    const [passwordToggle] = screen.getAllByRole("button", { name: "Show password" });
+
+    fireEvent.click(passwordToggle);
+
+    expect(screen.getByRole("button", { name: "Hide password" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Show password" })).toHaveLength(1);
+  });
+
+  it("toggle buttons are type=button and never submit the form", () => {
+    render(<SignUpForm next="/" />);
+    const toggles = screen.getAllByRole("button", { name: "Show password" });
+    for (const toggle of toggles) {
+      expect(toggle).toHaveAttribute("type", "button");
+    }
+
+    fireEvent.click(toggles[0]);
+    fireEvent.click(toggles[1]);
+
+    expect(signUpMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("toggling visibility preserves the typed values in both fields", () => {
+    render(<SignUpForm next="/" />);
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw-value" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "confirm-value" } });
+
+    const toggles = screen.getAllByRole("button", { name: "Show password" });
+    fireEvent.click(toggles[0]);
+    fireEvent.click(toggles[1]);
+
+    expect(screen.getByLabelText("Password")).toHaveValue("pw-value");
+    expect(screen.getByLabelText("Confirm password")).toHaveValue("confirm-value");
+  });
+});

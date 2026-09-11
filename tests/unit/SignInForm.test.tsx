@@ -98,3 +98,46 @@ describe("SignInForm", () => {
     expect(screen.queryByText(/relation/i)).not.toBeInTheDocument();
   });
 });
+
+describe("SignInForm password visibility toggle", () => {
+  beforeEach(() => {
+    signInWithPasswordMock.mockReset();
+    pushMock.mockReset();
+    refreshMock.mockReset();
+  });
+
+  it("password field starts hidden", () => {
+    render(<SignInForm next="/" />);
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+  });
+
+  it("has an accessible 'Show password' toggle that reveals the password and becomes 'Hide password'", () => {
+    render(<SignInForm next="/" />);
+    const toggle = screen.getByRole("button", { name: "Show password" });
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: "Hide password" })).toBeInTheDocument();
+  });
+
+  it("toggling visibility does not clear or alter the typed password value", () => {
+    render(<SignInForm next="/" />);
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "super-secret" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+
+    expect(screen.getByLabelText("Password")).toHaveValue("super-secret");
+  });
+
+  it("the toggle button is type=button and does not submit the form", () => {
+    render(<SignInForm next="/" />);
+    const toggle = screen.getByRole("button", { name: "Show password" });
+    expect(toggle).toHaveAttribute("type", "button");
+
+    fireEvent.click(toggle);
+
+    expect(signInWithPasswordMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+});
