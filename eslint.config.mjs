@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Supabase Edge Functions run on Deno, not Node -- `Deno.*` globals and
+    // jsr:/npm: import specifiers are not valid in this Next.js/Node lint
+    // environment. Deno has its own separate linter (`supabase functions
+    // deploy` / `deno lint`), not ESLint.
+    "supabase/functions/**",
   ]),
 ]);
 
