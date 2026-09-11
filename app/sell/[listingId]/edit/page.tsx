@@ -6,8 +6,7 @@ import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity,
 import { type ListingFieldValues } from "@/components/seller/ListingForm";
 import { ListingFormWithPublish } from "@/components/seller/ListingFormWithPublish";
 import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
-import { vehicleFieldValuesFromServer } from "@/components/seller/ListingVehicleFields";
-import { rentalFieldValuesFromServer } from "@/components/seller/ListingRentalFields";
+import { vehicleFieldValuesFromServer, rentalFieldValuesFromServer } from "@/components/listings/listing-field-mappers";
 import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 
 export const metadata = { title: "Edit Draft | Preshopps" };

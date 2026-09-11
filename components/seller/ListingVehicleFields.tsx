@@ -2,7 +2,18 @@
 
 import { REGISTRATION_LABELS } from "@/lib/marketplace/vehicle-rental-labels";
 import type { VehicleRegistrationStatus } from "@/lib/marketplace/listing-detail";
-import type { MyListingVehicleDetails } from "@/lib/seller/get-my-listing";
+import {
+  type VehicleFieldValues,
+  EMPTY_VEHICLE_VALUES,
+  vehicleFieldValuesFromServer,
+} from "@/components/listings/listing-field-mappers";
+
+/** Re-exported so existing importers (ListingForm, tests, etc.) keep
+ * working unchanged -- the canonical definitions now live in
+ * listing-field-mappers.ts so the Server Component at
+ * app/sell/[listingId]/edit/page.tsx can call vehicleFieldValuesFromServer
+ * without reaching into this "use client" module. */
+export { type VehicleFieldValues, EMPTY_VEHICLE_VALUES, vehicleFieldValuesFromServer };
 
 const INPUT_CLASS =
   "mt-1.5 h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60";
@@ -16,47 +27,6 @@ const REGISTRATION_OPTIONS = Object.keys(REGISTRATION_LABELS) as VehicleRegistra
  * a simple checkbox list against them (not a free-text tag input, and not
  * an invented longer list) is the smallest correct UX for this slice. */
 const DOCUMENT_OPTIONS = ["OR/CR", "Deed of sale", "Service records"] as const;
-
-/** All-string/array raw form state -- numeric fields are parsed only at
- * submit time (same convention as ListingForm's own price/stock fields),
- * so this component never needs to know how its values get used. */
-export type VehicleFieldValues = {
-  brand: string;
-  model: string;
-  year: string;
-  mileageKm: string;
-  transmission: string;
-  fuelType: string;
-  registrationStatus: VehicleRegistrationStatus | "";
-  documentsAvailable: string[];
-};
-
-export const EMPTY_VEHICLE_VALUES: VehicleFieldValues = {
-  brand: "",
-  model: "",
-  year: "",
-  mileageKm: "",
-  transmission: "",
-  fuelType: "",
-  registrationStatus: "",
-  documentsAvailable: [],
-};
-
-/** Converts get_my_listing's vehicleDetails row (or its absence) into this
- * form's raw-string field shape, for the edit page's own initial prefill. */
-export function vehicleFieldValuesFromServer(details: MyListingVehicleDetails | null): VehicleFieldValues {
-  if (!details) return EMPTY_VEHICLE_VALUES;
-  return {
-    brand: details.brand ?? "",
-    model: details.model ?? "",
-    year: details.year !== null ? String(details.year) : "",
-    mileageKm: details.mileageKm !== null ? String(details.mileageKm) : "",
-    transmission: details.transmission ?? "",
-    fuelType: details.fuelType ?? "",
-    registrationStatus: details.registrationStatus ?? "",
-    documentsAvailable: details.documentsAvailable ?? [],
-  };
-}
 
 export function isVehicleValuesEmpty(v: VehicleFieldValues): boolean {
   return (

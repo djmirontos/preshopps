@@ -1,9 +1,20 @@
 "use client";
 
-import { parsePesosToCents, centsToPesosInput } from "@/lib/seller/price-cents";
+import { parsePesosToCents } from "@/lib/seller/price-cents";
 import { RENTAL_PERIOD_OPTION_LABELS, RENTAL_AVAILABILITY_LABELS } from "@/lib/marketplace/vehicle-rental-labels";
 import type { RentalAvailability, RentalPeriod } from "@/lib/marketplace/listing-detail";
-import type { MyListingRentalDetails } from "@/lib/seller/get-my-listing";
+import {
+  type RentalFieldValues,
+  EMPTY_RENTAL_VALUES,
+  rentalFieldValuesFromServer,
+} from "@/components/listings/listing-field-mappers";
+
+/** Re-exported so existing importers (ListingForm, tests, etc.) keep
+ * working unchanged -- the canonical definitions now live in
+ * listing-field-mappers.ts so the Server Component at
+ * app/sell/[listingId]/edit/page.tsx can call rentalFieldValuesFromServer
+ * without reaching into this "use client" module. */
+export { type RentalFieldValues, EMPTY_RENTAL_VALUES, rentalFieldValuesFromServer };
 
 const INPUT_CLASS =
   "mt-1.5 h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60";
@@ -13,53 +24,6 @@ const TEXTAREA_CLASS =
 
 const PERIOD_OPTIONS = Object.keys(RENTAL_PERIOD_OPTION_LABELS) as RentalPeriod[];
 const AVAILABILITY_OPTIONS = Object.keys(RENTAL_AVAILABILITY_LABELS) as RentalAvailability[];
-
-/** All-string raw form state -- money fields parsed via parsePesosToCents
- * only at submit/build time, same convention as ListingForm's own price
- * field. `availability` defaults to "available" (the column's own NOT
- * NULL default, and what create_listing/update_listing already default to
- * when the sub-key is omitted from a supplied object) rather than an
- * empty/unset state, since the column structurally can never be null. */
-export type RentalFieldValues = {
-  priceInput: string;
-  period: RentalPeriod | "";
-  securityDepositInput: string;
-  terms: string;
-  minimumRentalPeriod: string;
-  capacity: string;
-  whatsIncluded: string;
-  rulesRestrictions: string;
-  availability: RentalAvailability;
-};
-
-export const EMPTY_RENTAL_VALUES: RentalFieldValues = {
-  priceInput: "",
-  period: "",
-  securityDepositInput: "",
-  terms: "",
-  minimumRentalPeriod: "",
-  capacity: "",
-  whatsIncluded: "",
-  rulesRestrictions: "",
-  availability: "available",
-};
-
-/** Converts get_my_listing's rentalDetails row (or its absence) into this
- * form's raw-string field shape, for the edit page's own initial prefill. */
-export function rentalFieldValuesFromServer(details: MyListingRentalDetails | null): RentalFieldValues {
-  if (!details) return EMPTY_RENTAL_VALUES;
-  return {
-    priceInput: centsToPesosInput(details.rentalPriceCents),
-    period: details.rentalPeriod ?? "",
-    securityDepositInput: centsToPesosInput(details.securityDepositCents),
-    terms: details.rentalTerms ?? "",
-    minimumRentalPeriod: details.minimumRentalPeriod ?? "",
-    capacity: details.capacity !== null ? String(details.capacity) : "",
-    whatsIncluded: details.whatsIncluded ?? "",
-    rulesRestrictions: details.rulesRestrictions ?? "",
-    availability: details.availability ?? "available",
-  };
-}
 
 export function isRentalValuesEmpty(v: RentalFieldValues): boolean {
   return (
