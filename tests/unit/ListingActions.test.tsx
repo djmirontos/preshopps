@@ -148,6 +148,47 @@ describe("ListingActions (authenticated)", () => {
   });
 });
 
+describe("ListingActions -- self-purchase guard (own listing)", () => {
+  it("shows a disabled 'Your listing' button instead of an active Add to Cart for the listing's own owner", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    expect(screen.queryByRole("button", { name: "Add to Cart" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Your listing" })).toBeDisabled();
+  });
+
+  it("never calls set_cart_item_quantity for the listing's own owner, even on click", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true, listingId: "listing-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Your listing" }));
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it("shows no generic cart error just from viewing (rendering) their own listing", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't add/i)).not.toBeInTheDocument();
+  });
+
+  it("still shows a real, enabled Add to Cart for a listing owned by someone else", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: false });
+    expect(screen.queryByRole("button", { name: "Your listing" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add to Cart" })).not.toBeDisabled();
+  });
+
+  it("never shows 'Your listing' when the listing is unavailable (reserved/sold/archived) -- same gate as Add to Cart itself", () => {
+    for (const status of ["reserved", "sold", "archived"] as const) {
+      const { unmount } = renderActions({ isAuthenticated: true, isOwnListing: true, status });
+      expect(screen.queryByRole("button", { name: "Your listing" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add to Cart" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("never shows 'Your listing' for an inquiry-only listing -- Add to Cart was never offered there either", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true, isInquiryOnly: true });
+    expect(screen.queryByRole("button", { name: "Your listing" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add to Cart" })).not.toBeInTheDocument();
+  });
+});
+
 describe("ListingActions (guest)", () => {
   it("adds to the local guest cart with no auth gate", () => {
     renderActions({ isAuthenticated: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
@@ -195,5 +236,11 @@ describe("ListingActions (guest)", () => {
   it("hides Message Seller entirely for the listing's own owner (never reachable as a guest, but the isOwnListing prop is still honored)", () => {
     renderActions({ isAuthenticated: false, isOwnListing: true });
     expect(screen.queryByRole("button", { name: "Message Seller" })).not.toBeInTheDocument();
+  });
+
+  it("adds to the local guest cart exactly as before when isOwnListing is false (unaffected by the self-purchase guard)", () => {
+    renderActions({ isAuthenticated: false, isOwnListing: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    expect(screen.getByText("1 in cart")).toBeInTheDocument();
   });
 });

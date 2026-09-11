@@ -20,8 +20,10 @@ type Props = {
   isAuthenticated: boolean;
   /** True when the viewer owns the shop this listing belongs to -- the
    * Message Seller action is never shown in that case, per this module's
-   * "cannot message oneself" rule (the backend also structurally rejects
-   * it, but the UI never offers a misleading action either). */
+   * "cannot message oneself" rule, and Add to Cart is replaced with a
+   * disabled "Your listing" button (set_cart_item_quantity's own
+   * CANNOT_BUY_OWN_LISTING check is the authoritative backend guard; the
+   * UI never offers a misleading action either). */
   isOwnListing: boolean;
   /** Safe internal path to return to after sign-in (see
    * lib/auth/safe-redirect.ts) -- this listing's own canonical route. */
@@ -86,12 +88,22 @@ export function ListingActions({
 
       <div className="flex flex-col gap-2.5 sm:flex-row">
         {!isInquiryOnly && isAvailable && (
-          <AddToCartButton
-            listingId={listingId}
-            publicCode={publicCode}
-            availableQuantity={availableQuantity}
-            className="flex-1"
-          />
+          isOwnListing ? (
+            <button
+              type="button"
+              disabled
+              className={cn(buttonBaseClass, "cursor-not-allowed bg-divider text-ink-muted")}
+            >
+              Your listing
+            </button>
+          ) : (
+            <AddToCartButton
+              listingId={listingId}
+              publicCode={publicCode}
+              availableQuantity={availableQuantity}
+              className="flex-1"
+            />
+          )
         )}
 
         {!isOwnListing && (
