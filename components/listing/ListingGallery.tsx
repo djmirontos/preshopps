@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { ListingLightbox } from "@/components/listing/ListingLightbox";
 
 type Props = {
   images: string[];
@@ -13,11 +14,14 @@ type Props = {
 /**
  * Server-rendered initial markup (the first image paints without any JS),
  * with thumbnail selection as the one purely-local client interaction --
- * no carousel/lightbox library, just CSS scroll-snap + next/image, per the
- * approved constraint.
+ * no carousel library, just CSS scroll-snap + next/image, per the approved
+ * constraint. `selected` is the single source of truth for "which image is
+ * active," shared with ListingLightbox (opened on click) rather than
+ * duplicated into a second piece of state there.
  */
 export function ListingGallery({ images, title }: Props) {
   const [selected, setSelected] = useState(0);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
   if (images.length === 0) {
     return (
@@ -29,7 +33,12 @@ export function ListingGallery({ images, title }: Props) {
 
   return (
     <div>
-      <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[14px] bg-divider">
+      <button
+        type="button"
+        onClick={() => setIsLightboxOpen(true)}
+        aria-label={`View full-size photo, image ${selected + 1} of ${images.length}`}
+        className="relative aspect-[4/5] w-full cursor-zoom-in overflow-hidden rounded-[14px] bg-divider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
         <Image
           key={images[selected]}
           src={images[selected]}
@@ -39,7 +48,7 @@ export function ListingGallery({ images, title }: Props) {
           sizes="(max-width: 1024px) 100vw, 50vw"
           className="object-cover"
         />
-      </div>
+      </button>
 
       {images.length > 1 && (
         <div
@@ -64,6 +73,16 @@ export function ListingGallery({ images, title }: Props) {
             </button>
           ))}
         </div>
+      )}
+
+      {isLightboxOpen && (
+        <ListingLightbox
+          images={images}
+          title={title}
+          selectedIndex={selected}
+          onSelectedIndexChange={setSelected}
+          onClose={() => setIsLightboxOpen(false)}
+        />
       )}
     </div>
   );

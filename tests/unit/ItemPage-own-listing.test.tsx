@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { ListingDetail, ListingDetailResult } from "@/lib/marketplace/listing-detail";
 import type { AuthUser } from "@/lib/auth/session";
 import type { MyShop } from "@/lib/seller/get-my-shop";
@@ -133,5 +133,24 @@ describe("ItemPage -- own-listing detection (isOwnListing)", () => {
     expect(getMyShopMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Your listing" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add to Cart" })).not.toBeDisabled();
+  });
+
+  it("the photo lightbox still opens for the owner and does not turn 'Your listing' into an active Add to Cart", async () => {
+    getAuthUserMock.mockResolvedValue(OWNER);
+    getMyShopMock.mockResolvedValue(MY_SHOP);
+    getListingDetailMock.mockResolvedValue({
+      status: "found",
+      listing: { ...sampleListing, imageUrls: ["https://example.supabase.co/a.webp"] },
+    });
+
+    render(await ItemPage(makeParams("PLS-ABC123")));
+
+    fireEvent.click(screen.getByRole("button", { name: /view full-size photo/i }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close photo viewer" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add to Cart" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Your listing" })).toBeDisabled();
   });
 });
