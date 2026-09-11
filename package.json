@@ -2,6 +2,9 @@
   "name": "preshopps",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -19,7 +22,6 @@
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "resend": "^6.27.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
