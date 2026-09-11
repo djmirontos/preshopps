@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronDown, Heart, MapPin, MessageCircle, Plus, Search } from "lucide-react";
+import { Heart, MessageCircle, Plus, Search } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 import { AccountEntry } from "@/components/auth/AccountEntry";
 import { SellGate } from "@/components/auth/SellGate";
@@ -23,9 +23,11 @@ type Props = {
 
 /**
  * Single responsive header for guest/buyer/seller alike. Desktop
- * (>=1024px) renders one row with a fused search+location control and a
+ * (>=1024px) renders one row with a centered search field and a
  * right-hand icon cluster. Below 1024px, a compact two-row mobile header
- * is shown instead.
+ * is shown instead. No location control is shown here -- nationwide/
+ * all-Philippines is already the default marketplace scope, and the real
+ * optional location filter lives on the search results page.
  *
  * Account, Favorites, Cart, Messages, and Notifications are all real.
  * Messages/Notifications link directly to their own routes (matching the
@@ -64,12 +66,16 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
           />
         </Link>
 
-        {/* Desktop: fused search + location, centered. Plain GET form --
-            Enter submits to /search?q=... with no client JS required. */}
+        {/* Desktop: search only, centered. Plain GET form -- Enter submits
+            to /search?q=... with no client JS required. Nationwide/all-
+            Philippines is already the default marketplace scope, so no
+            location control is shown here; the real optional location
+            filter (province/city/barangay) lives on the search results
+            page itself (components/search/FilterControls.tsx), untouched. */}
         <div className="hidden flex-1 justify-center lg:flex">
           <form
             action="/search"
-            className="flex w-full max-w-xl items-center rounded-full border border-border bg-canvas pl-3 pr-1.5"
+            className="flex w-full max-w-xl items-center rounded-full border border-border bg-canvas px-3"
           >
             <Search className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden="true" />
             <input
@@ -79,15 +85,6 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
               aria-label="Search for anything"
               className="w-full bg-transparent px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none"
             />
-            <span className="h-6 w-px shrink-0 bg-border" aria-hidden="true" />
-            <Link
-              href="/search"
-              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 py-2.5 text-sm text-ink-secondary transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              <MapPin className="h-4 w-4" aria-hidden="true" />
-              All Philippines
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
           </form>
         </div>
 
@@ -115,11 +112,12 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
         </div>
       </div>
 
-      {/* Mobile row 2: search + location -- same plain GET form pattern. */}
+      {/* Mobile row 2: search only -- same plain GET form pattern, no
+          location control (see the desktop form's comment above). */}
       <div className="border-t border-divider px-4 py-2.5 sm:px-6 lg:hidden">
         <form
           action="/search"
-          className="flex items-center gap-1.5 rounded-full border border-border bg-canvas py-1 pl-3 pr-1.5"
+          className="flex items-center gap-1.5 rounded-full border border-border bg-canvas px-3 py-1"
         >
           <Search className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden="true" />
           <input
@@ -129,14 +127,6 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
             aria-label="Search for anything"
             className="w-full bg-transparent py-1.5 text-base text-ink placeholder:text-ink-muted focus:outline-none"
           />
-          <Link
-            href="/search"
-            className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-2 py-1.5 text-xs font-medium text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-          >
-            <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-            All PH
-            <ChevronDown className="h-3 w-3" aria-hidden="true" />
-          </Link>
         </form>
       </div>
     </header>

@@ -120,10 +120,10 @@ describe("AppHeader", () => {
     }
   });
 
-  it("links the location control into /search", () => {
+  it("does not render an 'All Philippines'/'All PH' location control -- nationwide is already the default scope", () => {
     render(<AppHeader user={null} />);
-    expect(screen.getByRole("link", { name: "All Philippines" })).toHaveAttribute("href", "/search");
-    expect(screen.getByRole("link", { name: "All PH" })).toHaveAttribute("href", "/search");
+    expect(screen.queryByText("All Philippines")).not.toBeInTheDocument();
+    expect(screen.queryByText("All PH")).not.toBeInTheDocument();
   });
 
   it("links the guest Account icon to sign-in with the current path as next", () => {

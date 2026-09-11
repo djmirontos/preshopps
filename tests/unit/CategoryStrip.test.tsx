@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { CategoryStrip } from "@/components/marketplace/CategoryStrip";
 import type { CategoryRef } from "@/lib/marketplace/reference-data";
+
+/**
+ * jsdom never computes real layout, so scrollWidth/clientWidth/scrollLeft
+ * are always 0 unless explicitly stubbed. This simulates a rail whose
+ * content overflows its visible width by `overflowPx`, starting scrolled
+ * to `scrollLeft`, matching how a real overflowing horizontal rail
+ * reports these three properties.
+ */
+function stubScrollGeometry(el: HTMLElement, { clientWidth, overflowPx, scrollLeft = 0 }: { clientWidth: number; overflowPx: number; scrollLeft?: number }) {
+  Object.defineProperty(el, "clientWidth", { configurable: true, value: clientWidth });
+  Object.defineProperty(el, "scrollWidth", { configurable: true, value: clientWidth + overflowPx });
+  Object.defineProperty(el, "scrollLeft", { configurable: true, writable: true, value: scrollLeft });
+}
 
 const categories: CategoryRef[] = [
   { id: 1, slug: "women", name: "Women" },
@@ -108,5 +121,111 @@ describe("CategoryStrip", () => {
     for (const category of allSixteen) {
       expect(screen.getByRole("link", { name: category.name })).toBeInTheDocument();
     }
+  });
+});
+
+describe("CategoryStrip -- left/right navigation arrows", () => {
+  it("renders a left and right scroll button matching the existing icon-button style", () => {
+    render(<CategoryStrip categories={categories} />);
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeInTheDocument();
+  });
+
+  it("disables the left arrow at the beginning of the rail", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 0 }));
+    fireEvent.scroll(rail);
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).not.toBeDisabled();
+  });
+
+  it("disables the right arrow once scrolled to the end -- the final category is reachable, not clipped", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 600 }));
+    fireEvent.scroll(rail);
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).not.toBeDisabled();
+  });
+
+  it("re-enables the left arrow and keeps state correct while scrolling in the middle of the rail", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 300 }));
+    fireEvent.scroll(rail);
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).not.toBeDisabled();
+  });
+
+  it("both arrows are disabled when the rail does not overflow its container at all", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 1000, overflowPx: 0, scrollLeft: 0 }));
+    fireEvent.scroll(rail);
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeDisabled();
+  });
+
+  it("clicking the right arrow smooth-scrolls the rail forward by roughly its visible width", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 0 }));
+    fireEvent.scroll(rail);
+    const scrollBySpy = vi.fn();
+    rail.scrollBy = scrollBySpy;
+
+    fireEvent.click(screen.getByRole("button", { name: "Scroll categories right" }));
+
+    expect(scrollBySpy).toHaveBeenCalledWith({ left: 320, behavior: "smooth" });
+  });
+
+  it("clicking the left arrow smooth-scrolls the rail backward by roughly its visible width", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 400 }));
+    fireEvent.scroll(rail);
+    const scrollBySpy = vi.fn();
+    rail.scrollBy = scrollBySpy;
+
+    fireEvent.click(screen.getByRole("button", { name: "Scroll categories left" }));
+
+    expect(scrollBySpy).toHaveBeenCalledWith({ left: -320, behavior: "smooth" });
+  });
+
+  it("never disables both arrows by hiding them from the accessibility tree -- disabled state is reachable via role queries", () => {
+    render(<CategoryStrip categories={categories} />);
+    // Confirms the buttons stay in the DOM/a11y tree (as disabled, not
+    // removed) so screen readers and layout both stay stable across
+    // state changes -- no popping in/out of the tree.
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeInTheDocument();
+  });
+
+  it("recomputes arrow state on window resize", () => {
+    render(<CategoryStrip categories={categories} />);
+    const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
+    act(() => stubScrollGeometry(rail, { clientWidth: 400, overflowPx: 600, scrollLeft: 600 }));
+    fireEvent.scroll(rail);
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeDisabled();
+
+    // Viewport grows wide enough that the rail no longer overflows.
+    act(() => {
+      stubScrollGeometry(rail, { clientWidth: 1000, overflowPx: 0, scrollLeft: 0 });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(screen.getByRole("button", { name: "Scroll categories right" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Scroll categories left" })).toBeDisabled();
+  });
+
+  it("arrow buttons are hidden below the lg breakpoint (utility class only) so they never interfere with the mobile touch-swipe rail", () => {
+    render(<CategoryStrip categories={categories} />);
+    const leftArrow = screen.getByRole("button", { name: "Scroll categories left" });
+    const rightArrow = screen.getByRole("button", { name: "Scroll categories right" });
+    expect(leftArrow.className).toContain("hidden");
+    expect(leftArrow.className).toContain("lg:flex");
+    expect(rightArrow.className).toContain("hidden");
+    expect(rightArrow.className).toContain("lg:flex");
   });
 });
