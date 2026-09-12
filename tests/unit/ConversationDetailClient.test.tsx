@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { ConversationMessage } from "@/lib/messaging/get-conversation-messages";
 
 const {
   sendMessageMock,
+  markConversationReadMock,
   markConversationReadIfUnreadMock,
   markConversationUnreadMock,
   setConversationArchivedMock,
@@ -13,15 +14,59 @@ const {
   submitReportMock,
   blockUserMock,
   unblockUserMock,
-} = vi.hoisted(() => ({
-  sendMessageMock: vi.fn(),
-  markConversationReadIfUnreadMock: vi.fn(),
-  markConversationUnreadMock: vi.fn(),
-  setConversationArchivedMock: vi.fn(),
-  setConversationMutedMock: vi.fn(),
-  submitReportMock: vi.fn(),
-  blockUserMock: vi.fn(),
-  unblockUserMock: vi.fn(),
+  channelOnCalls,
+  channelNameCalls,
+  subscribeMock,
+  removeChannelMock,
+} = vi.hoisted(() => {
+  const channelOnCalls: Array<{ event: string; config: { event: string; schema: string; table: string; filter: string }; callback: (payload: { new: unknown }) => void }> = [];
+  const channelNameCalls: string[] = [];
+  const subscribeMock = vi.fn();
+  const removeChannelMock = vi.fn();
+  return {
+    sendMessageMock: vi.fn(),
+    markConversationReadMock: vi.fn(),
+    markConversationReadIfUnreadMock: vi.fn(),
+    markConversationUnreadMock: vi.fn(),
+    setConversationArchivedMock: vi.fn(),
+    setConversationMutedMock: vi.fn(),
+    submitReportMock: vi.fn(),
+    blockUserMock: vi.fn(),
+    unblockUserMock: vi.fn(),
+    channelOnCalls,
+    channelNameCalls,
+    subscribeMock,
+    removeChannelMock,
+  };
+});
+
+/** Minimal fake channel: `.on()` records every registration (so tests can
+ * grab the latest callback and invoke it directly to simulate an incoming
+ * Realtime event), `.subscribe()` returns itself, matching the real
+ * @supabase/supabase-js v2 channel builder API closely enough for this
+ * component's own usage. */
+function makeFakeChannel() {
+  const fakeChannel = {
+    on: vi.fn((event: string, config: never, callback: (payload: { new: unknown }) => void) => {
+      channelOnCalls.push({ event, config: config as unknown as (typeof channelOnCalls)[number]["config"], callback });
+      return fakeChannel;
+    }),
+    subscribe: vi.fn(() => {
+      subscribeMock();
+      return fakeChannel;
+    }),
+  };
+  return fakeChannel;
+}
+
+vi.mock("@/lib/supabase/client", () => ({
+  createClient: () => ({
+    channel: (name: string) => {
+      channelNameCalls.push(name);
+      return makeFakeChannel();
+    },
+    removeChannel: removeChannelMock,
+  }),
 }));
 
 vi.mock("@/lib/messaging/send-message", async () => {
@@ -30,6 +75,7 @@ vi.mock("@/lib/messaging/send-message", async () => {
 });
 
 vi.mock("@/lib/messaging/conversation-state", () => ({
+  markConversationRead: markConversationReadMock,
   markConversationReadIfUnread: markConversationReadIfUnreadMock,
   markConversationUnread: markConversationUnreadMock,
   setConversationArchived: setConversationArchivedMock,
@@ -99,7 +145,25 @@ beforeEach(() => {
   vi.clearAllMocks();
   loadEarlierMock.mockReset();
   markConversationReadIfUnreadMock.mockResolvedValue({ ok: true });
+  markConversationReadMock.mockResolvedValue({ ok: true });
+  channelOnCalls.length = 0;
+  channelNameCalls.length = 0;
 });
+
+/** Grabs the callback most recently registered for the messages INSERT
+ * subscription, so a test can invoke it directly to simulate an incoming
+ * Realtime event without a real websocket. */
+function latestMessagesCallback() {
+  const registration = channelOnCalls[channelOnCalls.length - 1];
+  if (!registration) throw new Error("No postgres_changes subscription was registered");
+  return registration.callback;
+}
+
+function fireIncomingMessage(row: { id: string; conversation_id: string; sender_id: string; body: string; created_at: string }) {
+  act(() => {
+    latestMessagesCallback()({ new: row });
+  });
+}
 
 describe("ConversationDetailClient -- composer", () => {
   it("disables Send while the draft is empty", () => {
@@ -475,5 +539,201 @@ describe("ConversationDetailClient -- Block / Unblock (PRD 30)", () => {
 
     await waitFor(() => expect(blockUserMock).toHaveBeenCalled());
     expect(submitReportMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConversationDetailClient -- Realtime message subscription", () => {
+  it("subscribes to postgres_changes INSERT on messages, filtered to this conversation's id", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
+
+    expect(channelNameCalls).toContain("messages:conv-1");
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+    expect(registration.event).toBe("postgres_changes");
+    expect(registration.config).toMatchObject({
+      event: "INSERT",
+      schema: "public",
+      table: "messages",
+      filter: "conversation_id=eq.conv-1",
+    });
+    expect(subscribeMock).toHaveBeenCalled();
+  });
+
+  it("removes the channel on unmount", () => {
+    const { unmount } = renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
+    unmount();
+    expect(removeChannelMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the old channel and opens a new one filtered to the new conversation when conversationId changes", () => {
+    const { rerender } = renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
+    expect(channelNameCalls).toContain("messages:conv-1");
+
+    rerender(
+      <ConversationDetailClient
+        context={sampleContext({ conversationId: "conv-2" })}
+        initialMessages={[]}
+        initialCursor={null}
+        loadEarlier={loadEarlierMock}
+        otherPartyId="other-user-1"
+        initialIsBlocked={false}
+      />,
+    );
+
+    expect(removeChannelMock).toHaveBeenCalledTimes(1);
+    expect(channelNameCalls).toContain("messages:conv-2");
+  });
+
+  it("appends an incoming INSERT immediately, without refetching the whole thread", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireIncomingMessage({
+      id: "msg-realtime-1",
+      conversation_id: "conv-1",
+      sender_id: "other-user-1",
+      body: "Hello from realtime",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    expect(screen.getByText("Hello from realtime")).toBeInTheDocument();
+  });
+
+  it("derives isMine from sender_id vs otherPartyId -- a message from the other party renders on the left", () => {
+    const { container } = renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireIncomingMessage({
+      id: "msg-theirs",
+      conversation_id: "conv-1",
+      sender_id: "other-user-1",
+      body: "Their message",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    const item = screen.getByText("Their message").closest("li");
+    expect(item?.className).toContain("justify-start");
+    void container;
+  });
+
+  it("a message NOT from otherPartyId renders as mine, on the right", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireIncomingMessage({
+      id: "msg-mine-echo",
+      conversation_id: "conv-1",
+      sender_id: "some-other-session-of-mine",
+      body: "My own echoed message",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    const item = screen.getByText("My own echoed message").closest("li");
+    expect(item?.className).toContain("justify-end");
+  });
+
+  it("marks the conversation read when a new incoming (not-mine) message arrives while open, without any Seen UI", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+    markConversationReadMock.mockClear();
+
+    fireIncomingMessage({
+      id: "msg-incoming",
+      conversation_id: "conv-1",
+      sender_id: "other-user-1",
+      body: "Are you there?",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    expect(markConversationReadMock).toHaveBeenCalledWith("conv-1");
+    expect(screen.queryByText(/seen/i)).not.toBeInTheDocument();
+  });
+
+  it("does not mark read for an incoming echo of the viewer's own message", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+    markConversationReadMock.mockClear();
+
+    fireIncomingMessage({
+      id: "msg-own-echo",
+      conversation_id: "conv-1",
+      sender_id: "viewer-own-id",
+      body: "Something I sent",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+  });
+
+  it("RPC-returned message + a matching Realtime event for the same id renders exactly once", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true, messageId: "msg-dup", createdAt: "2026-02-01T11:00:00.000Z" });
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+
+    fireIncomingMessage({
+      id: "msg-dup",
+      conversation_id: "conv-1",
+      sender_id: "viewer-own-id",
+      body: "Hello!",
+      created_at: "2026-02-01T11:00:00.000Z",
+    });
+
+    expect(screen.getAllByText("Hello!")).toHaveLength(1);
+  });
+
+  it("Realtime-first, then a matching RPC response second, still renders exactly once (no timing assumption)", async () => {
+    let resolveSend: (value: { ok: true; messageId: string; createdAt: string }) => void = () => {};
+    sendMessageMock.mockReturnValue(new Promise((resolve) => (resolveSend = resolve)));
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Race condition test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+
+    // The Realtime broadcast for this same message arrives before the RPC
+    // HTTP response does.
+    fireIncomingMessage({
+      id: "msg-race",
+      conversation_id: "conv-1",
+      sender_id: "viewer-own-id",
+      body: "Race condition test",
+      created_at: "2026-02-01T11:05:00.000Z",
+    });
+    // Scoped to the message-bubble <p> only -- the still-unsent-cleared
+    // composer textarea also legitimately contains this exact text at
+    // this point in the race, which is not what this assertion means to
+    // count.
+    expect(screen.getAllByText("Race condition test", { selector: "p" })).toHaveLength(1);
+
+    resolveSend({ ok: true, messageId: "msg-race", createdAt: "2026-02-01T11:05:00.000Z" });
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
+    expect(screen.getAllByText("Race condition test", { selector: "p" })).toHaveLength(1);
+  });
+
+  it("multiple incoming messages preserve chronological order", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireIncomingMessage({ id: "m1", conversation_id: "conv-1", sender_id: "other-user-1", body: "First", created_at: "2026-02-01T12:00:00.000Z" });
+    fireIncomingMessage({ id: "m2", conversation_id: "conv-1", sender_id: "viewer-own-id", body: "Second", created_at: "2026-02-01T12:01:00.000Z" });
+    fireIncomingMessage({ id: "m3", conversation_id: "conv-1", sender_id: "other-user-1", body: "Third", created_at: "2026-02-01T12:02:00.000Z" });
+
+    const items = screen.getAllByRole("listitem").map((li) => li.textContent);
+    const firstIndex = items.findIndex((text) => text?.includes("First"));
+    const secondIndex = items.findIndex((text) => text?.includes("Second"));
+    const thirdIndex = items.findIndex((text) => text?.includes("Third"));
+    expect(firstIndex).toBeLessThan(secondIndex);
+    expect(secondIndex).toBeLessThan(thirdIndex);
+  });
+
+  it("a message for a different conversation_id is ignored -- defense in depth alongside the server-side filter", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+
+    fireIncomingMessage({
+      id: "msg-unrelated",
+      conversation_id: "conv-999",
+      sender_id: "other-user-1",
+      body: "This belongs to a different conversation",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    expect(screen.queryByText("This belongs to a different conversation")).not.toBeInTheDocument();
   });
 });

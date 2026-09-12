@@ -91,8 +91,57 @@ describe("Real Messaging does not build out-of-scope modules", () => {
       expect(source).not.toMatch(/notification_center|notifications table|push notification/i);
     }
   });
+});
 
-  it("does not introduce Supabase Realtime (channel/subscribe) anywhere in the module", () => {
+/**
+ * Realtime slice 2 (per the accepted audit + 0087's publication change):
+ * public.messages is now in the supabase_realtime publication, and
+ * ConversationDetailClient is the one, deliberately narrow place that
+ * subscribes to it -- filtered to the currently open conversation_id only,
+ * never a broad/unfiltered subscription. public.conversations remains
+ * OUTSIDE the publication (0087 only added messages + notifications), so
+ * no file in this module may subscribe to it; conversation-list liveness
+ * is instead derived from the shared notifications channel (see
+ * notifications-architecture.test.ts), never a second websocket here.
+ */
+describe("Real Messaging Realtime is scoped to the open thread only, filtered per-conversation", () => {
+  it("ConversationDetailClient subscribes to postgres_changes INSERT on messages, filtered to this conversation only", () => {
+    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(source).toMatch(/\.channel\(/);
+    expect(source).toMatch(/postgres_changes/);
+    expect(source).toMatch(/event:\s*["']INSERT["']/);
+    expect(source).toMatch(/table:\s*["']messages["']/);
+    expect(source).toMatch(/filter:\s*`conversation_id=eq\.\$\{/);
+  });
+
+  it("ConversationDetailClient cleanly unsubscribes (removeChannel) rather than leaking a channel per conversation", () => {
+    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(source).toMatch(/removeChannel/);
+  });
+
+  it("ConversationDetailClient's message dedupe uses a stable message_id-based helper, not a timing assumption", () => {
+    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(source).toMatch(/appendMessageIfNew/);
+  });
+
+  it("no messaging file ever subscribes to public.conversations directly -- 0087 deliberately excluded it", () => {
+    const files = [
+      "components/messaging/ConversationDetailClient.tsx",
+      "components/messaging/ConversationsListClient.tsx",
+      "lib/messaging/get-my-conversations.ts",
+      "lib/messaging/get-conversation-context.ts",
+      "lib/messaging/get-conversation-messages.ts",
+      "lib/messaging/start-conversation.ts",
+      "lib/messaging/send-message.ts",
+      "lib/messaging/conversation-state.ts",
+    ];
+    for (const file of files) {
+      const source = readFile(file);
+      expect(source).not.toMatch(/table:\s*["']conversations["']/);
+    }
+  });
+
+  it("no messaging module besides ConversationDetailClient opens its own Realtime channel", () => {
     const files = [
       "lib/messaging/get-my-conversations.ts",
       "lib/messaging/get-conversation-context.ts",
@@ -101,12 +150,18 @@ describe("Real Messaging does not build out-of-scope modules", () => {
       "lib/messaging/send-message.ts",
       "lib/messaging/conversation-state.ts",
       "components/messaging/ConversationsListClient.tsx",
-      "components/messaging/ConversationDetailClient.tsx",
     ];
     for (const file of files) {
       const source = readFile(file);
       expect(source).not.toMatch(/\.channel\(|\.subscribe\(|supabase\.realtime/i);
     }
+  });
+
+  it("ConversationsListClient reacts to the shared notifications signal instead of subscribing itself -- no polling/setInterval added either", () => {
+    const source = readFile("components/messaging/ConversationsListClient.tsx");
+    expect(source).toMatch(/useLatestNotificationEvent/);
+    expect(source).not.toMatch(/\.channel\(/);
+    expect(source).not.toMatch(/setInterval/);
   });
 });
 

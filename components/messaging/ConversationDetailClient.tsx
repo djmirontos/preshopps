@@ -4,10 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Archive, ArchiveRestore, MailOpen, Package, UserCheck, UserX, Volume2, VolumeX } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { containsExternalLink } from "@/lib/messaging/detect-link";
 import { sendMessage, SEND_MESSAGE_ERROR_MESSAGES } from "@/lib/messaging/send-message";
+import { appendMessageIfNew } from "@/lib/messaging/message-list";
 import {
+  markConversationRead,
   markConversationReadIfUnread,
   markConversationUnread,
   setConversationArchived,
@@ -18,6 +21,17 @@ import { ReportButton } from "@/components/moderation/ReportButton";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { ConversationMessage, MessagesCursor } from "@/lib/messaging/get-conversation-messages";
+
+/** Raw public.messages row shape, exactly as Realtime's postgres_changes
+ * INSERT payload.new delivers it -- no is_mine (that's an RPC-computed
+ * field derived from auth.uid(), never present on the raw table row). */
+type RawMessageRow = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+};
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -82,6 +96,60 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
     void markConversationReadIfUnread(context.conversationId);
   }, [context.conversationId]);
 
+  // Realtime: one channel per open conversation, filtered server-side to
+  // this conversation_id only (RLS re-validates participation regardless).
+  // Mounts when this thread mounts/changes, cleanly unsubscribes on
+  // unmount or conversationId change -- never a second channel left
+  // dangling for a previous conversation. otherPartyId is used (rather
+  // than fetching the viewer's own id) to derive isMine: a conversation
+  // has exactly two participants, so any sender that isn't otherPartyId
+  // is, by construction, the viewer.
+  useEffect(() => {
+    const conversationId = context.conversationId;
+
+    // Matches every other Supabase-touching call in this codebase
+    // (send-message.ts, conversation-state.ts, etc.): never let a client
+    // construction/subscription failure throw uncaught and take down the
+    // whole thread -- worst case, this conversation simply has no live
+    // updates for this mount, same as before Realtime existed.
+    try {
+      const supabase = createClient();
+      const channel = supabase
+        .channel(`messages:${conversationId}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
+          (payload) => {
+            const row = payload.new as RawMessageRow;
+            if (row.conversation_id !== conversationId) return;
+
+            const isMine = row.sender_id !== otherPartyId;
+            let wasNew = false;
+            setMessages((prev) => {
+              const next = appendMessageIfNew(prev, { messageId: row.id, isMine, body: row.body, createdAt: row.created_at });
+              wasNew = next !== prev;
+              return next;
+            });
+
+            // The thread is open and visible -- this is purely local
+            // last_read_at bookkeeping (never a "seen" signal surfaced to
+            // the other participant, per canon's no-read-receipts rule).
+            if (wasNew && !isMine) {
+              void markConversationRead(conversationId);
+            }
+          },
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (err) {
+      console.error("Realtime message subscription failed to start:", err instanceof Error ? err.message : err);
+      return undefined;
+    }
+  }, [context.conversationId, otherPartyId]);
+
   const identityName = context.viewerRole === "seller" ? context.otherPartyDisplayName : context.shopName;
 
   function handleLoadEarlier() {
@@ -113,7 +181,7 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
       return;
     }
 
-    setMessages((prev) => [...prev, { messageId: result.messageId, isMine: true, body: trimmed, createdAt: result.createdAt }]);
+    setMessages((prev) => appendMessageIfNew(prev, { messageId: result.messageId, isMine: true, body: trimmed, createdAt: result.createdAt }));
     setDraft("");
   }
 

@@ -46,6 +46,15 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     return getMyConversations(CONVERSATIONS_LIMIT, cursor, showingArchived);
   }
 
+  /** Targeted first-page refetch, triggered client-side when a new_message
+   * notification arrives while this list is mounted (see
+   * ConversationsListClient) -- reuses this same view's own
+   * showingArchived scope, never a full page reload. */
+  async function refreshFirstPageAction() {
+    "use server";
+    return getMyConversations(CONVERSATIONS_LIMIT, undefined, showingArchived);
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between gap-3">
@@ -77,6 +86,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
           initialHadError={result.hadError}
           initialCursor={result.nextCursor}
           loadMore={loadMoreAction}
+          refreshFirstPage={refreshFirstPageAction}
           showingArchived={showingArchived}
         />
       </div>

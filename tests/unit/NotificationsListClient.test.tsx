@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { NotificationItem } from "@/lib/notifications/get-my-notifications";
 
-const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock } = vi.hoisted(() => ({
+const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock, channelOnCalls, channelNameCalls, removeChannelMock } = vi.hoisted(() => ({
   markNotificationReadMock: vi.fn(),
   markAllNotificationsReadMock: vi.fn(),
   refreshMock: vi.fn(),
+  channelOnCalls: [] as Array<{ event: string; config: unknown; callback: (payload: { new: unknown }) => void }>,
+  channelNameCalls: [] as string[],
+  removeChannelMock: vi.fn(),
 }));
 
 vi.mock("@/lib/notifications/notification-actions", () => ({
@@ -17,7 +20,29 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock }),
 }));
 
+function makeFakeChannel() {
+  const fakeChannel = {
+    on: vi.fn((event: string, config: never, callback: (payload: { new: unknown }) => void) => {
+      channelOnCalls.push({ event, config, callback });
+      return fakeChannel;
+    }),
+    subscribe: vi.fn(() => fakeChannel),
+  };
+  return fakeChannel;
+}
+
+vi.mock("@/lib/supabase/client", () => ({
+  createClient: () => ({
+    channel: (name: string) => {
+      channelNameCalls.push(name);
+      return makeFakeChannel();
+    },
+    removeChannel: removeChannelMock,
+  }),
+}));
+
 import { NotificationsListClient } from "@/components/notifications/NotificationsListClient";
+import { NotificationsProvider, useNotificationsUnreadCount } from "@/components/notifications/NotificationsProvider";
 
 function makeNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
@@ -41,6 +66,8 @@ const loadMoreMock = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   loadMoreMock.mockReset();
+  channelOnCalls.length = 0;
+  channelNameCalls.length = 0;
 });
 
 function renderList(notifications: NotificationItem[]) {
@@ -51,6 +78,46 @@ function renderList(notifications: NotificationItem[]) {
       initialCursor={null}
       loadMore={loadMoreMock}
     />,
+  );
+}
+
+function latestNotificationsCallback() {
+  const registration = channelOnCalls[channelOnCalls.length - 1];
+  if (!registration) throw new Error("No postgres_changes subscription was registered");
+  return registration.callback;
+}
+
+function fireIncomingNotification(row: {
+  id: string;
+  recipient_id: string;
+  type: string;
+  actor_id: string | null;
+  order_id: string | null;
+  conversation_id: string | null;
+  review_id: string | null;
+  created_at: string;
+  read_at: string | null;
+}) {
+  act(() => {
+    latestNotificationsCallback()({ new: row });
+  });
+}
+
+function UnreadCountProbe() {
+  const count = useNotificationsUnreadCount();
+  return <p data-testid="probe-count">{count}</p>;
+}
+
+/** Renders the real list alongside a small probe reading the same shared
+ * count, both inside one live NotificationsProvider -- proves the list's
+ * own mark-read handlers actually flow through to the Provider, not just
+ * that the list's local row state changes. */
+function renderListWithProvider(notifications: NotificationItem[], initialUnreadCount = notifications.filter((n) => n.readAt === null).length) {
+  return render(
+    <NotificationsProvider isAuthenticated userId="me" initialUnreadCount={initialUnreadCount}>
+      <UnreadCountProbe />
+      <NotificationsListClient initialNotifications={notifications} initialHadError={false} initialCursor={null} loadMore={loadMoreMock} />
+    </NotificationsProvider>,
   );
 }
 
@@ -183,5 +250,101 @@ describe("NotificationsListClient -- pagination", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /load more/i }));
     await waitFor(() => expect(screen.getByText(/unable to load more notifications/i)).toBeInTheDocument());
+  });
+});
+
+describe("NotificationsListClient -- live updates via the shared Provider", () => {
+  it("prepends an incoming notification without a page reload, reusing the Provider's own channel (no second subscription)", () => {
+    renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
+    expect(channelNameCalls).toHaveLength(1);
+
+    fireIncomingNotification({
+      id: "notif-new",
+      recipient_id: "me",
+      type: "new_message",
+      actor_id: "other-user-1",
+      order_id: null,
+      conversation_id: "conv-1",
+      review_id: null,
+      created_at: "2026-02-02T09:00:00.000Z",
+      read_at: null,
+    });
+
+    expect(screen.getByText("New message")).toBeInTheDocument();
+    expect(screen.getByText("Order ready")).toBeInTheDocument();
+    // Still only one subscription was ever opened.
+    expect(channelNameCalls).toHaveLength(1);
+  });
+
+  it("prepends the new item above the existing rows, preserving order", () => {
+    renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
+
+    fireIncomingNotification({
+      id: "notif-new",
+      recipient_id: "me",
+      type: "new_message",
+      actor_id: "other-user-1",
+      order_id: null,
+      conversation_id: "conv-1",
+      review_id: null,
+      created_at: "2026-02-02T09:00:00.000Z",
+      read_at: null,
+    });
+
+    const titles = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+    const newIndex = titles.findIndex((text) => text.includes("New message"));
+    const existingIndex = titles.findIndex((text) => text.includes("Order ready"));
+    expect(newIndex).toBeLessThan(existingIndex);
+  });
+
+  it("never renders a duplicate row for the same notification id, even if it somehow arrives twice", () => {
+    renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
+
+    fireIncomingNotification({
+      id: "notif-new",
+      recipient_id: "me",
+      type: "new_message",
+      actor_id: "other-user-1",
+      order_id: null,
+      conversation_id: "conv-1",
+      review_id: null,
+      created_at: "2026-02-02T09:00:00.000Z",
+      read_at: null,
+    });
+    // A second, distinct-looking event carrying the exact same id (the
+    // Provider itself already dedupes this in real usage; this list-level
+    // check is a defensive second layer).
+    fireIncomingNotification({
+      id: "notif-new",
+      recipient_id: "me",
+      type: "new_message",
+      actor_id: "other-user-1",
+      order_id: null,
+      conversation_id: "conv-1",
+      review_id: null,
+      created_at: "2026-02-02T09:00:00.000Z",
+      read_at: null,
+    });
+
+    expect(screen.getAllByText("New message")).toHaveLength(1);
+  });
+
+  it("clicking an unread linkable row decrements the shared unread count exactly once", async () => {
+    renderListWithProvider([makeNotification({ notificationId: "notif-1", readAt: null })], 1);
+    markNotificationReadMock.mockResolvedValue({ ok: true });
+
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("link", { name: /order accepted/i }));
+
+    await waitFor(() => expect(screen.getByTestId("probe-count")).toHaveTextContent("0"));
+  });
+
+  it("Mark all read zeros the shared unread count", async () => {
+    markAllNotificationsReadMock.mockResolvedValue({ ok: true, markedCount: 1 });
+    renderListWithProvider([makeNotification({ notificationId: "notif-1", readAt: null })], 1);
+
+    fireEvent.click(screen.getByRole("button", { name: /mark all read/i }));
+
+    await waitFor(() => expect(screen.getByTestId("probe-count")).toHaveTextContent("0"));
   });
 });

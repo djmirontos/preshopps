@@ -10,14 +10,8 @@ import type { AuthUser } from "@/lib/auth/session";
 
 type Props = {
   user: AuthUser | null;
-  /** Sourced from one root-layout-level get_my_notification_unread_count
-   * call (lib/notifications/get-my-notification-unread-count.ts) -- never
-   * fetched here, so this component adds no query of its own. Defaults to
-   * 0 so every existing call site (and every existing test) that doesn't
-   * pass it keeps rendering exactly as before. */
-  unreadNotificationCount?: number;
-  /** Sourced from one root-layout-level getMyShop() call, same convention
-   * as unreadNotificationCount above -- defaults to false. */
+  /** Sourced from one root-layout-level getMyShop() call -- defaults to
+   * false. */
   hasShop?: boolean;
 };
 
@@ -33,12 +27,11 @@ type Props = {
  * Messages/Notifications link directly to their own routes (matching the
  * Favorites icon's own convention) -- those pages themselves redirect a
  * guest to sign-in, so no auth branching is needed here. Notifications
- * carries an unread-count badge, since get_my_notification_unread_count
- * is a single efficient scalar RPC already supported cleanly by the
- * backend (see NotificationBellLink) -- unlike Messages, which has no
- * equivalent cheap count RPC and therefore stays badge-less.
+ * carries an unread-count badge, sourced from the shared
+ * NotificationsProvider (see NotificationBellLink) -- unlike Messages,
+ * which has no equivalent cheap count and therefore stays badge-less.
  */
-export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }: Props) {
+export function AppHeader({ user, hasShop = false }: Props) {
   const isAuthenticated = Boolean(user);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface">
@@ -92,7 +85,7 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
         <nav aria-label="Account actions" className="ml-auto hidden items-center gap-0.5 lg:flex">
           <IconButton href="/favorites" label="Favorites" icon={Heart} />
           <IconButton href="/messages" label="Messages" icon={MessageCircle} />
-          <NotificationBellLink unreadCount={unreadNotificationCount} />
+          <NotificationBellLink />
           <CartIconLink />
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />
           <SellGate
@@ -107,7 +100,7 @@ export function AppHeader({ user, unreadNotificationCount = 0, hasShop = false }
 
         {/* Mobile right-hand icons */}
         <div className="ml-auto flex items-center gap-0.5 lg:hidden">
-          <NotificationBellLink unreadCount={unreadNotificationCount} />
+          <NotificationBellLink />
           <CartIconLink />
         </div>
       </div>

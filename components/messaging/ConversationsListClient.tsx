@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { MessageCircle, Store, VolumeX } from "lucide-react";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
+import { useLatestNotificationEvent } from "@/components/notifications/NotificationsProvider";
 import type { ConversationSummary, ConversationsCursor } from "@/lib/messaging/get-my-conversations";
 
 type LoadMoreResult = {
@@ -13,22 +14,55 @@ type LoadMoreResult = {
   nextCursor: ConversationsCursor | null;
 };
 
+/** Debounce window for coalescing rapid new_message events into a single
+ * refetch -- each new event resets this timer (see the effect below), so a
+ * burst of incoming messages triggers exactly one refresh shortly after
+ * the burst settles, not one per message. */
+const REFRESH_DEBOUNCE_MS = 400;
+
 type Props = {
   initialConversations: ConversationSummary[];
   initialHadError: boolean;
   initialCursor: ConversationsCursor | null;
   loadMore: (cursor: ConversationsCursor) => Promise<LoadMoreResult>;
+  /** Targeted first-page refetch (no public.conversations subscription --
+   * see the file-level comment) used whenever a new_message notification
+   * arrives while this list is mounted. */
+  refreshFirstPage: () => Promise<LoadMoreResult>;
   showingArchived: boolean;
 };
 
-/** Same server-rendered-first-page + Load More shape as OrdersListClient/
+/**
+ * Same server-rendered-first-page + Load More shape as OrdersListClient/
  * SellerOrdersListClient -- cursor pagination on (last_message_at, id),
- * never OFFSET, per get_my_conversations (0046). */
-export function ConversationsListClient({ initialConversations, initialHadError, initialCursor, loadMore, showingArchived }: Props) {
+ * never OFFSET, per get_my_conversations (0046). public.conversations is
+ * deliberately not in the Realtime publication and this component never
+ * subscribes to it directly -- conversation-level liveness is instead
+ * derived from the shared NotificationsProvider's own `new_message` signal
+ * (every send_message call already inserts exactly one deduped
+ * notification row in the same transaction), reusing that one channel
+ * rather than opening a second websocket here.
+ */
+export function ConversationsListClient({ initialConversations, initialHadError, initialCursor, loadMore, refreshFirstPage, showingArchived }: Props) {
   const [conversations, setConversations] = useState(initialConversations);
   const [cursor, setCursor] = useState(initialCursor);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const lastEvent = useLatestNotificationEvent();
+  useEffect(() => {
+    if (!lastEvent || lastEvent.type !== "new_message") return;
+
+    const timeoutId = setTimeout(() => {
+      void refreshFirstPage().then((result) => {
+        if (result.hadError) return;
+        setConversations(result.conversations);
+        setCursor(result.nextCursor);
+      });
+    }, REFRESH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [lastEvent, refreshFirstPage]);
 
   if (initialHadError) {
     return <p className="text-sm text-ink-secondary">Unable to load your messages right now.</p>;

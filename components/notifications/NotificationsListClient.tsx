@@ -7,6 +7,7 @@ import { Bell, CheckCheck } from "lucide-react";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { getNotificationTitle, getNotificationMessage, getNotificationHref } from "@/lib/notifications/notification-copy";
 import { markNotificationRead, markAllNotificationsRead } from "@/lib/notifications/notification-actions";
+import { useLatestNotificationEvent, useNotificationsMarkRead } from "@/components/notifications/NotificationsProvider";
 import type { NotificationItem, NotificationsCursor } from "@/lib/notifications/get-my-notifications";
 
 type LoadMoreResult = {
@@ -43,6 +44,46 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
   const [markAllError, setMarkAllError] = useState<string | null>(null);
   const [markingIds, setMarkingIds] = useState<ReadonlySet<string>>(new Set());
 
+  const { markOneRead, markAllRead } = useNotificationsMarkRead();
+
+  // Live prepend while this page is mounted: reuses the shared
+  // NotificationsProvider's own Realtime subscription (no second
+  // websocket channel opened here). lastEvent only carries the raw
+  // table-row fields (no actor name/order code/listing title), so the
+  // prepended row renders via notification-copy.ts's own graceful
+  // null-fallback copy until the next full fetch fills in the rest.
+  // De-duped by notification_id in case of an overlap with a concurrent
+  // loadMore page.
+  // Adjusting state during render (not inside an effect) when `lastEvent`
+  // changes from the shared Provider -- the same "sync state to a changed
+  // external value" pattern CartProvider's own initialLines resync uses,
+  // per React's own guidance that this belongs in the render body, not a
+  // useEffect, when it's a direct reaction to a value that just changed.
+  const lastEvent = useLatestNotificationEvent();
+  const [prevLastEvent, setPrevLastEvent] = useState(lastEvent);
+  if (lastEvent !== prevLastEvent) {
+    setPrevLastEvent(lastEvent);
+    if (lastEvent) {
+      setNotifications((prev) => {
+        if (prev.some((n) => n.notificationId === lastEvent.notificationId)) return prev;
+        const newItem: NotificationItem = {
+          notificationId: lastEvent.notificationId,
+          type: lastEvent.type,
+          createdAt: lastEvent.createdAt,
+          readAt: lastEvent.readAt,
+          actorDisplayName: null,
+          actorAvatarUrl: undefined,
+          orderId: lastEvent.orderId,
+          orderPublicCode: null,
+          conversationId: lastEvent.conversationId,
+          conversationListingTitle: null,
+          reviewId: lastEvent.reviewId,
+        };
+        return [newItem, ...prev];
+      });
+    }
+  }
+
   const hasUnread = notifications.some((n) => n.readAt === null);
 
   function markLocalRead(notificationId: string) {
@@ -52,6 +93,7 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
   function handleLinkClick(item: NotificationItem) {
     if (item.readAt !== null) return;
     markLocalRead(item.notificationId);
+    markOneRead();
     void markNotificationRead(item.notificationId);
   }
 
@@ -65,8 +107,12 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
     });
     if (result.ok) {
       markLocalRead(notificationId);
-      // Stays on this page -- refresh so the header's unread badge
-      // (fetched once at the root layout) reflects the change immediately.
+      // Immediate, not solely reliant on the refresh below: the shared
+      // provider's own count is the header badge's live source now.
+      markOneRead();
+      // Still refreshed as a harmless belt-and-suspenders safety net for
+      // any other server-rendered surface still keyed off the layout's
+      // own initial fetch.
       router.refresh();
     }
   }
@@ -82,6 +128,7 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
       return;
     }
 
+    markAllRead();
     router.refresh();
 
     setNotifications((prev) => prev.map((n) => (n.readAt === null ? { ...n, readAt: new Date().toISOString() } : n)));

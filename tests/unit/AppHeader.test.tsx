@@ -6,6 +6,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { AppHeader } from "@/components/layout/AppHeader";
+import { NotificationsProvider } from "@/components/notifications/NotificationsProvider";
 
 describe("AppHeader", () => {
   it("renders the Preshopps wordmark linking home", () => {
@@ -65,21 +66,29 @@ describe("AppHeader", () => {
     }
   });
 
-  it("renders no unread badge when unreadNotificationCount is 0 (the default)", () => {
+  it("renders no unread badge when rendered without a NotificationsProvider ancestor (context default is 0)", () => {
     render(<AppHeader user={null} />);
     for (const link of screen.getAllByLabelText("Notifications")) {
       expect(link.textContent).toBe("");
     }
   });
 
-  it("renders an unread badge with the count and an accessible label when unreadNotificationCount > 0", () => {
-    render(<AppHeader user={{ id: "u1", email: "buyer@example.com" }} unreadNotificationCount={3} />);
+  it("renders an unread badge with the count and an accessible label when the notifications Provider is seeded with unread notifications", () => {
+    render(
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadCount={3}>
+        <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
+      </NotificationsProvider>,
+    );
     expect(screen.getAllByLabelText("Notifications, 3 unread").length).toBeGreaterThan(0);
     expect(screen.getAllByText("3").length).toBeGreaterThan(0);
   });
 
   it("caps the displayed badge at 99+ for a very large unread count", () => {
-    render(<AppHeader user={{ id: "u1", email: "buyer@example.com" }} unreadNotificationCount={150} />);
+    render(
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadCount={150}>
+        <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
+      </NotificationsProvider>,
+    );
     expect(screen.getAllByText("99+").length).toBeGreaterThan(0);
   });
 

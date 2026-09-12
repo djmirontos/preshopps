@@ -10,6 +10,7 @@ import { FavoritesProvider } from "@/components/favorites/FavoritesProvider";
 import { getMyFavoriteListingIds } from "@/lib/favorites/get-my-favorite-ids";
 import { CartProvider } from "@/components/cart/CartProvider";
 import { getMyCartQuantities } from "@/lib/cart/get-my-cart";
+import { NotificationsProvider } from "@/components/notifications/NotificationsProvider";
 import { getMyNotificationUnreadCount } from "@/lib/notifications/get-my-notification-unread-count";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 
@@ -54,10 +55,16 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <AuthStatusProvider isAuthenticated={Boolean(user)}>
           <FavoritesProvider favoritedIds={favoritedIds}>
             <CartProvider initialLines={cartLines} isAuthenticated={Boolean(user)}>
-              <AppHeader user={user} unreadNotificationCount={unreadNotificationCount} hasShop={Boolean(myShop)} />
-              <main className="flex-1">{children}</main>
-              <Footer />
-              <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
+              <NotificationsProvider
+                isAuthenticated={Boolean(user)}
+                userId={user?.id ?? null}
+                initialUnreadCount={unreadNotificationCount}
+              >
+                <AppHeader user={user} hasShop={Boolean(myShop)} />
+                <main className="flex-1">{children}</main>
+                <Footer />
+                <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
+              </NotificationsProvider>
             </CartProvider>
           </FavoritesProvider>
         </AuthStatusProvider>
