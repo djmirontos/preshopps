@@ -640,9 +640,9 @@ export function ConversationThread({
         </ul>
       </div>
 
-      <div className="shrink-0 border-t border-divider pt-3">
+      <div className="shrink-0 border-t border-divider pt-3 pb-4">
         {effectiveCanSend ? (
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-1.5">
             <label htmlFor="message-composer" className="sr-only">
               Message
             </label>
@@ -660,7 +660,7 @@ export function ConversationThread({
               type="button"
               onClick={handleSend}
               disabled={isSending || draft.trim().length === 0}
-              className="flex h-11 shrink-0 items-center justify-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+              className="flex h-11 shrink-0 items-center justify-center rounded-[10px] bg-brand-action px-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
             >
               {isSending ? "Sending…" : "Send"}
             </button>
