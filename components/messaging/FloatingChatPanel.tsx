@@ -90,14 +90,22 @@ export function FloatingChatPanel() {
       : "Conversation";
 
   return (
-    <div className="fixed bottom-0 right-6 z-40 hidden w-[360px] max-w-[calc(100vw-3rem)] lg:block">
+    // bottom-6/right-6 (24px each) -- both the minimized pill and the
+    // expanded chrome below are children of this one positioned wrapper,
+    // so they always share the exact same offset; nothing to keep in
+    // sync separately when toggling minimize/restore.
+    <div className="fixed bottom-6 right-6 z-40 hidden w-[360px] max-w-[calc(100vw-3rem)] lg:block">
       {/* Minimized pill -- the only visible element while isMinimized. */}
       <button
         type="button"
         onClick={handleRestore}
         aria-label={hasUnreadWhileMinimized ? `${panelName}, new message. Restore chat` : `Restore chat with ${panelName}`}
         className={cn(
-          "flex h-12 w-full items-center gap-2 rounded-t-[14px] border border-b-0 border-border bg-surface px-4 shadow-lg hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+          // Fully rounded + a full border on every side, not just the
+          // top -- now that the panel floats clear of the bottom edge
+          // (bottom-6 above) rather than sitting flush against it, a
+          // missing bottom border/radius would look like a cut-off box.
+          "flex h-12 w-full items-center gap-2 rounded-[14px] border border-border bg-surface px-4 shadow-lg hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
           !isMinimized && "hidden",
         )}
       >
@@ -111,7 +119,8 @@ export function FloatingChatPanel() {
           way. */}
       <div
         className={cn(
-          "flex max-h-[75vh] flex-col overflow-hidden rounded-t-[14px] border border-b-0 border-border bg-surface shadow-xl",
+          // Same "fully rounded + full border" reasoning as the pill above.
+          "flex max-h-[75vh] flex-col overflow-hidden rounded-[14px] border border-border bg-surface shadow-xl",
           isMinimized && "hidden",
         )}
       >
@@ -141,7 +150,13 @@ export function FloatingChatPanel() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* No overflow-y-auto here -- ConversationThread now owns its own
+            internal scroll region (see its own file comment), so this is
+            just the flex-column chain that gives it a real bounded
+            height to fill (h-full) inside this chrome's own
+            max-h-[75vh]. A second independently-scrolling ancestor here
+            would fight with ConversationThread's own scroll handling. */}
+        <div className="flex min-h-0 flex-1 flex-col">
           {state.status === "loading" && <p className="p-4 text-sm text-ink-secondary">Loading conversation…</p>}
 
           {state.status === "error" && (
@@ -163,7 +178,7 @@ export function FloatingChatPanel() {
           )}
 
           {state.status === "ready" && (
-            <div className="px-3">
+            <div className="flex min-h-0 flex-1 flex-col px-3">
               <ConversationThread
                 key={state.data.context.conversationId}
                 context={state.data.context}

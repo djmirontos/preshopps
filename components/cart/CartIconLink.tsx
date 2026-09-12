@@ -16,7 +16,11 @@ export function CartIconLink() {
   const { itemCount } = useCart();
 
   return (
-    <Tooltip label="Cart">
+    // Header icon (also rendered in the mobile row, but the tooltip
+    // itself only ever shows at lg+ regardless -- see Tooltip's own
+    // comment) -- side="bottom" so it has room below the icon instead of
+    // being pushed above the viewport's top.
+    <Tooltip label="Cart" side="bottom">
       <Link
         href="/cart"
         aria-label={itemCount > 0 ? `Cart, ${itemCount} item${itemCount === 1 ? "" : "s"}` : "Cart"}

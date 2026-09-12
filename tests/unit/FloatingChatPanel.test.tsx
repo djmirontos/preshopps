@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { LoadConversationForPanelResult } from "@/lib/messaging/load-conversation-for-panel";
@@ -173,6 +173,15 @@ function fireIncomingMessage(row: { id: string; conversation_id: string; sender_
   });
 }
 
+/** jsdom hardcodes scrollHeight/clientHeight to 0 on every element (no
+ * real layout) -- stubbed on the shared prototype so the minimize/
+ * restore scroll-reconciliation tests below have a known "content taller
+ * than the visible area" shape to assert scrollTop against. See
+ * ConversationThread-scroll.test.tsx for the fuller scroll-behavior
+ * suite; this file only covers the minimize/restore-specific case (D). */
+const STUBBED_SCROLL_HEIGHT = 1000;
+const STUBBED_CLIENT_HEIGHT = 400;
+
 beforeEach(() => {
   vi.clearAllMocks();
   channelOnCalls.length = 0;
@@ -182,6 +191,13 @@ beforeEach(() => {
   markConversationReadMock.mockResolvedValue({ ok: true });
   markConversationReadIfUnreadMock.mockResolvedValue({ ok: true });
   loadConversationForPanelMock.mockResolvedValue(readyResult());
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, value: STUBBED_SCROLL_HEIGHT });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: STUBBED_CLIENT_HEIGHT });
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+  Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
 });
 
 describe("FloatingChatPanel -- open/close lifecycle", () => {
@@ -344,5 +360,87 @@ describe("FloatingChatPanel -- minimized read-state semantics", () => {
     // The pill's own local unread dot is cleared on restore too.
     fireEvent.click(screen.getByRole("button", { name: "Minimize chat" }));
     expect(screen.queryByRole("button", { name: /new message/i })).not.toBeInTheDocument();
+  });
+
+  it("restoring re-snaps to the latest message when the viewer was near the bottom before minimizing (Requirement D)", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+
+    const container = screen.getByTestId("messages-scroll-container");
+    fireEvent.click(screen.getByRole("button", { name: "Minimize chat" }));
+    // Simulates a real browser's own behavior: scrollTop changes made
+    // while an element is display:none don't take effect (jsdom itself
+    // doesn't model this, so the test forces the same starting point by
+    // hand) -- restoring should re-snap to the bottom regardless, since
+    // the viewer was reading the latest messages before minimizing.
+    container.scrollTop = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: /Restore chat/ }));
+
+    expect(container.scrollTop).toBe(STUBBED_SCROLL_HEIGHT);
+  });
+
+  it("restoring does NOT force a scroll when the viewer had deliberately scrolled up before minimizing -- no jarring re-scroll, no loop", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+
+    const container = screen.getByTestId("messages-scroll-container");
+    container.scrollTop = 50; // 1000-50-400=550, not near bottom
+    fireEvent.scroll(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize chat" }));
+    fireEvent.click(screen.getByRole("button", { name: /Restore chat/ }));
+
+    expect(container.scrollTop).toBe(50);
+  });
+});
+
+describe("FloatingChatPanel -- desktop positioning (Issue 2: was flush against the bottom edge)", () => {
+  it("the positioned wrapper sits a comfortable 24px off both the bottom and right edges, not flush against them", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+
+    const wrapper = screen.getByRole("button", { name: "Minimize chat" }).closest("div.fixed");
+    expect(wrapper?.className).toMatch(/bottom-6/);
+    expect(wrapper?.className).toMatch(/right-6/);
+    expect(wrapper?.className).not.toMatch(/\bbottom-0\b/);
+  });
+
+  it("the minimized pill uses the exact same offset as the expanded panel -- both are children of the one positioned wrapper, so there is nothing to keep in sync separately", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Minimize chat" }));
+
+    const pill = screen.getByRole("button", { name: /Restore chat/ });
+    const wrapper = pill.closest("div.fixed");
+    expect(wrapper?.className).toMatch(/bottom-6/);
+    expect(wrapper?.className).toMatch(/right-6/);
+    // The pill itself is a direct child of that one positioned wrapper --
+    // confirms there's no separate/duplicated offset for the minimized case.
+    expect(pill.parentElement).toBe(wrapper);
+  });
+
+  it("remains hidden below the lg breakpoint (mobile is unaffected by this positioning change)", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+
+    const wrapper = screen.getByRole("button", { name: "Minimize chat" }).closest("div.fixed");
+    expect(wrapper?.className).toMatch(/\bhidden\b/);
+    expect(wrapper?.className).toMatch(/lg:block/);
+  });
+
+  it("the panel's own width/height caps are unchanged -- only the edge offsets moved", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Minimize chat" })).toBeInTheDocument());
+
+    const wrapper = screen.getByRole("button", { name: "Minimize chat" }).closest("div.fixed");
+    expect(wrapper?.className).toMatch(/w-\[360px\]/);
+    expect(wrapper?.className).toMatch(/max-w-\[calc\(100vw-3rem\)\]/);
   });
 });

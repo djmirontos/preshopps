@@ -23,7 +23,11 @@ export function IconButton({
   className,
 }: IconButtonProps) {
   return (
-    <Tooltip label={label}>
+    // IconButton is only ever used for the sticky site header's own icons
+    // (AppHeader's Favorites, AccountEntry's guest Account) -- side="bottom"
+    // so the tooltip has room below the icon instead of being pushed above
+    // the top of the viewport.
+    <Tooltip label={label} side="bottom">
       <Link
         href={href}
         aria-label={label}

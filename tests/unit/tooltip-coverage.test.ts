@@ -22,27 +22,34 @@ describe("Tooltip coverage -- global header / marketplace icon-only controls", (
     ["components/notifications/NotificationBellLink.tsx", "Notifications"],
     ["components/cart/CartIconLink.tsx", "Cart"],
     ["components/auth/AccountMenu.tsx", "Account (authenticated)"],
-  ])("%s (%s) wraps its icon-only control with <Tooltip>", (file) => {
+  ])("%s (%s) wraps its icon-only control with <Tooltip side=\"bottom\">", (file) => {
     const source = readFile(file);
     expect(source).toMatch(/<Tooltip label=/);
+    // These all sit in the sticky site header, at/near the very top of
+    // the viewport -- side="bottom" is the fix for Issue 1 (a top-placed
+    // bubble there gets pushed above y=0 and clipped by the viewport).
+    expect(source).toMatch(/side="bottom"/);
   });
 
-  it("CategoryStrip's desktop-only left/right scroll arrows each carry a <TooltipBubble> (they're already absolutely positioned, so they use the bare bubble + their own `group` class instead of the wrapping <Tooltip>)", () => {
+  it("CategoryStrip's desktop-only left/right scroll arrows each carry a <TooltipBubble> (they're already absolutely positioned, so they use the bare bubble + their own `group` class instead of the wrapping <Tooltip>), and keep the default top placement -- they sit well below the very top of the viewport, so top placement is appropriate there and was not part of Issue 1", () => {
     const source = readFile("components/marketplace/CategoryStrip.tsx");
     expect(source).toMatch(/<TooltipBubble label="Scroll left" \/>/);
     expect(source).toMatch(/<TooltipBubble label="Scroll right" \/>/);
+    expect(source).not.toMatch(/side="bottom"/);
   });
 
-  it("the listing card/detail favorite icon-only control wraps its button with <Tooltip>", () => {
+  it("the listing card/detail favorite icon-only control wraps its button with <Tooltip>, keeping the default top placement (not a header control, not part of Issue 1)", () => {
     const source = readFile("components/marketplace/FavoriteButton.tsx");
     expect(source).toMatch(/<Tooltip label=/);
+    expect(source).not.toMatch(/side="bottom"/);
   });
 
-  it("ListingLightbox's Close uses <Tooltip>; Previous/Next (absolutely positioned) use the bare <TooltipBubble>", () => {
+  it("ListingLightbox's Close uses <Tooltip>; Previous/Next (absolutely positioned) use the bare <TooltipBubble> -- all three keep the default top placement, per this task's own explicit instruction not to force lightbox actions to bottom", () => {
     const source = readFile("components/listing/ListingLightbox.tsx");
     expect(source).toMatch(/<Tooltip label="Close">/);
     expect(source).toMatch(/<TooltipBubble label="Previous" \/>/);
     expect(source).toMatch(/<TooltipBubble label="Next" \/>/);
+    expect(source).not.toMatch(/side="bottom"/);
   });
 });
 
@@ -64,6 +71,13 @@ describe("Tooltip coverage -- messaging icon-only controls", () => {
   it("ReportButton's icon-only variant wraps its button with <Tooltip>", () => {
     const source = readFile("components/moderation/ReportButton.tsx");
     expect(source).toMatch(/<Tooltip label="Report">/);
+  });
+
+  it("messaging controls are not the sticky site header -- none of them pass side=\"bottom\" (Issue 1 was specifically about the global header icons)", () => {
+    for (const file of ["components/messaging/FloatingChatPanel.tsx", "components/messaging/ConversationThread.tsx", "components/moderation/ReportButton.tsx"]) {
+      const source = readFile(file);
+      expect(source).not.toMatch(/side="bottom"/);
+    }
   });
 });
 

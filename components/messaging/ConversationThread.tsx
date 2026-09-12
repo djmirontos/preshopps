@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { Archive, ArchiveRestore, MailOpen, Package, UserCheck, UserX, Volume2, VolumeX } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/cn";
@@ -38,6 +38,14 @@ type RawMessageRow = {
 };
 
 const MAX_MESSAGE_LENGTH = 4000;
+
+/** How close to the bottom (in px of remaining scroll distance) still
+ * counts as "already reading the latest messages" -- close enough that
+ * an incoming message should pull the view down with it, rather than the
+ * viewer having to notice and scroll manually. Comfortably more than one
+ * message bubble's height, so ordinary sub-pixel/rounding scroll noise
+ * near the bottom never gets misread as "scrolled away". */
+const NEAR_BOTTOM_THRESHOLD_PX = 120;
 
 type LoadEarlierResult = {
   messages: ConversationMessage[];
@@ -136,6 +144,77 @@ export function ConversationThread({
 
   const refreshUnreadMessageCount = useRefreshUnreadMessageCount();
 
+  // Scroll behavior -- see the three effects and the realtime handler
+  // below for how these are used together. messagesContainerRef is the
+  // one scrollable region for the whole thread (see its own element
+  // below); isNearBottomRef tracks the viewer's own scroll position
+  // without triggering a re-render (updated on every scroll event, and
+  // reset to a known value on mount/restore); pendingScrollRef is a
+  // one-shot flag set by "an action that should snap to the latest
+  // message" (sending, or an incoming message that arrived while already
+  // near the bottom) and consumed by the effect that reacts to `messages`
+  // changing -- a "Load earlier" prepend never sets this flag, so it
+  // never causes an unexpected jump to the bottom.
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const pendingScrollRef = useRef(false);
+
+  function scrollMessagesToBottom() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function handleMessagesScroll() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_THRESHOLD_PX;
+  }
+
+  // A. Initial open: snap to the latest message once this thread mounts
+  // for a given conversation. Runs after the initial messages have
+  // already committed to the DOM (useLayoutEffect, not useEffect, so
+  // there's no visible flash of the top of the list before the snap),
+  // so scrollHeight already reflects the real content height.
+  // FloatingChatPanel force-remounts a fresh ConversationThread instance
+  // (via key={conversationId}) whenever the open conversation changes, so
+  // this also covers "switching to a different conversation" the same
+  // way a full-page navigation does.
+  useLayoutEffect(() => {
+    isNearBottomRef.current = true;
+    scrollMessagesToBottom();
+  }, [context.conversationId]);
+
+  // B & C. Follow to the latest message after sending, or after an
+  // incoming Realtime message that arrived while the viewer was already
+  // near the bottom (both set pendingScrollRef -- see handleSend and the
+  // Realtime handler below). Deliberately keyed on `messages` rather than
+  // a dedicated "scroll request" counter, so this needs no extra state;
+  // gated by the flag so a "Load earlier" prepend (which never sets it)
+  // is a no-op here, never an unexpected jump to the bottom.
+  useLayoutEffect(() => {
+    if (!pendingScrollRef.current) return;
+    pendingScrollRef.current = false;
+    scrollMessagesToBottom();
+  }, [messages]);
+
+  // D. Restoring from minimized: while the floating panel's chrome is
+  // hidden (display:none), the browser does not apply scrollTop changes
+  // to it, so a message that arrived while minimized (see the Realtime
+  // handler below) may not have actually moved the real scroll position
+  // even though isNearBottomRef was already true. Re-snap once visible
+  // again, but only when the viewer was near the bottom to begin with --
+  // if they had deliberately scrolled up to read older messages before
+  // minimizing, isNearBottomRef stayed false the whole time and this is a
+  // no-op, so there is no jarring re-scroll and no loop (this effect
+  // never itself changes isMinimized, so it cannot retrigger itself). On
+  // the full-page route isMinimized is always false, so this only ever
+  // runs once, on mount, redundantly with effect A above.
+  useLayoutEffect(() => {
+    if (isMinimized) return;
+    if (isNearBottomRef.current) scrollMessagesToBottom();
+  }, [isMinimized]);
+
   // Mark-read-on-open/restore: fires whenever this thread becomes visible
   // (isMinimized is false), at most once per "visible session" -- the ref
   // resets the moment isMinimized flips true, so restoring from minimized
@@ -228,12 +307,28 @@ export function ConversationThread({
             if (row.conversation_id !== conversationId) return;
 
             const isMine = row.sender_id !== otherPartyId;
+            // Captured before the append below changes scrollHeight --
+            // this is "was the viewer already near the bottom", the
+            // signal that decides whether this specific message should
+            // pull the view down with it (Requirement C: never force a
+            // viewer back down who deliberately scrolled up to read
+            // older messages).
+            const wasNearBottom = isNearBottomRef.current;
             let wasNew = false;
             setMessages((prev) => {
               const next = appendMessageIfNew(prev, { messageId: row.id, isMine, body: row.body, createdAt: row.created_at });
               wasNew = next !== prev;
               return next;
             });
+
+            if (wasNew && (wasNearBottom || isMine)) {
+              // isMine covers the (harmless, already-deduped) case where
+              // this Realtime echo of the viewer's own just-sent message
+              // arrives before handleSend's own local append -- either
+              // way the view should be at the bottom for the viewer's
+              // own message regardless of where they'd scrolled to.
+              pendingScrollRef.current = true;
+            }
 
             if (wasNew && !isMine) {
               latestRef.current.onIncomingMessage?.();
@@ -296,6 +391,11 @@ export function ConversationThread({
 
     setMessages((prev) => appendMessageIfNew(prev, { messageId: result.messageId, isMine: true, body: trimmed, createdAt: result.createdAt }));
     setDraft("");
+    // Requirement B: always follow the viewer's own just-sent message to
+    // the bottom, regardless of where they'd scrolled to -- consumed by
+    // the effect above the next time `messages` changes.
+    isNearBottomRef.current = true;
+    pendingScrollRef.current = true;
   }
 
   async function handleToggleArchive() {
@@ -363,8 +463,15 @@ export function ConversationThread({
   const effectiveCanSend = context.canSend && !isBlocked;
 
   return (
-    <div>
-      <div className="border-b border-divider pb-3">
+    // A plain flex column filling whatever height the caller gives it --
+    // height:100% against an unbounded ancestor (nothing special done by
+    // the full-page route) computes to auto per the CSS spec, so this
+    // degrades to today's plain block layout there; ConversationDetailClient
+    // and FloatingChatPanel each separately provide a real bounded height
+    // (see their own comments) so the messages region below can actually
+    // scroll internally instead of the whole page having to.
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-divider pb-3">
         {!hideBackLink && (
           <Link href="/messages" className="text-sm text-ink-secondary hover:text-ink">
             ← Back to Messages
@@ -478,7 +585,20 @@ export function ConversationThread({
         )}
       </div>
 
-      <div className="py-4">
+      {/* The one scrollable region for the whole thread -- see the three
+          scroll effects and the Realtime handler above for how initial
+          load, sending, incoming messages, and minimize/restore all keep
+          this pinned to the latest message unless the viewer has
+          deliberately scrolled up. min-h-0 is required for a flex child
+          to be allowed to shrink below its content size at all (the
+          default min-height:auto would otherwise make overflow-y-auto a
+          no-op inside a flex column). */}
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        data-testid="messages-scroll-container"
+        className="min-h-0 flex-1 overflow-y-auto py-4"
+      >
         {earlierCursor && (
           <div className="mb-3 flex flex-col items-center gap-1">
             <button
@@ -520,7 +640,7 @@ export function ConversationThread({
         </ul>
       </div>
 
-      <div className="border-t border-divider pt-3">
+      <div className="shrink-0 border-t border-divider pt-3">
         {effectiveCanSend ? (
           <div className="flex items-end gap-2">
             <label htmlFor="message-composer" className="sr-only">

@@ -56,6 +56,45 @@ describe("Tooltip", () => {
     const wrapper = container.firstElementChild;
     expect(wrapper?.className).toContain("group");
   });
+
+  it("defaults to side=\"top\" (bottom-full, above the trigger) -- unchanged behavior for controls with clear room above them", () => {
+    render(
+      <Tooltip label="Previous photo">
+        <button type="button" aria-label="Previous photo">
+          icon
+        </button>
+      </Tooltip>,
+    );
+    const bubble = screen.getByRole("tooltip");
+    expect(bubble.className).toMatch(/bottom-full/);
+    expect(bubble.className).toMatch(/mb-2/);
+    expect(bubble.className).not.toMatch(/top-full/);
+  });
+
+  it("side=\"bottom\" places the bubble below the trigger (top-full) with a comfortable gap -- for controls at/near the top of the viewport, where a top-placed bubble would be pushed above y=0 and clipped", () => {
+    render(
+      <Tooltip label="Messages" side="bottom">
+        <button type="button" aria-label="Messages">
+          icon
+        </button>
+      </Tooltip>,
+    );
+    const bubble = screen.getByRole("tooltip");
+    expect(bubble.className).toMatch(/top-full/);
+    expect(bubble.className).toMatch(/mt-2/);
+    expect(bubble.className).not.toMatch(/bottom-full/);
+  });
+
+  it("still carries a sufficient z-index regardless of side, so it renders above the sticky header (z-40) and any other page content", () => {
+    render(
+      <Tooltip label="Cart" side="bottom">
+        <button type="button" aria-label="Cart">
+          icon
+        </button>
+      </Tooltip>,
+    );
+    expect(screen.getByRole("tooltip").className).toMatch(/z-50/);
+  });
 });
 
 describe("TooltipBubble", () => {
@@ -69,12 +108,25 @@ describe("TooltipBubble", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("Scroll left");
   });
 
-  it("supports a bottom side variant", () => {
+  it("defaults to side=\"top\" (bottom-full)", () => {
+    render(
+      <div className="group relative">
+        <TooltipBubble label="Above" />
+      </div>,
+    );
+    const bubble = screen.getByRole("tooltip");
+    expect(bubble.className).toMatch(/bottom-full/);
+    expect(bubble.className).toMatch(/mb-2/);
+  });
+
+  it("supports a bottom side variant (top-full, below the trigger)", () => {
     render(
       <div className="group relative">
         <TooltipBubble label="Below" side="bottom" />
       </div>,
     );
-    expect(screen.getByRole("tooltip").className).toMatch(/-bottom-9/);
+    const bubble = screen.getByRole("tooltip");
+    expect(bubble.className).toMatch(/top-full/);
+    expect(bubble.className).toMatch(/mt-2/);
   });
 });

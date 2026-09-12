@@ -20,7 +20,11 @@ export function NotificationBellLink() {
   const unreadCount = useUnreadNotificationCount();
 
   return (
-    <Tooltip label="Notifications">
+    // Header icon (also rendered in the mobile row, but the tooltip
+    // itself only ever shows at lg+ regardless -- see Tooltip's own
+    // comment) -- side="bottom" so it has room below the icon instead of
+    // being pushed above the viewport's top.
+    <Tooltip label="Notifications" side="bottom">
       <Link
         href="/notifications"
         aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}

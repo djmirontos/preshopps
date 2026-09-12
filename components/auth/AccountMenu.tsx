@@ -45,7 +45,9 @@ export function AccountMenu({ email }: Props) {
 
   return (
     <div ref={containerRef} className="relative">
-      <Tooltip label="Account">
+      {/* Header icon -- side="bottom" so it has room below the icon
+          instead of being pushed above the viewport's top. */}
+      <Tooltip label="Account" side="bottom">
         <button
           ref={triggerRef}
           type="button"

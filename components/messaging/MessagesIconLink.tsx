@@ -18,7 +18,10 @@ export function MessagesIconLink() {
   const unreadMessageCount = useUnreadMessageCount();
 
   return (
-    <Tooltip label="Messages">
+    // Desktop-header-only icon (rendered only in AppHeader's lg:flex nav,
+    // never in the mobile row) -- side="bottom" so the tooltip has room
+    // below the icon instead of being pushed above the viewport's top.
+    <Tooltip label="Messages" side="bottom">
       <Link
         href="/messages"
         aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}

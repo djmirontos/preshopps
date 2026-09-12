@@ -29,9 +29,23 @@ type Props = {
  * import and every existing test of this exact component keep working
  * unchanged; it renders ConversationThread with every floating-panel-only
  * prop left at its default (back link and identity header both shown,
- * not minimized), i.e. pixel-identical to this component's own original,
- * pre-extraction markup.
+ * not minimized).
+ *
+ * The height here is what turns ConversationThread's own message list
+ * into a real, internally-scrolling region (rather than the whole page
+ * scrolling) -- 100vh minus the sticky site header's own height
+ * (AppHeader: h-16/64px below `lg`, h-[72px] at `lg` and up) and this
+ * page's own vertical padding (py-6, 24px top + 24px bottom = 48px).
+ * ConversationThread fills whatever height it's given (`h-full`) and
+ * degrades to plain content-sized block layout with no bounding
+ * ancestor, so this is the one place that height decision belongs for
+ * the full-page route -- FloatingChatPanel makes the equivalent decision
+ * for the floating panel, from its own already-bounded chrome.
  */
 export function ConversationDetailClient(props: Props) {
-  return <ConversationThread {...props} />;
+  return (
+    <div className="flex h-[calc(100vh-112px)] min-h-0 flex-col lg:h-[calc(100vh-120px)]">
+      <ConversationThread {...props} />
+    </div>
+  );
 }
