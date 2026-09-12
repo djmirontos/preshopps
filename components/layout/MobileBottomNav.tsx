@@ -6,6 +6,7 @@ import { CirclePlus, Home, MessageCircle, Search, UserCircle } from "lucide-reac
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { SellGate } from "@/components/auth/SellGate";
+import { useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
 import type { AuthUser } from "@/lib/auth/session";
 
 type Props = {
@@ -28,13 +29,24 @@ const LABEL_CLASS = "text-[11px] font-medium leading-none";
  * labels sit at an identical baseline regardless of whether that slot
  * holds a bare icon or Sell's filled circle -- fixes the previous
  * misalignment where Sell's icon block was a different height than the
- * other four.
+ * other four. `badgeCount` is optional and only ever passed for the
+ * Messages tab -- every other tab renders exactly as before (no layout
+ * shift: the icon slot's own size is unchanged, the badge is an
+ * absolutely-positioned overlay on top of it).
  */
-function tabContent(Icon: LucideIcon, label: string, isActive: boolean) {
+function tabContent(Icon: LucideIcon, label: string, isActive: boolean, badgeCount?: number) {
   return (
     <>
-      <span className="flex h-9 w-9 items-center justify-center">
+      <span className="relative flex h-9 w-9 items-center justify-center">
         <Icon className={cn("h-6 w-6", isActive ? "text-brand-link" : "text-ink-muted")} aria-hidden="true" />
+        {Boolean(badgeCount) && badgeCount! > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-action px-1 text-[10px] font-semibold leading-none text-brand-action-text"
+          >
+            {badgeCount! > 99 ? "99+" : badgeCount}
+          </span>
+        )}
       </span>
       <span className={cn(LABEL_CLASS, isActive ? "text-brand-link" : "text-ink-muted")}>{label}</span>
     </>
@@ -54,6 +66,7 @@ export function MobileBottomNav({ user, hasShop = false }: Props) {
   const pathname = usePathname();
   const isAuthenticated = Boolean(user);
   const currentPath = pathname || "/";
+  const unreadMessageCount = useUnreadMessageCount();
 
   const isHomeActive = pathname === "/";
   const isSearchActive = pathname?.startsWith("/search") ?? false;
@@ -96,11 +109,11 @@ export function MobileBottomNav({ user, hasShop = false }: Props) {
         <li className="flex-1">
           <Link
             href="/messages"
-            aria-label="Messages"
+            aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
             aria-current={isMessagesActive ? "page" : undefined}
             className={TAB_CLASS}
           >
-            {tabContent(MessageCircle, "Messages", isMessagesActive)}
+            {tabContent(MessageCircle, "Messages", isMessagesActive, unreadMessageCount)}
           </Link>
         </li>
 

@@ -1,10 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Heart, MessageCircle, Plus, Search } from "lucide-react";
+import { Heart, Plus, Search } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 import { AccountEntry } from "@/components/auth/AccountEntry";
 import { SellGate } from "@/components/auth/SellGate";
 import { CartIconLink } from "@/components/cart/CartIconLink";
+import { MessagesIconLink } from "@/components/messaging/MessagesIconLink";
 import { NotificationBellLink } from "@/components/notifications/NotificationBellLink";
 import type { AuthUser } from "@/lib/auth/session";
 
@@ -26,10 +27,12 @@ type Props = {
  * Account, Favorites, Cart, Messages, and Notifications are all real.
  * Messages/Notifications link directly to their own routes (matching the
  * Favorites icon's own convention) -- those pages themselves redirect a
- * guest to sign-in, so no auth branching is needed here. Notifications
- * carries an unread-count badge, sourced from the shared
- * NotificationsProvider (see NotificationBellLink) -- unlike Messages,
- * which has no equivalent cheap count and therefore stays badge-less.
+ * guest to sign-in, so no auth branching is needed here. Messages and
+ * Notifications each carry their OWN unread-count badge, sourced from the
+ * shared NotificationsProvider -- unreadMessageCount (new_message only)
+ * for MessagesIconLink, unreadNotificationCount (everything else) for
+ * NotificationBellLink. The two never overlap; see NotificationsProvider's
+ * own header comment for why.
  */
 export function AppHeader({ user, hasShop = false }: Props) {
   const isAuthenticated = Boolean(user);
@@ -84,7 +87,7 @@ export function AppHeader({ user, hasShop = false }: Props) {
         {/* Desktop right-hand actions */}
         <nav aria-label="Account actions" className="ml-auto hidden items-center gap-0.5 lg:flex">
           <IconButton href="/favorites" label="Favorites" icon={Heart} />
-          <IconButton href="/messages" label="Messages" icon={MessageCircle} />
+          <MessagesIconLink />
           <NotificationBellLink />
           <CartIconLink />
           <AccountEntry isAuthenticated={isAuthenticated} email={user?.email ?? null} />

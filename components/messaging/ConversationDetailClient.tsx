@@ -17,6 +17,7 @@ import {
   setConversationMuted,
 } from "@/lib/messaging/conversation-state";
 import { blockUser, unblockUser, BLOCK_USER_ERROR_MESSAGES, UNBLOCK_USER_ERROR_MESSAGES } from "@/lib/messaging/block-actions";
+import { useRefreshUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
 import { ReportButton } from "@/components/moderation/ReportButton";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
@@ -83,18 +84,24 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  const refreshUnreadMessageCount = useRefreshUnreadMessageCount();
+
   // Mark-read-on-open: fires at most once per conversationId per mount --
   // the ref (not just the dependency array) also guards against React
   // Strict Mode's dev-only double-invoke, which would otherwise trigger a
   // second read+maybe-write for the same open. markConversationReadIfUnread
   // itself performs zero writes when the conversation is already read, so
   // this is never a "repeated unnecessary write" even if the check reruns.
+  // The Messages badge is always recalculated afterward (authoritative,
+  // from the server) rather than guessed locally -- opening this one
+  // conversation says nothing by itself about how many *other*
+  // conversations are still unread.
   const markedReadForRef = useRef<string | null>(null);
   useEffect(() => {
     if (markedReadForRef.current === context.conversationId) return;
     markedReadForRef.current = context.conversationId;
-    void markConversationReadIfUnread(context.conversationId);
-  }, [context.conversationId]);
+    void markConversationReadIfUnread(context.conversationId).then(() => refreshUnreadMessageCount());
+  }, [context.conversationId, refreshUnreadMessageCount]);
 
   // Realtime: one channel per open conversation, filtered server-side to
   // this conversation_id only (RLS re-validates participation regardless).
@@ -104,6 +111,23 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
   // than fetching the viewer's own id) to derive isMine: a conversation
   // has exactly two participants, so any sender that isn't otherPartyId
   // is, by construction, the viewer.
+  //
+  // Deliberately does NOT await supabase.auth.getSession() before
+  // subscribing, unlike NotificationsProvider's own equivalent channel
+  // (see its file for the session-race bug that guard fixes there).
+  // Considered and rejected here: this component only ever mounts once a
+  // user has already navigated into a specific conversation -- by
+  // construction, several authenticated round trips (the page's own
+  // getAuthUser() gate, get_conversation_context, get_conversation_
+  // messages, get_conversation_block_state) have already completed
+  // first, so the browser client's session has always had ample time to
+  // hydrate before this effect ever runs; live testing confirms this
+  // channel already receives INSERT events correctly. NotificationsProvider
+  // mounts at the very first paint of the entire app instead, with no such
+  // guarantee, which is why it actually needed the fix. Adding an await
+  // here would turn a synchronous subscribe into an async one for a path
+  // that isn't broken -- a real (if small) risk to a proven-working
+  // channel for no measurable benefit -- so it is intentionally left as-is.
   useEffect(() => {
     const conversationId = context.conversationId;
 
@@ -134,8 +158,11 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
             // The thread is open and visible -- this is purely local
             // last_read_at bookkeeping (never a "seen" signal surfaced to
             // the other participant, per canon's no-read-receipts rule).
+            // The Messages badge is recalculated afterward from the
+            // server (authoritative), not decremented/incremented by
+            // guesswork here.
             if (wasNew && !isMine) {
-              void markConversationRead(conversationId);
+              void markConversationRead(conversationId).then(() => refreshUnreadMessageCount());
             }
           },
         )
@@ -148,7 +175,7 @@ export function ConversationDetailClient({ context, initialMessages, initialCurs
       console.error("Realtime message subscription failed to start:", err instanceof Error ? err.message : err);
       return undefined;
     }
-  }, [context.conversationId, otherPartyId]);
+  }, [context.conversationId, otherPartyId, refreshUnreadMessageCount]);
 
   const identityName = context.viewerRole === "seller" ? context.otherPartyDisplayName : context.shopName;
 

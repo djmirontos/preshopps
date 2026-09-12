@@ -75,7 +75,7 @@ describe("AppHeader", () => {
 
   it("renders an unread badge with the count and an accessible label when the notifications Provider is seeded with unread notifications", () => {
     render(
-      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadCount={3}>
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadMessageCount={0} initialUnreadNotificationCount={3}>
         <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
       </NotificationsProvider>,
     );
@@ -85,11 +85,42 @@ describe("AppHeader", () => {
 
   it("caps the displayed badge at 99+ for a very large unread count", () => {
     render(
-      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadCount={150}>
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadMessageCount={0} initialUnreadNotificationCount={150}>
         <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
       </NotificationsProvider>,
     );
     expect(screen.getAllByText("99+").length).toBeGreaterThan(0);
+  });
+
+  it("desktop Messages icon shows its own unreadMessageCount badge, independent of the Bell", () => {
+    render(
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadMessageCount={4} initialUnreadNotificationCount={0}>
+        <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
+      </NotificationsProvider>,
+    );
+    expect(screen.getByLabelText("Messages, 4 unread")).toBeInTheDocument();
+    // The Bell stays badge-less since unreadNotificationCount is 0.
+    for (const link of screen.getAllByLabelText("Notifications")) {
+      expect(link.textContent).toBe("");
+    }
+  });
+
+  it("a new_message-driven unreadMessageCount never shows up on the Bell, and vice versa", () => {
+    render(
+      <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadMessageCount={2} initialUnreadNotificationCount={5}>
+        <AppHeader user={{ id: "u1", email: "buyer@example.com" }} />
+      </NotificationsProvider>,
+    );
+    expect(screen.getByLabelText("Messages, 2 unread")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Notifications, 5 unread").length).toBeGreaterThan(0);
+    // Never merged/summed into a single number anywhere.
+    expect(screen.queryByLabelText("Messages, 7 unread")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Notifications, 7 unread")).not.toBeInTheDocument();
+  });
+
+  it("Messages icon shows no badge when rendered without a NotificationsProvider ancestor (context default is 0)", () => {
+    render(<AppHeader user={null} />);
+    expect(screen.getByLabelText("Messages").textContent).toBe("");
   });
 
   it("links the Cart icon to the real /cart route, not a placeholder", () => {

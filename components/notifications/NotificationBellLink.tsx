@@ -2,19 +2,21 @@
 
 import Link from "next/link";
 import { Bell } from "lucide-react";
-import { useNotificationsUnreadCount } from "@/components/notifications/NotificationsProvider";
+import { useUnreadNotificationCount } from "@/components/notifications/NotificationsProvider";
 
 /**
  * Real destination plus an unread-count badge, mirroring CartIconLink's
  * exact pattern -- unreadCount is read from the shared NotificationsProvider
- * (seeded once per request from get_my_notification_unread_count at the
- * root layout, then kept live by that Provider's own Realtime subscription
- * and mark-read updates), never a prop and never fetched here. Renders
- * correctly even without a Provider ancestor (context default is 0),
- * matching every existing call site's original "no badge" expectation.
+ * (seeded once per request, then kept live by that Provider's own Realtime
+ * subscription and mark-read updates), never a prop and never fetched
+ * here. Counts general marketplace notifications only -- new_message
+ * never contributes here, it drives MessagesIconLink's own badge instead
+ * (see NotificationsProvider's own header comment). Renders correctly
+ * even without a Provider ancestor (context default is 0), matching
+ * every existing call site's original "no badge" expectation.
  */
 export function NotificationBellLink() {
-  const unreadCount = useNotificationsUnreadCount();
+  const unreadCount = useUnreadNotificationCount();
 
   return (
     <Link

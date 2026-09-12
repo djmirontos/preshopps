@@ -18,6 +18,8 @@ const {
   channelNameCalls,
   subscribeMock,
   removeChannelMock,
+  getSessionMock,
+  rpcMock,
 } = vi.hoisted(() => {
   const channelOnCalls: Array<{ event: string; config: { event: string; schema: string; table: string; filter: string }; callback: (payload: { new: unknown }) => void }> = [];
   const channelNameCalls: string[] = [];
@@ -37,6 +39,15 @@ const {
     channelNameCalls,
     subscribeMock,
     removeChannelMock,
+    // Only exercised by the "Realtime message subscription" describe
+    // block below and the NotificationsProvider-wrapped badge tests --
+    // ConversationDetailClient's OWN messages:<id> subscription
+    // deliberately does not await getSession() (out of this task's
+    // scope, see its own effect comment), so these two only matter when
+    // a test wraps the component in a real NotificationsProvider, whose
+    // subscription does.
+    getSessionMock: vi.fn(),
+    rpcMock: vi.fn(),
   };
 });
 
@@ -61,6 +72,8 @@ function makeFakeChannel() {
 
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
+    auth: { getSession: getSessionMock },
+    rpc: rpcMock,
     channel: (name: string) => {
       channelNameCalls.push(name);
       return makeFakeChannel();
@@ -93,6 +106,7 @@ vi.mock("@/lib/messaging/block-actions", async () => {
 });
 
 import { ConversationDetailClient } from "@/components/messaging/ConversationDetailClient";
+import { NotificationsProvider, useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
 
 function sampleContext(overrides: Partial<ConversationContext> = {}): ConversationContext {
   return {
@@ -148,14 +162,24 @@ beforeEach(() => {
   markConversationReadMock.mockResolvedValue({ ok: true });
   channelOnCalls.length = 0;
   channelNameCalls.length = 0;
+  getSessionMock.mockReset();
+  getSessionMock.mockResolvedValue({ data: { session: { access_token: "token" } }, error: null });
+  rpcMock.mockReset();
+  rpcMock.mockResolvedValue({ data: 0, error: null });
 });
 
-/** Grabs the callback most recently registered for the messages INSERT
- * subscription, so a test can invoke it directly to simulate an incoming
- * Realtime event without a real websocket. */
+/** Grabs the callback most recently registered specifically for the
+ * messages table's INSERT subscription (filtered by table, not just "the
+ * last one registered overall") so a test can invoke it directly to
+ * simulate an incoming Realtime event without a real websocket -- some
+ * tests below also wrap the component in a real NotificationsProvider,
+ * whose own notifications:<id> subscription registers into this same
+ * array (asynchronously, after its own getSession() resolves), so "last
+ * overall" would be unreliable once both are present. */
 function latestMessagesCallback() {
-  const registration = channelOnCalls[channelOnCalls.length - 1];
-  if (!registration) throw new Error("No postgres_changes subscription was registered");
+  const messageRegistrations = channelOnCalls.filter((registration) => registration.config.table === "messages");
+  const registration = messageRegistrations[messageRegistrations.length - 1];
+  if (!registration) throw new Error("No postgres_changes subscription was registered for messages");
   return registration.callback;
 }
 
@@ -735,5 +759,92 @@ describe("ConversationDetailClient -- Realtime message subscription", () => {
     });
 
     expect(screen.queryByText("This belongs to a different conversation")).not.toBeInTheDocument();
+  });
+});
+
+/** Wraps ConversationDetailClient in a real, live NotificationsProvider
+ * (same fake createClient() as the rest of this file, extended with
+ * auth.getSession/rpc) plus a small probe reading unreadMessageCount --
+ * proves the "authoritative recalculation, not a local guess" behavior
+ * end-to-end: mark-read really does trigger a get_my_conversations
+ * refetch that updates the shared Messages badge count. */
+function UnreadMessageCountProbe() {
+  const count = useUnreadMessageCount();
+  return <p data-testid="probe-message-count">{count}</p>;
+}
+
+function renderConversationWithProvider(overrides: Partial<ComponentProps<typeof ConversationDetailClient>> = {}, initialUnreadMessageCount = 5) {
+  return render(
+    <NotificationsProvider isAuthenticated={false} userId={null} initialUnreadMessageCount={initialUnreadMessageCount} initialUnreadNotificationCount={0}>
+      <UnreadMessageCountProbe />
+      <ConversationDetailClient
+        context={sampleContext()}
+        initialMessages={[]}
+        initialCursor={null}
+        loadEarlier={loadEarlierMock}
+        otherPartyId="other-user-1"
+        initialIsBlocked={false}
+        {...overrides}
+      />
+    </NotificationsProvider>,
+  );
+}
+
+describe("ConversationDetailClient -- Messages badge recalculation (authoritative, not guessed)", () => {
+  it("recalculates unreadMessageCount from the server after the mount-time mark-read-if-unread completes", async () => {
+    rpcMock.mockResolvedValue({ data: 1, error: null });
+    renderConversationWithProvider({ context: sampleContext({ conversationId: "conv-1" }) }, 99);
+
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
+    await waitFor(() => expect(screen.getByTestId("probe-message-count")).toHaveTextContent("1"));
+    expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count");
+  });
+
+  it("does not simply zero the badge -- other unread conversations remain counted after recalculation", async () => {
+    // Three still-unread conversations remain even after this one was
+    // just read -- the recalculation must reflect all of them, not
+    // pretend everything is now read.
+    rpcMock.mockResolvedValue({ data: 3, error: null });
+    renderConversationWithProvider({ context: sampleContext({ conversationId: "conv-1" }) }, 99);
+
+    await waitFor(() => expect(screen.getByTestId("probe-message-count")).toHaveTextContent("3"));
+  });
+
+  it("recalculates the Messages badge again when an incoming (not-mine) message is marked read while the thread is open", async () => {
+    rpcMock.mockResolvedValue({ data: 0, error: null });
+    renderConversationWithProvider({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" }, 5);
+
+    await waitFor(() => expect(screen.getByTestId("probe-message-count")).toHaveTextContent("0"));
+
+    // A second, still-unread conversation now exists by the time this
+    // message arrives and gets marked read.
+    rpcMock.mockResolvedValue({ data: 1, error: null });
+
+    fireIncomingMessage({
+      id: "msg-incoming",
+      conversation_id: "conv-1",
+      sender_id: "other-user-1",
+      body: "Are you there?",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    await waitFor(() => expect(screen.getByTestId("probe-message-count")).toHaveTextContent("1"));
+  });
+
+  it("never recalculates for an incoming echo of the viewer's own message (no mark-read happens for it)", async () => {
+    renderConversationWithProvider({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" }, 5);
+    await waitFor(() => expect(screen.getByTestId("probe-message-count")).toHaveTextContent("0")); // mount-time recalculation already ran
+    rpcMock.mockClear();
+
+    fireIncomingMessage({
+      id: "msg-own-echo",
+      conversation_id: "conv-1",
+      sender_id: "viewer-own-id",
+      body: "Something I sent",
+      created_at: "2026-02-01T12:00:00.000Z",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });

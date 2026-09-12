@@ -199,6 +199,12 @@ describe("Real Messaging navigation matches the locked design", () => {
 
   it("desktop header Messages icon points to /messages, no longer a placeholder", () => {
     const source = readFile("components/layout/AppHeader.tsx");
-    expect(source).toMatch(/IconButton href="\/messages" label="Messages"/);
+    // Realtime slice 3: swapped from a plain IconButton (no badge support)
+    // to MessagesIconLink, which carries its own unreadMessageCount badge
+    // (see notifications-architecture.test.ts's own "Bell vs Messages
+    // badge" describe block) -- the route itself is unchanged.
+    expect(source).toMatch(/<MessagesIconLink/);
+    const messagesIconSource = readFile("components/messaging/MessagesIconLink.tsx");
+    expect(messagesIconSource).toMatch(/href="\/messages"/);
   });
 });

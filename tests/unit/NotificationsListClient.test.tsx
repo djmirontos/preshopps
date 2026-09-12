@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { NotificationItem } from "@/lib/notifications/get-my-notifications";
 
-const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock, channelOnCalls, channelNameCalls, removeChannelMock } = vi.hoisted(() => ({
+const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock, channelOnCalls, channelNameCalls, removeChannelMock, getSessionMock } = vi.hoisted(() => ({
   markNotificationReadMock: vi.fn(),
   markAllNotificationsReadMock: vi.fn(),
   refreshMock: vi.fn(),
   channelOnCalls: [] as Array<{ event: string; config: unknown; callback: (payload: { new: unknown }) => void }>,
   channelNameCalls: [] as string[],
   removeChannelMock: vi.fn(),
+  getSessionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/notifications/notification-actions", () => ({
@@ -33,6 +34,7 @@ function makeFakeChannel() {
 
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
+    auth: { getSession: getSessionMock },
     channel: (name: string) => {
       channelNameCalls.push(name);
       return makeFakeChannel();
@@ -42,7 +44,7 @@ vi.mock("@/lib/supabase/client", () => ({
 }));
 
 import { NotificationsListClient } from "@/components/notifications/NotificationsListClient";
-import { NotificationsProvider, useNotificationsUnreadCount } from "@/components/notifications/NotificationsProvider";
+import { NotificationsProvider, useUnreadNotificationCount } from "@/components/notifications/NotificationsProvider";
 
 function makeNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
@@ -68,6 +70,8 @@ beforeEach(() => {
   loadMoreMock.mockReset();
   channelOnCalls.length = 0;
   channelNameCalls.length = 0;
+  getSessionMock.mockReset();
+  getSessionMock.mockResolvedValue({ data: { session: { access_token: "token" } }, error: null });
 });
 
 function renderList(notifications: NotificationItem[]) {
@@ -81,13 +85,12 @@ function renderList(notifications: NotificationItem[]) {
   );
 }
 
-function latestNotificationsCallback() {
-  const registration = channelOnCalls[channelOnCalls.length - 1];
-  if (!registration) throw new Error("No postgres_changes subscription was registered");
-  return registration.callback;
+async function latestNotificationsCallback() {
+  await waitFor(() => expect(channelOnCalls.length).toBeGreaterThan(0));
+  return channelOnCalls[channelOnCalls.length - 1].callback;
 }
 
-function fireIncomingNotification(row: {
+async function fireIncomingNotification(row: {
   id: string;
   recipient_id: string;
   type: string;
@@ -98,23 +101,26 @@ function fireIncomingNotification(row: {
   created_at: string;
   read_at: string | null;
 }) {
+  const callback = await latestNotificationsCallback();
   act(() => {
-    latestNotificationsCallback()({ new: row });
+    callback({ new: row });
   });
 }
 
 function UnreadCountProbe() {
-  const count = useNotificationsUnreadCount();
+  const count = useUnreadNotificationCount();
   return <p data-testid="probe-count">{count}</p>;
 }
 
 /** Renders the real list alongside a small probe reading the same shared
  * count, both inside one live NotificationsProvider -- proves the list's
  * own mark-read handlers actually flow through to the Provider, not just
- * that the list's local row state changes. */
-function renderListWithProvider(notifications: NotificationItem[], initialUnreadCount = notifications.filter((n) => n.readAt === null).length) {
+ * that the list's local row state changes. Uses unreadNotificationCount
+ * specifically (the Bell's own count) -- this list is general
+ * notifications, never messages. */
+function renderListWithProvider(notifications: NotificationItem[], initialUnreadNotificationCount = notifications.filter((n) => n.readAt === null).length) {
   return render(
-    <NotificationsProvider isAuthenticated userId="me" initialUnreadCount={initialUnreadCount}>
+    <NotificationsProvider isAuthenticated userId="me" initialUnreadMessageCount={0} initialUnreadNotificationCount={initialUnreadNotificationCount}>
       <UnreadCountProbe />
       <NotificationsListClient initialNotifications={notifications} initialHadError={false} initialCursor={null} loadMore={loadMoreMock} />
     </NotificationsProvider>,
@@ -254,11 +260,11 @@ describe("NotificationsListClient -- pagination", () => {
 });
 
 describe("NotificationsListClient -- live updates via the shared Provider", () => {
-  it("prepends an incoming notification without a page reload, reusing the Provider's own channel (no second subscription)", () => {
+  it("prepends an incoming notification without a page reload, reusing the Provider's own channel (no second subscription)", async () => {
     renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
-    expect(channelNameCalls).toHaveLength(1);
+    await waitFor(() => expect(channelNameCalls).toHaveLength(1));
 
-    fireIncomingNotification({
+    await fireIncomingNotification({
       id: "notif-new",
       recipient_id: "me",
       type: "new_message",
@@ -276,10 +282,10 @@ describe("NotificationsListClient -- live updates via the shared Provider", () =
     expect(channelNameCalls).toHaveLength(1);
   });
 
-  it("prepends the new item above the existing rows, preserving order", () => {
+  it("prepends the new item above the existing rows, preserving order", async () => {
     renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
 
-    fireIncomingNotification({
+    await fireIncomingNotification({
       id: "notif-new",
       recipient_id: "me",
       type: "new_message",
@@ -297,10 +303,10 @@ describe("NotificationsListClient -- live updates via the shared Provider", () =
     expect(newIndex).toBeLessThan(existingIndex);
   });
 
-  it("never renders a duplicate row for the same notification id, even if it somehow arrives twice", () => {
+  it("never renders a duplicate row for the same notification id, even if it somehow arrives twice", async () => {
     renderListWithProvider([makeNotification({ notificationId: "notif-existing", type: "order_ready" })]);
 
-    fireIncomingNotification({
+    await fireIncomingNotification({
       id: "notif-new",
       recipient_id: "me",
       type: "new_message",
@@ -314,7 +320,7 @@ describe("NotificationsListClient -- live updates via the shared Provider", () =
     // A second, distinct-looking event carrying the exact same id (the
     // Provider itself already dedupes this in real usage; this list-level
     // check is a defensive second layer).
-    fireIncomingNotification({
+    await fireIncomingNotification({
       id: "notif-new",
       recipient_id: "me",
       type: "new_message",

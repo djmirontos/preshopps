@@ -11,7 +11,8 @@ import { getMyFavoriteListingIds } from "@/lib/favorites/get-my-favorite-ids";
 import { CartProvider } from "@/components/cart/CartProvider";
 import { getMyCartQuantities } from "@/lib/cart/get-my-cart";
 import { NotificationsProvider } from "@/components/notifications/NotificationsProvider";
-import { getMyNotificationUnreadCount } from "@/lib/notifications/get-my-notification-unread-count";
+import { getMyUnreadConversationCountServer } from "@/lib/messaging/get-my-unread-conversation-count-server";
+import { getMyGeneralNotificationUnreadCount } from "@/lib/notifications/get-my-general-notification-unread-count";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 
 const inter = Inter({
@@ -26,26 +27,31 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // getAuthUser is React cache()-memoized, so getMyFavoriteListingIds',
-  // getMyCartQuantities', getMyNotificationUnreadCount's, and getMyShop's
-  // internal calls to it reuse the same in-flight request rather than
-  // extra getUser() round trips; getMyCartQuantities' own get_my_cart()
-  // RPC call is itself cache()-shared with the /cart page (see
-  // lib/cart/get-my-cart.ts). getMyNotificationUnreadCount is the one
-  // root-level unread-count query this task's own instruction explicitly
-  // allows ("a single root-level unread-count query is acceptable if
-  // already supported cleanly") -- exactly one extra scalar RPC call per
-  // request, never per-notification, never polled. getMyShop is the same
-  // narrow {id, slug, name} read already used elsewhere (lib/seller/
-  // get-my-shop.ts) for exactly this "does this account have a shop"
-  // question -- reused here, not a new query, so SellGate (via AppHeader/
-  // MobileBottomNav) can route an authenticated seller to /sell vs
-  // /seller/shop without a page-level round trip of its own.
-  const [user, favoritedIds, cartLines, unreadNotificationCount, myShop] = await Promise.all([
+  // getAuthUser is React cache()-memoized, so every other call below that
+  // also needs the caller (directly or via its own internal getUser())
+  // reuses this same in-flight request rather than an extra round trip.
+  // getMyCartQuantities' own get_my_cart() RPC call is itself
+  // cache()-shared with the /cart page (see lib/cart/get-my-cart.ts).
+  // getMyUnreadConversationCountServer/getMyGeneralNotificationUnreadCount
+  // (0088) are exact scalar RPCs, each internally guarding on
+  // getAuthUser() first (same convention as getMyFavoriteListingIds/
+  // getMyCartQuantities/getMyShop) -- a guest pageview never issues a
+  // doomed-to-fail authenticated RPC call. The Messages badge counts
+  // UNREAD CONVERSATIONS (get_my_unread_conversation_count's own
+  // is_unread semantics, identical to get_my_conversations' per-row
+  // flag) -- a conversation with five new messages still counts once.
+  // The Bell counts every notification type EXCEPT new_message --
+  // get_my_notification_unread_count (all types together) is
+  // deliberately not used for either badge anymore, since it would
+  // double-count new_message into the Bell. getMyShop is the same narrow
+  // {id, slug, name} read already used elsewhere for exactly this "does
+  // this account have a shop" question.
+  const [user, favoritedIds, cartLines, initialUnreadMessageCount, initialUnreadNotificationCount, myShop] = await Promise.all([
     getAuthUser(),
     getMyFavoriteListingIds(),
     getMyCartQuantities(),
-    getMyNotificationUnreadCount(),
+    getMyUnreadConversationCountServer(),
+    getMyGeneralNotificationUnreadCount(),
     getMyShop(),
   ]);
 
@@ -58,7 +64,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <NotificationsProvider
                 isAuthenticated={Boolean(user)}
                 userId={user?.id ?? null}
-                initialUnreadCount={unreadNotificationCount}
+                initialUnreadMessageCount={initialUnreadMessageCount}
+                initialUnreadNotificationCount={initialUnreadNotificationCount}
               >
                 <AppHeader user={user} hasShop={Boolean(myShop)} />
                 <main className="flex-1">{children}</main>

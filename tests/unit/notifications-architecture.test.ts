@@ -131,10 +131,98 @@ describe("Notifications Realtime is scoped to exactly one global, per-user-filte
 
   it("NotificationBellLink and NotificationsListClient consume the shared Provider hooks rather than fetching/subscribing themselves", () => {
     const bellSource = readFile("components/notifications/NotificationBellLink.tsx");
-    expect(bellSource).toMatch(/useNotificationsUnreadCount/);
+    expect(bellSource).toMatch(/useUnreadNotificationCount/);
 
     const listSource = readFile("components/notifications/NotificationsListClient.tsx");
     expect(listSource).toMatch(/useLatestNotificationEvent/);
+  });
+
+  it("waits for the browser client's session to resolve before subscribing -- the fix for the original 'realtime never fires' bug", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/await supabase\.auth\.getSession\(\)/);
+  });
+});
+
+/**
+ * Realtime slice 3 (unread-count split): a notification's `type` decides
+ * which of the two independent counters it affects -- new_message
+ * contributes to unreadMessageCount only, every other type to
+ * unreadNotificationCount only. The Bell is for general marketplace
+ * activity; the Messages badge (AppHeader's MessagesIconLink,
+ * MobileBottomNav's Messages tab) is for new_message specifically.
+ */
+describe("Bell vs Messages badge counts are split and never double-counted", () => {
+  it("NotificationsProvider exposes two independent counts, not one merged unreadCount", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/unreadMessageCount/);
+    expect(source).toMatch(/unreadNotificationCount/);
+    expect(source).not.toMatch(/\bunreadCount\b/);
+  });
+
+  it("routes new_message to a debounced authoritative refresh (never a direct setUnreadMessageCount increment) and every other type to a direct unreadNotificationCount increment, in one exclusive branch", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    const branchMatch = source.match(/if \(row\.type === ["']new_message["']\) \{([\s\S]*?)\n\s*\} else \{([\s\S]*?)\n\s*\}/);
+    expect(branchMatch).not.toBeNull();
+    const [, newMessageBranch, otherBranch] = branchMatch!;
+
+    // new_message never increments the badge directly -- it schedules a
+    // debounced authoritative re-fetch instead (Part 1's fix).
+    expect(newMessageBranch).not.toMatch(/setUnreadMessageCount/);
+    expect(newMessageBranch).toMatch(/clearTimeout/);
+    expect(newMessageBranch).toMatch(/setTimeout/);
+    expect(newMessageBranch).toMatch(/refreshUnreadMessageCount\(\)/);
+
+    // every other type still increments the Bell count directly and
+    // immediately -- unaffected by the new_message debounce.
+    expect(otherBranch).toMatch(/setUnreadNotificationCount\(\(prev\) => prev \+ 1\)/);
+  });
+
+  it("the new_message debounce timer is tracked in a ref and cleared both on reschedule and on unmount -- no leaked timer, no drift from a stale pending refresh", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/refreshTimeoutRef\s*=\s*useRef/);
+    expect(source).toMatch(/if \(refreshTimeoutRef\.current\) clearTimeout\(refreshTimeoutRef\.current\)/);
+  });
+
+  it("markOneRead/markAllRead (driven by /notifications' own mark-read actions) only ever touch unreadNotificationCount", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/markOneRead = useCallback\(\(\) => setUnreadNotificationCount/);
+    expect(source).toMatch(/markAllRead = useCallback\(\(\) => setUnreadNotificationCount\(0\)/);
+  });
+
+  it("MessagesIconLink (desktop) and MobileBottomNav's Messages tab both read unreadMessageCount, never unreadNotificationCount", () => {
+    const messagesIconSource = readFile("components/messaging/MessagesIconLink.tsx");
+    expect(messagesIconSource).toMatch(/useUnreadMessageCount/);
+    expect(messagesIconSource).not.toMatch(/useUnreadNotificationCount/);
+
+    const mobileNavSource = readFile("components/layout/MobileBottomNav.tsx");
+    expect(mobileNavSource).toMatch(/useUnreadMessageCount/);
+    expect(mobileNavSource).not.toMatch(/useUnreadNotificationCount/);
+  });
+
+  it("AppHeader's Bell (NotificationBellLink) never reads unreadMessageCount", () => {
+    const source = readFile("components/notifications/NotificationBellLink.tsx");
+    expect(source).not.toMatch(/useUnreadMessageCount/);
+  });
+
+  it("does not add a bell/notifications icon to MobileBottomNav", () => {
+    const source = readFile("components/layout/MobileBottomNav.tsx");
+    expect(source).not.toMatch(/Bell|NotificationBellLink/);
+  });
+
+  it("a conversation being marked read triggers an authoritative recalculation (refreshUnreadMessageCount), not a blind local decrement", () => {
+    const providerSource = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(providerSource).toMatch(/refreshUnreadMessageCount/);
+    expect(providerSource).toMatch(/getMyUnreadConversationCount/);
+
+    const conversationDetailSource = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(conversationDetailSource).toMatch(/useRefreshUnreadMessageCount/);
+    expect(conversationDetailSource).toMatch(/refreshUnreadMessageCount\(\)/);
+  });
+
+  it("never introduces read-receipt/'Seen' UI as part of the recalculation", () => {
+    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(source).not.toMatch(/>Seen</);
+    expect(source).not.toMatch(/"Seen"/);
   });
 });
 
@@ -147,27 +235,54 @@ describe("Notifications does not add a sixth bottom-nav item", () => {
   });
 });
 
-describe("header unread badge is seeded by a single root-level query, then kept live by the shared Provider", () => {
-  it("AppHeader never fetches notification data itself -- it doesn't even hold the count anymore, NotificationsProvider does", () => {
+describe("header unread badges are seeded by root-level queries, then kept live by the shared Provider", () => {
+  it("AppHeader never fetches notification data itself -- it doesn't even hold either count anymore, NotificationsProvider does", () => {
     const source = readFile("components/layout/AppHeader.tsx");
     expect(source).not.toMatch(/from ["']@\/lib\/notifications/);
-    expect(source).not.toMatch(/getMyNotificationUnreadCount\(/);
+    expect(source).not.toMatch(/from ["']@\/lib\/messaging/);
     expect(source).not.toMatch(/\.rpc\(/);
   });
 
-  it("NotificationBellLink never fetches notification data itself -- unreadCount comes from the shared Provider's context, not a prop or an RPC", () => {
+  it("NotificationBellLink never fetches notification data itself -- unreadNotificationCount comes from the shared Provider's context, not a prop or an RPC", () => {
     const source = readFile("components/notifications/NotificationBellLink.tsx");
     expect(source).not.toMatch(/getMyNotification\(|\.rpc\(/);
-    expect(source).toMatch(/useNotificationsUnreadCount/);
+    expect(source).toMatch(/useUnreadNotificationCount/);
     expect(source).not.toMatch(/type Props/);
   });
 
-  it("the root layout fetches the unread count exactly once, alongside the other existing root-level queries", () => {
+  it("root layout no longer calls getMyNotificationUnreadCount for either header badge -- it counts every type together, which is the exact bug being fixed", () => {
     const source = readFile("app/layout.tsx");
-    expect(source).toMatch(/getMyNotificationUnreadCount/);
-    // Exactly one call site (inside the shared Promise.all), not a second
-    // ad-hoc fetch elsewhere in the same file.
-    const callSites = source.match(/getMyNotificationUnreadCount\(\)/g) ?? [];
-    expect(callSites.length).toBe(1);
+    // Matches an actual call/import, not this file's own header comment
+    // explaining (by name) why that scalar is deliberately not used here.
+    expect(source).not.toMatch(/getMyNotificationUnreadCount\(/);
+    expect(source).not.toMatch(/from ["']@\/lib\/notifications\/get-my-notification-unread-count["']/);
+  });
+
+  it("root layout seeds initialUnreadMessageCount from the exact get_my_unread_conversation_count RPC (0088), and initialUnreadNotificationCount from the exact get_my_general_notification_unread_count RPC (0088) -- never the bounded first-page approach", () => {
+    const source = readFile("app/layout.tsx");
+    expect(source).toMatch(/getMyUnreadConversationCountServer\(/);
+    expect(source).toMatch(/getMyGeneralNotificationUnreadCount\(/);
+    expect(source).toMatch(/from ["']@\/lib\/messaging\/get-my-unread-conversation-count-server["']/);
+    expect(source).toMatch(/from ["']@\/lib\/notifications\/get-my-general-notification-unread-count["']/);
+    expect(source).not.toMatch(/getMyConversations\(/);
+    expect(source).not.toMatch(/getMyNotifications\(/);
+  });
+
+  it("root layout calls the two exact-count functions unconditionally -- each self-guards on getAuthUser() internally, so no external guest ternary is needed", () => {
+    const layoutSource = readFile("app/layout.tsx");
+    expect(layoutSource).not.toMatch(/user \? getMyUnreadConversationCountServer/);
+    expect(layoutSource).not.toMatch(/user \? getMyGeneralNotificationUnreadCount/);
+
+    const serverCountSource = readFile("lib/messaging/get-my-unread-conversation-count-server.ts");
+    expect(serverCountSource).toMatch(/if \(!user\) return 0;/);
+
+    const generalCountSource = readFile("lib/notifications/get-my-general-notification-unread-count.ts");
+    expect(generalCountSource).toMatch(/if \(!user\) return 0;/);
+  });
+
+  it("getMyNotificationUnreadCount itself is untouched and still exists as a valid utility, just unused by either header badge now", () => {
+    const source = readFile("lib/notifications/get-my-notification-unread-count.ts");
+    expect(source).toMatch(/export async function getMyNotificationUnreadCount/);
+    expect(source).toMatch(/rpc\(\s*["']get_my_notification_unread_count["']\s*\)/);
   });
 });

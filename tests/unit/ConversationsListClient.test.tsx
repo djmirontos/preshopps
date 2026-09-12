@@ -4,10 +4,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ConversationSummary } from "@/lib/messaging/get-my-conversations";
 
-const { channelOnCalls, channelNameCalls, removeChannelMock } = vi.hoisted(() => ({
+const { channelOnCalls, channelNameCalls, removeChannelMock, getSessionMock } = vi.hoisted(() => ({
   channelOnCalls: [] as Array<{ event: string; config: unknown; callback: (payload: { new: unknown }) => void }>,
   channelNameCalls: [] as string[],
   removeChannelMock: vi.fn(),
+  getSessionMock: vi.fn(),
 }));
 
 function makeFakeChannel() {
@@ -23,6 +24,7 @@ function makeFakeChannel() {
 
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
+    auth: { getSession: getSessionMock },
     channel: (name: string) => {
       channelNameCalls.push(name);
       return makeFakeChannel();
@@ -72,15 +74,16 @@ beforeEach(() => {
   refreshFirstPageMock.mockReset();
   channelOnCalls.length = 0;
   channelNameCalls.length = 0;
+  getSessionMock.mockReset();
+  getSessionMock.mockResolvedValue({ data: { session: { access_token: "token" } }, error: null });
 });
 
-function latestNotificationsCallback() {
-  const registration = channelOnCalls[channelOnCalls.length - 1];
-  if (!registration) throw new Error("No postgres_changes subscription was registered");
-  return registration.callback;
+async function latestNotificationsCallback() {
+  await waitFor(() => expect(channelOnCalls.length).toBeGreaterThan(0));
+  return channelOnCalls[channelOnCalls.length - 1].callback;
 }
 
-function fireIncomingNotification(row: {
+async function fireIncomingNotification(row: {
   id: string;
   recipient_id: string;
   type: string;
@@ -91,8 +94,9 @@ function fireIncomingNotification(row: {
   created_at: string;
   read_at: string | null;
 }) {
+  const callback = await latestNotificationsCallback();
   act(() => {
-    latestNotificationsCallback()({ new: row });
+    callback({ new: row });
   });
 }
 
@@ -113,7 +117,7 @@ function newMessageNotification(overrides: Partial<Parameters<typeof fireIncomin
 
 function renderList(conversations: ConversationSummary[]) {
   return render(
-    <NotificationsProvider isAuthenticated userId="me" initialUnreadCount={0}>
+    <NotificationsProvider isAuthenticated userId="me" initialUnreadMessageCount={0} initialUnreadNotificationCount={0}>
       <ConversationsListClient
         initialConversations={conversations}
         initialHadError={false}
@@ -148,7 +152,7 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
     });
     renderList([sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet", lastMessagePreview: "Old preview" })]);
 
-    fireIncomingNotification(newMessageNotification());
+    await fireIncomingNotification(newMessageNotification());
     expect(refreshFirstPageMock).not.toHaveBeenCalled();
 
     await waitFor(() => expect(refreshFirstPageMock).toHaveBeenCalledTimes(1));
@@ -161,9 +165,9 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
 
     // All three arrive well within the debounce window -- only the last
     // one's timer should ever actually fire.
-    fireIncomingNotification(newMessageNotification({ id: "notif-1" }));
-    fireIncomingNotification(newMessageNotification({ id: "notif-2" }));
-    fireIncomingNotification(newMessageNotification({ id: "notif-3" }));
+    await fireIncomingNotification(newMessageNotification({ id: "notif-1" }));
+    await fireIncomingNotification(newMessageNotification({ id: "notif-2" }));
+    await fireIncomingNotification(newMessageNotification({ id: "notif-3" }));
 
     await waitFor(() => expect(refreshFirstPageMock).toHaveBeenCalled());
     // Give any (incorrect) second debounced call a chance to also fire
@@ -175,7 +179,7 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
   it("an unrelated notification type does not trigger a conversation-list refetch", async () => {
     renderList([sampleConversation()]);
 
-    fireIncomingNotification(newMessageNotification({ id: "notif-order", type: "order_accepted" }));
+    await fireIncomingNotification(newMessageNotification({ id: "notif-order", type: "order_accepted" }));
 
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(refreshFirstPageMock).not.toHaveBeenCalled();
@@ -185,7 +189,7 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
     refreshFirstPageMock.mockResolvedValue({ conversations: [sampleConversation()], hadError: false, nextCursor: null });
     renderList([sampleConversation()]);
 
-    fireIncomingNotification(newMessageNotification());
+    await fireIncomingNotification(newMessageNotification());
 
     await waitFor(() => expect(refreshFirstPageMock).toHaveBeenCalled());
     // Still the same jsdom document -- a real navigation would have torn
@@ -197,7 +201,7 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
     refreshFirstPageMock.mockResolvedValue({ conversations: [], hadError: true, nextCursor: null });
     renderList([sampleConversation({ shopName: "Anne's Closet" })]);
 
-    fireIncomingNotification(newMessageNotification());
+    await fireIncomingNotification(newMessageNotification());
 
     await waitFor(() => expect(refreshFirstPageMock).toHaveBeenCalled());
     expect(screen.getByText("Anne's Closet")).toBeInTheDocument();
@@ -205,8 +209,9 @@ describe("ConversationsListClient -- live refresh on new_message notifications",
 });
 
 describe("ConversationsListClient -- no direct Realtime subscription of its own", () => {
-  it("never opens a Realtime channel itself -- it only reacts to the shared NotificationsProvider signal", () => {
+  it("never opens a Realtime channel itself -- it only reacts to the shared NotificationsProvider signal", async () => {
     renderList([sampleConversation()]);
+    await waitFor(() => expect(channelNameCalls.length).toBeGreaterThan(0));
     expect(channelNameCalls).toHaveLength(1); // exactly the Provider's own notifications channel
     expect(channelNameCalls[0]).toBe("notifications:me");
   });
