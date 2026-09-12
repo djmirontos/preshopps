@@ -14,6 +14,8 @@ import { NotificationsProvider } from "@/components/notifications/NotificationsP
 import { getMyUnreadConversationCountServer } from "@/lib/messaging/get-my-unread-conversation-count-server";
 import { getMyGeneralNotificationUnreadCount } from "@/lib/notifications/get-my-general-notification-unread-count";
 import { getMyShop } from "@/lib/seller/get-my-shop";
+import { FloatingMessengerProvider } from "@/components/messaging/FloatingMessengerProvider";
+import { FloatingChatPanel } from "@/components/messaging/FloatingChatPanel";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -67,10 +69,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 initialUnreadMessageCount={initialUnreadMessageCount}
                 initialUnreadNotificationCount={initialUnreadNotificationCount}
               >
-                <AppHeader user={user} hasShop={Boolean(myShop)} />
-                <main className="flex-1">{children}</main>
-                <Footer />
-                <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
+                {/* Root-level so the floating desktop chat panel survives
+                    normal marketplace navigation (the layout itself never
+                    unmounts on a route change) -- see
+                    FloatingMessengerProvider's own file comment. Renders
+                    nothing on its own; FloatingChatPanel below is the only
+                    consumer that actually shows anything, and only once a
+                    conversation has been opened. */}
+                <FloatingMessengerProvider>
+                  <AppHeader user={user} hasShop={Boolean(myShop)} />
+                  <main className="flex-1">{children}</main>
+                  <Footer />
+                  <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
+                  <FloatingChatPanel />
+                </FloatingMessengerProvider>
               </NotificationsProvider>
             </CartProvider>
           </FavoritesProvider>

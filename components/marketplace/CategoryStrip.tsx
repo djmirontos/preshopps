@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { CategoryRef } from "@/lib/marketplace/reference-data";
 import { getCategoryImage } from "@/lib/marketplace/category-images";
+import { TooltipBubble } from "@/components/ui/Tooltip";
 
 /** Fallback only -- used for a category slug with no image mapping (e.g.
  * a future admin-added category not yet covered by category-images.ts).
@@ -91,9 +92,10 @@ export function CategoryStrip({ categories }: { categories: CategoryRef[] }) {
           onClick={() => scrollByDirection(-1)}
           disabled={!canScrollLeft}
           aria-label="Scroll categories left"
-          className="absolute left-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
+          className="group absolute left-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
         >
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          <TooltipBubble label="Scroll left" />
         </button>
 
         <ul
@@ -135,9 +137,10 @@ export function CategoryStrip({ categories }: { categories: CategoryRef[] }) {
           onClick={() => scrollByDirection(1)}
           disabled={!canScrollRight}
           aria-label="Scroll categories right"
-          className="absolute right-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
+          className="group absolute right-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
         >
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          <TooltipBubble label="Scroll right" />
         </button>
       </div>
     </section>

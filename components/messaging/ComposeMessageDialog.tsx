@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { handleComposerKeyDown } from "@/lib/messaging/composer-keydown";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -105,6 +106,11 @@ export function ComposeMessageDialog({ title, isPending, errorMessage, onSend, o
               id="compose-message-body"
               value={body}
               onChange={(event) => setBody(event.target.value.slice(0, MAX_MESSAGE_LENGTH))}
+              onKeyDown={(event) =>
+                handleComposerKeyDown(event, () => {
+                  if (canSend) onSend(trimmed);
+                })
+              }
               maxLength={MAX_MESSAGE_LENGTH}
               rows={4}
               placeholder="Write a message…"

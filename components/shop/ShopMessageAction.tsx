@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
+import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
+import { isDesktopViewport } from "@/lib/ui/viewport";
 
 type Props = {
   shopId: string;
@@ -23,6 +25,7 @@ type Props = {
  */
 export function ShopMessageAction({ shopId, shopSlug, isAuthenticated, isOwnShop }: Props) {
   const router = useRouter();
+  const { openConversation } = useFloatingMessenger();
   const [isMessageGateOpen, setIsMessageGateOpen] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -42,7 +45,16 @@ export function ShopMessageAction({ shopId, shopSlug, isAuthenticated, isOwnShop
       return;
     }
 
-    router.push(`/messages/${result.conversationId}`);
+    setIsComposeOpen(false);
+    // Desktop: open the floating chat panel right where the conversation
+    // was just started, no navigation away from this shop page. Mobile
+    // has no floating panel, so it keeps the original full-page route
+    // navigation.
+    if (isDesktopViewport()) {
+      openConversation(result.conversationId);
+    } else {
+      router.push(`/messages/${result.conversationId}`);
+    }
   }
 
   return (

@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useIsAuthenticated } from "@/lib/auth/use-is-authenticated";
 import { useFavorites } from "@/components/favorites/FavoritesProvider";
 import { AuthGate } from "@/components/auth/AuthGate";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 type Props = {
   listingId: string;
@@ -96,18 +97,20 @@ export function FavoriteButton({ listingId, label, next }: Props) {
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-pressed={isFavorited}
-        onClick={handleClick}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/85 text-ink-secondary shadow-sm backdrop-blur-sm transition-colors duration-150 hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-      >
-        <Heart
-          className={cn("h-4 w-4", isFavorited && "fill-brand-link text-brand-link")}
-          aria-hidden="true"
-        />
-      </button>
+      <Tooltip label={isFavorited ? "Remove from favorites" : "Add to favorites"}>
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          aria-pressed={isFavorited}
+          onClick={handleClick}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/85 text-ink-secondary shadow-sm backdrop-blur-sm transition-colors duration-150 hover:text-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <Heart
+            className={cn("h-4 w-4", isFavorited && "fill-brand-link text-brand-link")}
+            aria-hidden="true"
+          />
+        </button>
+      </Tooltip>
 
       {isGateOpen && (
         <AuthGate

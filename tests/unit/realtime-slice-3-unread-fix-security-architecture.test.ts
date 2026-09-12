@@ -27,10 +27,14 @@ const SLICE_3_FILES = [
   "components/notifications/NotificationBellLink.tsx",
   "components/messaging/MessagesIconLink.tsx",
   "components/messaging/ConversationDetailClient.tsx",
+  "components/messaging/ConversationThread.tsx",
+  "components/messaging/FloatingMessengerProvider.tsx",
+  "components/messaging/FloatingChatPanel.tsx",
   "components/layout/AppHeader.tsx",
   "components/layout/MobileBottomNav.tsx",
   "lib/messaging/get-my-unread-conversation-count.ts",
   "lib/messaging/get-my-unread-conversation-count-server.ts",
+  "lib/messaging/load-conversation-for-panel.ts",
   "lib/notifications/get-my-general-notification-unread-count.ts",
   "app/layout.tsx",
 ];
@@ -174,8 +178,12 @@ describe("Realtime Slice 3 -- session-race fix is present exactly where the bug 
     expect(channelCreateIndex).toBeGreaterThan(sessionAwaitIndex);
   });
 
-  it("ConversationDetailClient's own (separately confirmed working) message subscription is deliberately left untouched by this fix -- no actual await getSession() call in its code, only a comment explaining why one wasn't added", () => {
-    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+  it("ConversationThread's own (separately confirmed working) message subscription is deliberately left untouched by this fix -- no actual await getSession() call in its code, only a comment explaining why one wasn't added", () => {
+    // This logic (and the comment explaining the decision) now lives in
+    // ConversationThread -- ConversationDetailClient.tsx is a thin
+    // wrapper around it (see messaging-architecture.test.ts's own
+    // coverage of that extraction).
+    const source = readFile("components/messaging/ConversationThread.tsx");
     const codeOnly = stripComments(source);
     expect(codeOnly).not.toMatch(/await supabase\.auth\.getSession\(\)/);
     // The decision itself is documented in-code, per Part 4's "report what

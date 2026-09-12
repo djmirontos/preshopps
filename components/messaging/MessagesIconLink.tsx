@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 /**
  * Real destination plus an unread-conversation-count badge, mirroring
@@ -17,20 +18,22 @@ export function MessagesIconLink() {
   const unreadMessageCount = useUnreadMessageCount();
 
   return (
-    <Link
-      href="/messages"
-      aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
-      className="relative inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-    >
-      <MessageCircle className="h-5 w-5" aria-hidden="true" />
-      {unreadMessageCount > 0 && (
-        <span
-          aria-hidden="true"
-          className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-action px-1 text-[10px] font-semibold leading-none text-brand-action-text"
-        >
-          {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
-        </span>
-      )}
-    </Link>
+    <Tooltip label="Messages">
+      <Link
+        href="/messages"
+        aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
+        className="relative inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
+        <MessageCircle className="h-5 w-5" aria-hidden="true" />
+        {unreadMessageCount > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-action px-1 text-[10px] font-semibold leading-none text-brand-action-text"
+          >
+            {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+          </span>
+        )}
+      </Link>
+    </Tooltip>
   );
 }

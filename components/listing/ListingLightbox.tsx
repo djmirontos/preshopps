@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { Tooltip, TooltipBubble } from "@/components/ui/Tooltip";
 
 type Props = {
   images: string[];
@@ -130,14 +131,16 @@ export function ListingLightbox({ images, title, selectedIndex, onSelectedIndexC
           ) : (
             <span />
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close photo viewer"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-          >
-            <X className="h-6 w-6" aria-hidden="true" />
-          </button>
+          <Tooltip label="Close">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close photo viewer"
+              className="flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <X className="h-6 w-6" aria-hidden="true" />
+            </button>
+          </Tooltip>
         </div>
 
         <div
@@ -163,18 +166,20 @@ export function ListingLightbox({ images, title, selectedIndex, onSelectedIndexC
                 onClick={showPrevious}
                 disabled={isFirst}
                 aria-label="Previous photo"
-                className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-30 sm:left-4"
+                className="group absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-30 sm:left-4"
               >
                 <ChevronLeft className="h-6 w-6" aria-hidden="true" />
+                <TooltipBubble label="Previous" />
               </button>
               <button
                 type="button"
                 onClick={showNext}
                 disabled={isLast}
                 aria-label="Next photo"
-                className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-30 sm:right-4"
+                className="group absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-30 sm:right-4"
               >
                 <ChevronRight className="h-6 w-6" aria-hidden="true" />
+                <TooltipBubble label="Next" />
               </button>
             </>
           )}

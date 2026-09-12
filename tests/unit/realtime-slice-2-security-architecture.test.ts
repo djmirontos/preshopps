@@ -13,6 +13,7 @@ function readFile(relativePath: string): string {
 const SLICE_2_FILES = [
   "lib/messaging/message-list.ts",
   "components/messaging/ConversationDetailClient.tsx",
+  "components/messaging/ConversationThread.tsx",
   "components/messaging/ConversationsListClient.tsx",
   "components/notifications/NotificationsProvider.tsx",
   "components/notifications/NotificationBellLink.tsx",
@@ -32,7 +33,12 @@ describe("Realtime Slice 2 -- no service-role key/client anywhere in the browser
   });
 
   it("every Realtime subscription is created through the existing browser client (createClient from lib/supabase/client), never a second/ad-hoc client", () => {
-    const subscribingFiles = ["components/messaging/ConversationDetailClient.tsx", "components/notifications/NotificationsProvider.tsx"];
+    // ConversationDetailClient's own channel logic was later extracted
+    // into ConversationThread (its one shared implementation, also
+    // reused by FloatingChatPanel) -- see
+    // realtime-slice-3-unread-fix-security-architecture.test.ts and
+    // messaging-architecture.test.ts for that later slice's own coverage.
+    const subscribingFiles = ["components/messaging/ConversationThread.tsx", "components/notifications/NotificationsProvider.tsx"];
     for (const file of subscribingFiles) {
       const source = readFile(file);
       expect(source).toMatch(/from ["']@\/lib\/supabase\/client["']/);

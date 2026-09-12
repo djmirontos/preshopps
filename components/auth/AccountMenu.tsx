@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { UserCircle } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 type Props = {
   email: string | null;
@@ -44,17 +45,19 @@ export function AccountMenu({ email }: Props) {
 
   return (
     <div ref={containerRef} className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label="Account"
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        onClick={() => setIsOpen((value) => !value)}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-      >
-        <UserCircle className="h-5 w-5" aria-hidden="true" />
-      </button>
+      <Tooltip label="Account">
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-label="Account"
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen((value) => !value)}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <UserCircle className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </Tooltip>
 
       {isOpen && (
         <div

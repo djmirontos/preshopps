@@ -6,7 +6,9 @@ import { AuthGate } from "@/components/auth/AuthGate";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
 import { ReportButton } from "@/components/moderation/ReportButton";
+import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
+import { isDesktopViewport } from "@/lib/ui/viewport";
 import { cn } from "@/lib/cn";
 import type { ListingStatus } from "@/lib/marketplace/listing-detail";
 
@@ -56,6 +58,7 @@ export function ListingActions({
   next,
 }: Props) {
   const router = useRouter();
+  const { openConversation } = useFloatingMessenger();
   const isAvailable = status === "available";
   const unavailableNote = UNAVAILABLE_NOTES[status];
   const [isMessageGateOpen, setIsMessageGateOpen] = useState(false);
@@ -77,7 +80,16 @@ export function ListingActions({
       return;
     }
 
-    router.push(`/messages/${result.conversationId}`);
+    setIsComposeOpen(false);
+    // Desktop: open the floating chat panel right where the conversation
+    // was just started, no navigation away from this listing. Mobile has
+    // no floating panel (see Part 1's own scope), so it keeps the
+    // original full-page route navigation.
+    if (isDesktopViewport()) {
+      openConversation(result.conversationId);
+    } else {
+      router.push(`/messages/${result.conversationId}`);
+    }
   }
 
   return (

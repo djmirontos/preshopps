@@ -3,12 +3,26 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/auth/use-is-authenticated", async (importOriginal) => importOriginal());
 
-const { rpcMock, pushMock } = vi.hoisted(() => ({ rpcMock: vi.fn(), pushMock: vi.fn() }));
+const { rpcMock, pushMock, openConversationMock } = vi.hoisted(() => ({
+  rpcMock: vi.fn(),
+  pushMock: vi.fn(),
+  openConversationMock: vi.fn(),
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ rpc: rpcMock }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
+}));
+vi.mock("@/components/messaging/FloatingMessengerProvider", () => ({
+  useFloatingMessenger: () => ({
+    openConversationId: null,
+    isMinimized: false,
+    openConversation: openConversationMock,
+    minimize: vi.fn(),
+    restore: vi.fn(),
+    close: vi.fn(),
+  }),
 }));
 
 import { AuthStatusProvider } from "@/components/auth/AuthStatusProvider";
@@ -17,9 +31,18 @@ import { ListingActions } from "@/components/listing/ListingActions";
 
 const NEXT = "/item/PLS-ABC123";
 
+const DESKTOP_WIDTH = 1280;
+const MOBILE_WIDTH = 375;
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+}
+
 beforeEach(() => {
   rpcMock.mockReset();
   pushMock.mockReset();
+  openConversationMock.mockReset();
+  setViewportWidth(DESKTOP_WIDTH);
   window.localStorage.clear();
 });
 
@@ -90,11 +113,12 @@ describe("ListingActions (authenticated)", () => {
     expect(screen.queryByText("Sign in to message this seller")).not.toBeInTheDocument();
   });
 
-  it("calls start_conversation with the shop id, listing id, and typed body, then navigates to the resulting conversation", async () => {
+  it("calls start_conversation with the shop id, listing id, and typed body, then opens the floating chat panel on desktop (no navigation away from the listing)", async () => {
     rpcMock.mockResolvedValue({
       data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
       error: null,
     });
+    setViewportWidth(DESKTOP_WIDTH);
     renderActions({ isAuthenticated: true, shopId: "shop-1", listingId: "listing-1" });
 
     fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
@@ -108,7 +132,25 @@ describe("ListingActions (authenticated)", () => {
         p_listing_id: "listing-1",
       }),
     );
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-1"));
+    expect(pushMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("navigates to the full-page conversation route on mobile instead of opening the (desktop-only) floating panel", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
+      error: null,
+    });
+    setViewportWidth(MOBILE_WIDTH);
+    renderActions({ isAuthenticated: true, shopId: "shop-1", listingId: "listing-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Is this still available?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages/conv-1"));
+    expect(openConversationMock).not.toHaveBeenCalled();
   });
 
   it("hides Message Seller entirely for the listing's own owner", () => {

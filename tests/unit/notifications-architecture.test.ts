@@ -214,15 +214,21 @@ describe("Bell vs Messages badge counts are split and never double-counted", () 
     expect(providerSource).toMatch(/refreshUnreadMessageCount/);
     expect(providerSource).toMatch(/getMyUnreadConversationCount/);
 
-    const conversationDetailSource = readFile("components/messaging/ConversationDetailClient.tsx");
-    expect(conversationDetailSource).toMatch(/useRefreshUnreadMessageCount/);
-    expect(conversationDetailSource).toMatch(/refreshUnreadMessageCount\(\)/);
+    // ConversationDetailClient is now a thin wrapper -- the actual
+    // subscription/mark-read logic (and this refreshUnreadMessageCount
+    // usage) lives in ConversationThread, its one shared implementation
+    // (also reused by FloatingChatPanel).
+    const conversationThreadSource = readFile("components/messaging/ConversationThread.tsx");
+    expect(conversationThreadSource).toMatch(/useRefreshUnreadMessageCount/);
+    expect(conversationThreadSource).toMatch(/refreshUnreadMessageCount\(\)/);
   });
 
   it("never introduces read-receipt/'Seen' UI as part of the recalculation", () => {
-    const source = readFile("components/messaging/ConversationDetailClient.tsx");
-    expect(source).not.toMatch(/>Seen</);
-    expect(source).not.toMatch(/"Seen"/);
+    for (const file of ["components/messaging/ConversationThread.tsx", "components/messaging/FloatingChatPanel.tsx"]) {
+      const source = readFile(file);
+      expect(source).not.toMatch(/>Seen</);
+      expect(source).not.toMatch(/"Seen"/);
+    }
   });
 });
 

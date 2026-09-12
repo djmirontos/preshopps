@@ -254,6 +254,77 @@ describe("ConversationDetailClient -- composer", () => {
   });
 });
 
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+}
+
+describe("ConversationDetailClient -- desktop Enter-to-send / Shift+Enter-newline", () => {
+  const DESKTOP_WIDTH = 1280;
+  const MOBILE_WIDTH = 375;
+
+  it("desktop (>= lg): Enter sends the message", async () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    sendMessageMock.mockResolvedValue({ ok: true, messageId: "msg-new", createdAt: "2026-02-01T11:00:00.000Z" });
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!"));
+  });
+
+  it("desktop (>= lg): Shift+Enter never sends -- the draft is left for the default newline", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter", shiftKey: true });
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("desktop (>= lg): Enter while an IME composition is active never sends", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "こんにちは" } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter", isComposing: true });
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("desktop (>= lg): Enter on a whitespace-only draft never sends", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "   " } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("mobile (< lg): Enter never sends -- it remains a plain newline, Send stays the only way to send", () => {
+    setViewportWidth(MOBILE_WIDTH);
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
+    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("mobile (< lg): the Send button still works", async () => {
+    setViewportWidth(MOBILE_WIDTH);
+    sendMessageMock.mockResolvedValue({ ok: true, messageId: "msg-new", createdAt: "2026-02-01T11:00:00.000Z" });
+    renderConversation();
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!"));
+  });
+});
+
 describe("ConversationDetailClient -- message history", () => {
   it("renders existing history, preserved even in a blocked conversation", () => {
     renderConversation({

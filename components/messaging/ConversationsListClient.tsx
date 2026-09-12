@@ -6,6 +6,8 @@ import { useEffect, useState, useTransition } from "react";
 import { MessageCircle, Store, VolumeX } from "lucide-react";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { useLatestNotificationEvent } from "@/components/notifications/NotificationsProvider";
+import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
+import { isDesktopViewport } from "@/lib/ui/viewport";
 import type { ConversationSummary, ConversationsCursor } from "@/lib/messaging/get-my-conversations";
 
 type LoadMoreResult = {
@@ -48,6 +50,23 @@ export function ConversationsListClient({ initialConversations, initialHadError,
   const [cursor, setCursor] = useState(initialCursor);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const { openConversation } = useFloatingMessenger();
+
+  /** Desktop (`lg` and up): open the floating chat panel instead of
+   * navigating to the full-page route -- checked at click time only (an
+   * interactive event, never render), so there's no SSR/hydration risk.
+   * A modified click (new-tab/new-window/download conventions) or
+   * anything other than a plain left click always falls through to the
+   * normal <Link> navigation, exactly like clicking any other link.
+   * Below `lg`, this is a no-op and the existing full-page route
+   * navigation proceeds completely unchanged. */
+  function handleConversationClick(event: React.MouseEvent<HTMLAnchorElement>, conversationId: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!isDesktopViewport()) return;
+    event.preventDefault();
+    openConversation(conversationId);
+  }
 
   const lastEvent = useLatestNotificationEvent();
   useEffect(() => {
@@ -103,6 +122,7 @@ export function ConversationsListClient({ initialConversations, initialHadError,
             <li key={conversation.conversationId}>
               <Link
                 href={`/messages/${conversation.conversationId}`}
+                onClick={(event) => handleConversationClick(event, conversation.conversationId)}
                 className="flex items-start gap-3 rounded-[14px] border border-border bg-surface p-3 hover:border-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:p-4"
               >
                 <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-canvas">

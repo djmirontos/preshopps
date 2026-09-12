@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ConversationSummary } from "@/lib/messaging/get-my-conversations";
@@ -35,6 +35,7 @@ vi.mock("@/lib/supabase/client", () => ({
 
 import { ConversationsListClient } from "@/components/messaging/ConversationsListClient";
 import { NotificationsProvider } from "@/components/notifications/NotificationsProvider";
+import { FloatingMessengerProvider, useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 
 function readFile(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), relativePath), "utf-8");
@@ -130,6 +131,33 @@ function renderList(conversations: ConversationSummary[]) {
   );
 }
 
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+}
+
+function OpenIdProbe() {
+  const { openConversationId } = useFloatingMessenger();
+  return <p data-testid="floating-open-id">{openConversationId ?? "none"}</p>;
+}
+
+function renderListWithFloatingMessenger(conversations: ConversationSummary[]) {
+  return render(
+    <NotificationsProvider isAuthenticated userId="me" initialUnreadMessageCount={0} initialUnreadNotificationCount={0}>
+      <FloatingMessengerProvider>
+        <OpenIdProbe />
+        <ConversationsListClient
+          initialConversations={conversations}
+          initialHadError={false}
+          initialCursor={null}
+          loadMore={loadMoreMock}
+          refreshFirstPage={refreshFirstPageMock}
+          showingArchived={false}
+        />
+      </FloatingMessengerProvider>
+    </NotificationsProvider>,
+  );
+}
+
 describe("ConversationsListClient -- baseline rendering (unaffected by the new refresh signal)", () => {
   it("renders each conversation's shop name and last-message preview", () => {
     renderList([sampleConversation({ shopName: "Anne's Closet", lastMessagePreview: "Is this still available?" })]);
@@ -220,5 +248,47 @@ describe("ConversationsListClient -- no direct Realtime subscription of its own"
     const source = readFile("components/messaging/ConversationsListClient.tsx");
     expect(source).not.toMatch(/\.channel\(/);
     expect(source).not.toMatch(/table:\s*["']conversations["']/);
+  });
+});
+
+describe("ConversationsListClient -- desktop floating panel vs mobile full-page navigation", () => {
+  const DESKTOP_WIDTH = 1280;
+  const MOBILE_WIDTH = 375;
+
+  it("desktop (>= lg): clicking a conversation opens the floating panel instead of navigating", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderListWithFloatingMessenger([sampleConversation({ conversationId: "conv-42" })]);
+
+    const link = screen.getByRole("link", { name: /Anne's Closet/ });
+    fireEvent.click(link, { button: 0 });
+
+    expect(screen.getByTestId("floating-open-id")).toHaveTextContent("conv-42");
+  });
+
+  it("mobile (< lg): clicking a conversation does not open the floating panel -- normal <Link> navigation proceeds", () => {
+    setViewportWidth(MOBILE_WIDTH);
+    renderListWithFloatingMessenger([sampleConversation({ conversationId: "conv-42" })]);
+
+    const link = screen.getByRole("link", { name: /Anne's Closet/ });
+    fireEvent.click(link, { button: 0 });
+
+    expect(screen.getByTestId("floating-open-id")).toHaveTextContent("none");
+  });
+
+  it("a modified click (e.g. ctrl/cmd-click for a new tab) is never intercepted, even on desktop", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderListWithFloatingMessenger([sampleConversation({ conversationId: "conv-42" })]);
+
+    const link = screen.getByRole("link", { name: /Anne's Closet/ });
+    fireEvent.click(link, { button: 0, ctrlKey: true });
+
+    expect(screen.getByTestId("floating-open-id")).toHaveTextContent("none");
+  });
+
+  it("still renders a real href to the full-page route regardless of viewport -- interception is click-time only, never removes the link's own destination", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderListWithFloatingMessenger([sampleConversation({ conversationId: "conv-42" })]);
+    const link = screen.getByRole("link", { name: /Anne's Closet/ });
+    expect(link).toHaveAttribute("href", "/messages/conv-42");
   });
 });

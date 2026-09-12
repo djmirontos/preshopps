@@ -60,8 +60,13 @@ describe("no service-role bypass anywhere in the Real Messaging module", () => {
       "lib/messaging/send-message.ts",
       "lib/messaging/conversation-state.ts",
       "lib/messaging/detect-link.ts",
+      "lib/messaging/composer-keydown.ts",
+      "lib/messaging/load-conversation-for-panel.ts",
       "components/messaging/ConversationsListClient.tsx",
       "components/messaging/ConversationDetailClient.tsx",
+      "components/messaging/ConversationThread.tsx",
+      "components/messaging/FloatingMessengerProvider.tsx",
+      "components/messaging/FloatingChatPanel.tsx",
       "components/messaging/ComposeMessageDialog.tsx",
       "components/shop/ShopMessageAction.tsx",
       "components/listing/ListingActions.tsx",
@@ -81,6 +86,8 @@ describe("Real Messaging does not build out-of-scope modules", () => {
     const files = [
       "components/messaging/ConversationsListClient.tsx",
       "components/messaging/ConversationDetailClient.tsx",
+      "components/messaging/ConversationThread.tsx",
+      "components/messaging/FloatingChatPanel.tsx",
       "app/messages/page.tsx",
       "app/messages/[conversationId]/page.tsx",
     ];
@@ -96,17 +103,24 @@ describe("Real Messaging does not build out-of-scope modules", () => {
 /**
  * Realtime slice 2 (per the accepted audit + 0087's publication change):
  * public.messages is now in the supabase_realtime publication, and
- * ConversationDetailClient is the one, deliberately narrow place that
+ * ConversationThread is the one, deliberately narrow place that
  * subscribes to it -- filtered to the currently open conversation_id only,
  * never a broad/unfiltered subscription. public.conversations remains
  * OUTSIDE the publication (0087 only added messages + notifications), so
  * no file in this module may subscribe to it; conversation-list liveness
  * is instead derived from the shared notifications channel (see
  * notifications-architecture.test.ts), never a second websocket here.
+ *
+ * ConversationThread was extracted out of ConversationDetailClient (the
+ * floating-desktop-chat-panel slice) as the one shared implementation
+ * behind both the full-page `/messages/[conversationId]` route
+ * (ConversationDetailClient is now a thin wrapper around it) and
+ * FloatingChatPanel -- there is still exactly one subscribing
+ * implementation, just relocated.
  */
 describe("Real Messaging Realtime is scoped to the open thread only, filtered per-conversation", () => {
-  it("ConversationDetailClient subscribes to postgres_changes INSERT on messages, filtered to this conversation only", () => {
-    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+  it("ConversationThread subscribes to postgres_changes INSERT on messages, filtered to this conversation only", () => {
+    const source = readFile("components/messaging/ConversationThread.tsx");
     expect(source).toMatch(/\.channel\(/);
     expect(source).toMatch(/postgres_changes/);
     expect(source).toMatch(/event:\s*["']INSERT["']/);
@@ -114,19 +128,27 @@ describe("Real Messaging Realtime is scoped to the open thread only, filtered pe
     expect(source).toMatch(/filter:\s*`conversation_id=eq\.\$\{/);
   });
 
-  it("ConversationDetailClient cleanly unsubscribes (removeChannel) rather than leaking a channel per conversation", () => {
-    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+  it("ConversationThread cleanly unsubscribes (removeChannel) rather than leaking a channel per conversation", () => {
+    const source = readFile("components/messaging/ConversationThread.tsx");
     expect(source).toMatch(/removeChannel/);
   });
 
-  it("ConversationDetailClient's message dedupe uses a stable message_id-based helper, not a timing assumption", () => {
-    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+  it("ConversationThread's message dedupe uses a stable message_id-based helper, not a timing assumption", () => {
+    const source = readFile("components/messaging/ConversationThread.tsx");
     expect(source).toMatch(/appendMessageIfNew/);
+  });
+
+  it("ConversationDetailClient itself is now a thin wrapper -- it renders ConversationThread rather than duplicating the subscription", () => {
+    const source = readFile("components/messaging/ConversationDetailClient.tsx");
+    expect(source).toMatch(/<ConversationThread/);
+    expect(source).not.toMatch(/\.channel\(/);
   });
 
   it("no messaging file ever subscribes to public.conversations directly -- 0087 deliberately excluded it", () => {
     const files = [
+      "components/messaging/ConversationThread.tsx",
       "components/messaging/ConversationDetailClient.tsx",
+      "components/messaging/FloatingChatPanel.tsx",
       "components/messaging/ConversationsListClient.tsx",
       "lib/messaging/get-my-conversations.ts",
       "lib/messaging/get-conversation-context.ts",
@@ -141,7 +163,7 @@ describe("Real Messaging Realtime is scoped to the open thread only, filtered pe
     }
   });
 
-  it("no messaging module besides ConversationDetailClient opens its own Realtime channel", () => {
+  it("no messaging module besides ConversationThread opens its own Realtime channel", () => {
     const files = [
       "lib/messaging/get-my-conversations.ts",
       "lib/messaging/get-conversation-context.ts",
@@ -150,6 +172,9 @@ describe("Real Messaging Realtime is scoped to the open thread only, filtered pe
       "lib/messaging/send-message.ts",
       "lib/messaging/conversation-state.ts",
       "components/messaging/ConversationsListClient.tsx",
+      "components/messaging/ConversationDetailClient.tsx",
+      "components/messaging/FloatingChatPanel.tsx",
+      "components/messaging/FloatingMessengerProvider.tsx",
     ];
     for (const file of files) {
       const source = readFile(file);

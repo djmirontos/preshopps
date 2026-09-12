@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Flag } from "lucide-react";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { ReportDialog } from "@/components/moderation/ReportDialog";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { submitReport, SUBMIT_REPORT_ERROR_MESSAGES, type ReportTargetType, type ReportReason } from "@/lib/moderation/report-actions";
 
 type Props = {
@@ -77,17 +78,19 @@ export function ReportButton({ targetType, targetId, targetLabel, isAuthenticate
   return (
     <>
       {iconOnly ? (
-        <button
-          type="button"
-          onClick={() => (isAuthenticated ? setIsDialogOpen(true) : setIsGateOpen(true))}
-          aria-label={`Report ${targetLabel}`}
-          className={
-            className ??
-            "flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-          }
-        >
-          <Flag className="h-4 w-4" aria-hidden="true" />
-        </button>
+        <Tooltip label="Report">
+          <button
+            type="button"
+            onClick={() => (isAuthenticated ? setIsDialogOpen(true) : setIsGateOpen(true))}
+            aria-label={`Report ${targetLabel}`}
+            className={
+              className ??
+              "flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            }
+          >
+            <Flag className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
       ) : (
         <button
           type="button"
