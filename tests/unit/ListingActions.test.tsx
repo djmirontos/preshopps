@@ -231,6 +231,59 @@ describe("ListingActions -- self-purchase guard (own listing)", () => {
   });
 });
 
+describe("ListingActions -- mobile secondary-CTA sizing fix (Message Seller was rendering too thin)", () => {
+  it("Message Seller is full width on mobile (w-full), not fighting a column-direction flex-1 for its height", () => {
+    setViewportWidth(MOBILE_WIDTH);
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/\bw-full\b/);
+  });
+
+  it("Message Seller has at least a 48px (h-12) minimum touch height -- comfortably above the 44px minimum", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/\bh-12\b/);
+  });
+
+  it("Message Seller remains visually secondary -- white/light background with a clear border, never the orange primary treatment", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/bg-surface/);
+    expect(messageButton.className).toMatch(/\bborder\b/);
+    expect(messageButton.className).not.toMatch(/bg-brand-action/);
+  });
+
+  it("Add to Cart remains the full-width, orange primary CTA, unchanged by this fix", () => {
+    renderActions({ isAuthenticated: true });
+    const addToCartButton = screen.getByRole("button", { name: "Add to Cart" });
+    expect(addToCartButton.className).toMatch(/bg-brand-action/);
+    expect(addToCartButton.className).toMatch(/\bh-12\b/);
+    expect(addToCartButton.className).toMatch(/\bw-full\b/);
+  });
+
+  it("preserves the existing comfortable gap between the stacked mobile actions", () => {
+    renderActions({ isAuthenticated: true });
+    const row = screen.getByRole("button", { name: "Add to Cart" }).closest("div.flex");
+    expect(row?.className).toMatch(/gap-2\.5/);
+  });
+
+  it("the disabled 'Your listing' owner button gets the exact same height fix (it shares the same base class as Message Seller) -- still disabled, still the same text, only its height bug is fixed", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    const ownListingButton = screen.getByRole("button", { name: "Your listing" });
+    expect(ownListingButton.className).toMatch(/\bh-12\b/);
+    expect(ownListingButton.className).toMatch(/\bw-full\b/);
+    expect(ownListingButton).toBeDisabled();
+  });
+
+  it("desktop (>= sm, where this component's own row layout already switches) keeps the exact previous side-by-side sizing -- sm:flex-1 restores equal-width buttons in a row, unaffected by the mobile-only fix", () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/sm:w-auto/);
+    expect(messageButton.className).toMatch(/sm:flex-1/);
+  });
+});
+
 describe("ListingActions (guest)", () => {
   it("adds to the local guest cart with no auth gate", () => {
     renderActions({ isAuthenticated: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
@@ -284,5 +337,50 @@ describe("ListingActions (guest)", () => {
     renderActions({ isAuthenticated: false, isOwnListing: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
     fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
     expect(screen.getByText("1 in cart")).toBeInTheDocument();
+  });
+});
+
+describe("ListingActions -- mobile CTA fix touched styling only, never messaging/cart logic", () => {
+  it("Message Seller still calls start_conversation with the exact same arguments as before this styling fix", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
+      error: null,
+    });
+    renderActions({ isAuthenticated: true, shopId: "shop-1", listingId: "listing-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Still available?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("start_conversation", {
+        p_shop_id: "shop-1",
+        p_body: "Still available?",
+        p_listing_id: "listing-1",
+      }),
+    );
+  });
+
+  it("Add to Cart still calls set_cart_item_quantity with the exact same arguments as before this styling fix", async () => {
+    rpcMock.mockResolvedValue({ data: [{ cart_item_id: "ci1", listing_id: "listing-1", quantity: 1 }], error: null });
+    renderActions({ isAuthenticated: true, listingId: "listing-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith("set_cart_item_quantity", { p_listing_id: "listing-1", p_quantity: 1 }),
+    );
+  });
+
+  it("no new RPC name was introduced by this fix -- only these two, pre-existing calls are ever made", async () => {
+    rpcMock.mockResolvedValue({ data: [{ cart_item_id: "ci1", listing_id: "listing-1", quantity: 1 }], error: null });
+    renderActions({ isAuthenticated: true, listingId: "listing-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+
+    const calledRpcNames = rpcMock.mock.calls.map((call) => call[0]);
+    for (const name of calledRpcNames) {
+      expect(["set_cart_item_quantity"]).toContain(name);
+    }
   });
 });

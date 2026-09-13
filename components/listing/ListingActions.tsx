@@ -66,7 +66,23 @@ export function ListingActions({
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
-  const buttonBaseClass = "h-12 flex-1 rounded-[10px] px-5 text-sm font-semibold";
+  // w-full (not flex-1) below `sm`: these two buttons are direct flex
+  // items of the flex-col/sm:flex-row row below, and in a *column* flex
+  // container flex-1's flex-basis:0% applies along the height axis --
+  // competing with this shared h-12, and with no vertical padding to
+  // give the button any intrinsic content height beyond its text's own
+  // line-height, that fight was exactly what made "Message Seller" (and,
+  // identically, the disabled "Your listing" button, which shares this
+  // same class) render far shorter than the intended 44-48px touch target
+  // on mobile. AddToCartButton never hit this because its own h-12
+  // button lives inside a plain, unheighted wrapper div -- that div, not
+  // the button itself, is the actual flex item, so its explicit height
+  // was never in the running for a flex-basis override.
+  // sm:w-auto sm:flex-1 restores the exact previous (correct, unaffected)
+  // desktop behavior once the layout switches to a row at `sm` --
+  // flex-basis:0% there applies to width, which never conflicted with
+  // h-12 in the first place.
+  const buttonBaseClass = "h-12 w-full sm:w-auto sm:flex-1 rounded-[10px] px-5 text-sm font-semibold";
 
   async function handleSend(body: string) {
     setIsSending(true);
