@@ -258,6 +258,57 @@ function setViewportWidth(width: number) {
   Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
 }
 
+describe("ConversationDetailClient -- mobile fixed viewport layout (P1: composer/header no longer scroll away)", () => {
+  it("the root wrapper is a fixed, bounded panel pinned between the site header and the mobile bottom nav", () => {
+    const { container } = renderConversation();
+    const wrapper = container.firstElementChild;
+    expect(wrapper?.className).toMatch(/\bfixed\b/);
+    expect(wrapper?.className).toMatch(/inset-x-0/);
+    expect(wrapper?.className).toMatch(/top-\[132px\]/);
+    expect(wrapper?.className).toMatch(/bottom-\[calc\(4rem\+env\(safe-area-inset-bottom\)\)\]/);
+  });
+
+  it("sits below both the sticky header and the fixed bottom nav's own z-index, so either one's opaque background always wins at the seams", () => {
+    const { container } = renderConversation();
+    const wrapper = container.firstElementChild;
+    expect(wrapper?.className).toMatch(/z-30/);
+  });
+
+  it("desktop (lg and up) cancels the mobile fixed positioning and restores the exact original in-page height calc -- unchanged desktop behavior", () => {
+    const { container } = renderConversation();
+    const wrapper = container.firstElementChild;
+    expect(wrapper?.className).toMatch(/lg:static/);
+    expect(wrapper?.className).toMatch(/lg:h-\[calc\(100vh-120px\)\]/);
+  });
+
+  it("the conversation header/context is a sibling of the scrolling message region, not a descendant -- it never scrolls away with the messages", () => {
+    renderConversation({ context: sampleContext({ listingId: "listing-1", listingPublicCode: "PLS-1", listingTitle: "A related listing" }) });
+    const scrollContainer = screen.getByTestId("messages-scroll-container");
+    const backLink = screen.getByRole("link", { name: "← Back to Messages" });
+    expect(scrollContainer.contains(backLink)).toBe(false);
+    const listingChip = screen.getByText("A related listing");
+    expect(scrollContainer.contains(listingChip)).toBe(false);
+  });
+
+  it("the composer is a sibling of the scrolling message region, not a descendant -- it stays visible at the bottom regardless of message scroll position", () => {
+    renderConversation();
+    const scrollContainer = screen.getByTestId("messages-scroll-container");
+    const composer = screen.getByLabelText("Message");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(scrollContainer.contains(composer)).toBe(false);
+    expect(scrollContainer.contains(sendButton)).toBe(false);
+  });
+
+  it("preserves the already-approved composer spacing (pt-3 pb-4 wrapper, gap-1.5 row) untouched by this layout fix", () => {
+    renderConversation();
+    const composerWrapper = screen.getByLabelText("Message").closest("div.shrink-0");
+    expect(composerWrapper?.className).toMatch(/pt-3/);
+    expect(composerWrapper?.className).toMatch(/pb-4/);
+    const composerRow = screen.getByLabelText("Message").parentElement;
+    expect(composerRow?.className).toMatch(/gap-1\.5/);
+  });
+});
+
 describe("ConversationDetailClient -- desktop Enter-to-send / Shift+Enter-newline", () => {
   const DESKTOP_WIDTH = 1280;
   const MOBILE_WIDTH = 375;

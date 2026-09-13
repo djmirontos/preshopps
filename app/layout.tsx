@@ -3,7 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
-import { Footer } from "@/components/layout/Footer";
+import { ConditionalFooter } from "@/components/layout/ConditionalFooter";
 import { getAuthUser } from "@/lib/auth/session";
 import { AuthStatusProvider } from "@/components/auth/AuthStatusProvider";
 import { FavoritesProvider } from "@/components/favorites/FavoritesProvider";
@@ -79,7 +79,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 <FloatingMessengerProvider>
                   <AppHeader user={user} hasShop={Boolean(myShop)} />
                   <main className="flex-1">{children}</main>
-                  <Footer />
+                  <ConditionalFooter />
                   <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
                   <FloatingChatPanel />
                 </FloatingMessengerProvider>
