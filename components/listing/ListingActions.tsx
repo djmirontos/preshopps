@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { AddToCartButton } from "@/components/cart/AddToCartButton";
+import { BuyNowDialog } from "@/components/cart/BuyNowDialog";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
 import { ReportButton } from "@/components/moderation/ReportButton";
 import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
@@ -65,6 +66,8 @@ export function ListingActions({
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [isBuyNowGateOpen, setIsBuyNowGateOpen] = useState(false);
+  const [isBuyNowOpen, setIsBuyNowOpen] = useState(false);
 
   // w-full (not flex-1) below `sm`: these two buttons are direct flex
   // items of the flex-col/sm:flex-row row below, and in a *column* flex
@@ -125,12 +128,27 @@ export function ListingActions({
               Your listing
             </button>
           ) : (
-            <AddToCartButton
-              listingId={listingId}
-              publicCode={publicCode}
-              availableQuantity={availableQuantity}
-              className="flex-1"
-            />
+            <>
+              <AddToCartButton
+                listingId={listingId}
+                publicCode={publicCode}
+                availableQuantity={availableQuantity}
+                className="flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => (isAuthenticated ? setIsBuyNowOpen(true) : setIsBuyNowGateOpen(true))}
+                disabled={availableQuantity <= 0}
+                className={cn(
+                  buttonBaseClass,
+                  availableQuantity <= 0
+                    ? "cursor-not-allowed bg-divider text-ink-muted"
+                    : "bg-ink text-canvas hover:brightness-110",
+                )}
+              >
+                Buy Now
+              </button>
+            </>
           )
         )}
 
@@ -163,6 +181,17 @@ export function ListingActions({
           onClose={() => setIsComposeOpen(false)}
         />
       )}
+
+      {isBuyNowGateOpen && (
+        <AuthGate
+          title="Sign in to buy this item"
+          reason="Create a free account to review and submit your order."
+          next={next}
+          onClose={() => setIsBuyNowGateOpen(false)}
+        />
+      )}
+
+      {isBuyNowOpen && <BuyNowDialog publicCode={publicCode} onClose={() => setIsBuyNowOpen(false)} />}
 
       <ReportButton
         targetType="listing"

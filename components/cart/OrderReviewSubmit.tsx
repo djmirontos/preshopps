@@ -5,13 +5,48 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { useCart } from "@/components/cart/CartProvider";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 import { FULFILLMENT_LABELS, type FulfillmentMethod } from "@/lib/marketplace/search-params";
-import { submitCartOrder, ORDER_ERROR_MESSAGES, type SubmittedOrder } from "@/lib/cart/submit-cart-order";
-import { refreshMyCart } from "@/lib/cart/refresh-my-cart-client";
+import {
+  submitCartOrder,
+  ORDER_ERROR_MESSAGES,
+  type SubmitCartOrderResult,
+  type SubmittedOrder,
+} from "@/lib/cart/submit-cart-order";
+import { refreshMyCart, type RefreshMyCartResult } from "@/lib/cart/refresh-my-cart-client";
 import type { CartLineDisplay } from "@/lib/cart/map-cart-row";
 
 type Props = {
   lines: CartLineDisplay[];
   onLinesChange: Dispatch<SetStateAction<CartLineDisplay[]>>;
+  /** Which RPC path actually submits. Defaults to the canonical cart path
+   * (submitCartOrder) -- /cart never passes this. Buy Now injects its own
+   * submitBuyNowOrder-backed implementation instead, so this one review UI
+   * drives either flow without a second, parallel submission component. */
+  submit?: (input: {
+    rows: CartLineDisplay[];
+    fulfillmentChoices: Record<string, FulfillmentMethod | undefined>;
+  }) => Promise<SubmitCartOrderResult>;
+  /** How to re-fetch fresh line data after a submit attempt (success or
+   * failure), so eligibility/price reflect whatever actually changed.
+   * Defaults to the real persistent-cart read (refreshMyCart) -- /cart
+   * never passes this. Buy Now injects a single-listing re-read instead
+   * (get_listing_detail), since it has no cart row to reconcile against. */
+  refreshLines?: () => Promise<RefreshMyCartResult>;
+  /** Whether a successful submission should remove the submitted
+   * listing(s) from the shared CartProvider state. Defaults to true,
+   * preserving /cart's exact existing behavior. Buy Now passes false --
+   * it never added anything to the persistent cart, so there is nothing
+   * to remove, and the header cart count must not change. */
+  removeFromCartOnSuccess?: boolean;
+  /** When provided, a successful submission hands the created order(s) to
+   * this callback INSTEAD of rendering the built-in success card/"View
+   * orders" link -- the caller takes over entirely from that point (e.g.
+   * Buy Now navigates straight to the one order it always creates,
+   * router.push(`/orders/${orders[0].orderPublicCode}`)). Undefined by
+   * default, so /cart's own multi-seller success summary (appropriate
+   * there since one cart submission can create several orders) is
+   * completely unaffected. Only ever called after a CONFIRMED successful
+   * submission -- never on failure. */
+  onSuccess?: (orders: SubmittedOrder[]) => void;
 };
 
 const METHOD_ORDER: FulfillmentMethod[] = ["meetup", "pickup", "local_delivery", "shipping"];
@@ -85,13 +120,33 @@ type Result =
  * leaves the confirmation visible instead of being replaced by the
  * generic "Your cart is empty" state the parent renders once lines is []
  * (see AuthenticatedCartClient, which mounts this component unconditionally
- * above that empty-state branch for exactly this reason).
+ * above that empty-state branch for exactly this reason). A successful
+ * result is terminal for this rendered instance: once it lands, the
+ * review form (fulfillment selectors, Submit Order) never renders again
+ * for any value of `lines`, so a still-available Buy Now listing or
+ * leftover unavailable /cart rows can never resurface a live "submit
+ * again" control under an already-created order.
  */
-export function OrderReviewSubmit({ lines, onLinesChange }: Props) {
+export function OrderReviewSubmit({
+  lines,
+  onLinesChange,
+  submit = submitCartOrder,
+  refreshLines = refreshMyCart,
+  removeFromCartOnSuccess = true,
+  onSuccess,
+}: Props) {
   const { removeItem } = useCart();
   const [fulfillmentChoices, setFulfillmentChoices] = useState<Record<string, FulfillmentMethod | undefined>>({});
   const [isPending, setIsPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  // Set right before calling onSuccess, instead of setResult -- there is
+  // no success card to show in that path, but this instance must still
+  // become terminal immediately: without it, isPending resetting to false
+  // would make canSubmit/showForm true again (fulfillmentChoices is left
+  // untouched on purpose, see the onSuccess branch below) for the brief
+  // window before the caller's navigation actually unmounts this
+  // component, letting a fast double-click fire a second real submission.
+  const [handedOffToCaller, setHandedOffToCaller] = useState(false);
 
   if (lines.length === 0 && !result) return null;
 
@@ -100,22 +155,57 @@ export function OrderReviewSubmit({ lines, onLinesChange }: Props) {
   const hasUnavailable = submittableRows.length < lines.length;
   const hasNoCommonMethodGroup = groups.some((group) => group.availableMethods.length === 0);
   const allChosen = groups.length > 0 && !hasNoCommonMethodGroup && groups.every((group) => fulfillmentChoices[group.shopId]);
-  const canSubmit = !isPending && allChosen;
-  // Once a submission clears the entire cart, there is nothing left to
-  // review -- keep only the confirmation, not a dangling "0 items
-  // eligible" form underneath it.
-  const showForm = !(result?.kind === "success" && lines.length === 0);
+  const canSubmit = !isPending && allChosen && !handedOffToCaller;
+  // A successful submission is a TERMINAL state for this component
+  // instance -- once `result` is a success, the fulfillment selector(s)
+  // and Submit Order never come back, regardless of what `lines` looks
+  // like afterward. This used to be conditioned on `lines.length === 0`
+  // (only hiding the form once the cart happened to empty out entirely),
+  // which left the form -- selectors reset to "Choose a method", Submit
+  // Order re-enabled -- visible underneath the success confirmation
+  // whenever any line remained (e.g. Buy Now's own listing, which stays
+  // "available" and submittable until the seller accepts; or leftover
+  // unavailable rows in a /cart submission). That looked like, and
+  // invited, a second submission for an order that had already been
+  // created. A fresh attempt now requires leaving and re-entering the
+  // flow (closing the Buy Now dialog, or reloading /cart), which remounts
+  // this component with a clean `result`.
+  const showForm = result?.kind !== "success" && !handedOffToCaller;
 
   async function handleSubmit() {
-    if (!canSubmit) return;
+    // Defense in depth: canSubmit already goes false while isPending, and
+    // showForm above already unmounts this exact button once `result` is
+    // a success or the order has been handed off to onSuccess -- but a
+    // stale/queued event handler must never be able to resubmit against an
+    // order that already exists.
+    if (!canSubmit || result?.kind === "success" || handedOffToCaller) return;
     setIsPending(true);
     setResult(null);
 
     const shopNames = Object.fromEntries(groups.map((group) => [group.shopId, group.shopName]));
-    const outcome = await submitCartOrder({ rows: submittableRows, fulfillmentChoices });
+    const outcome = await submit({ rows: submittableRows, fulfillmentChoices });
 
     if (outcome.ok) {
-      for (const listingId of outcome.submittedListingIds) removeItem(listingId);
+      if (removeFromCartOnSuccess) {
+        for (const listingId of outcome.submittedListingIds) removeItem(listingId);
+      }
+
+      if (onSuccess) {
+        // The caller takes over completely from a confirmed successful
+        // creation -- no success card, no "View orders" link, no cart-
+        // refresh read, since this component is about to be replaced
+        // (e.g. Buy Now navigating straight to the new order's detail
+        // page and closing its own dialog). Never reached on failure --
+        // this whole branch is inside `if (outcome.ok)`. handedOffToCaller
+        // makes this instance terminal immediately, independent of and
+        // faster than however long the caller's own navigation/unmount
+        // takes.
+        setHandedOffToCaller(true);
+        onSuccess(outcome.orders);
+        setIsPending(false);
+        return;
+      }
+
       setResult({ kind: "success", orders: outcome.orders, shopNames });
       setFulfillmentChoices({});
     } else {
@@ -126,7 +216,7 @@ export function OrderReviewSubmit({ lines, onLinesChange }: Props) {
     // both "remove the rows that were actually submitted" (success) and
     // "reflect whatever changed" (failure) with one mechanism, rather than
     // manually guessing the new state client-side.
-    const refreshed = await refreshMyCart();
+    const refreshed = await refreshLines();
     if (!refreshed.hadError) {
       onLinesChange(refreshed.lines);
     }

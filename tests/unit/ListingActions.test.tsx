@@ -231,6 +231,100 @@ describe("ListingActions -- self-purchase guard (own listing)", () => {
   });
 });
 
+describe("ListingActions -- Buy Now", () => {
+  it("shows an enabled Buy Now action for a purchasable, non-owner listing", () => {
+    renderActions({ isAuthenticated: true });
+    expect(screen.getByRole("button", { name: "Buy Now" })).not.toBeDisabled();
+  });
+
+  it("never shows Buy Now for the listing's own owner -- same gate as Add to Cart/'Your listing'", () => {
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    expect(screen.queryByRole("button", { name: "Buy Now" })).not.toBeInTheDocument();
+  });
+
+  it("never shows Buy Now for an inquiry-only listing, regardless of status", () => {
+    for (const status of ["available", "reserved", "sold", "archived"] as const) {
+      const { unmount } = renderActions({ isAuthenticated: true, isInquiryOnly: true, status });
+      expect(screen.queryByRole("button", { name: "Buy Now" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("hides Buy Now when reserved, sold, or archived -- consistent with Add to Cart's own availability gate", () => {
+    for (const status of ["reserved", "sold", "archived"] as const) {
+      const { unmount } = renderActions({ isAuthenticated: true, status });
+      expect(screen.queryByRole("button", { name: "Buy Now" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add to Cart" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("disables Buy Now (never bypassing availability) when available stock is zero", () => {
+    renderActions({ isAuthenticated: true, availableQuantity: 0 });
+    expect(screen.getByRole("button", { name: "Buy Now" })).toBeDisabled();
+  });
+
+  it("opens the existing order-review dialog for an authenticated buyer, not the auth gate", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    renderActions({ isAuthenticated: true, listingId: "listing-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Buy Now" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Buy Now", { selector: "h2" })).toBeInTheDocument();
+    expect(screen.queryByText("Sign in to buy this item")).not.toBeInTheDocument();
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+  });
+
+  it("requires sign-in for a guest -- opens the auth gate, never the order-review dialog", () => {
+    renderActions({ isAuthenticated: false });
+    fireEvent.click(screen.getByRole("button", { name: "Buy Now" }));
+    expect(screen.getByText("Sign in to buy this item")).toBeInTheDocument();
+    expect(screen.queryByText("No items in your cart can be submitted right now.")).not.toBeInTheDocument();
+  });
+
+  it("carries the given safe next path into the Buy Now gate links, same convention as Message Seller", () => {
+    renderActions({ isAuthenticated: false });
+    fireEvent.click(screen.getByRole("button", { name: "Buy Now" }));
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      `/sign-in?next=${encodeURIComponent(NEXT)}`,
+    );
+  });
+
+  it("Buy Now gets the same 44-48px (h-12) touch target and full mobile width as Add to Cart", () => {
+    setViewportWidth(MOBILE_WIDTH);
+    renderActions({ isAuthenticated: true });
+    const buyNowButton = screen.getByRole("button", { name: "Buy Now" });
+    expect(buyNowButton.className).toMatch(/\bh-12\b/);
+    expect(buyNowButton.className).toMatch(/\bw-full\b/);
+  });
+
+  it("Buy Now is visually distinct from both Add to Cart and Message Seller -- three actions never look identical", () => {
+    renderActions({ isAuthenticated: true });
+    const buyNow = screen.getByRole("button", { name: "Buy Now" });
+    const addToCart = screen.getByRole("button", { name: "Add to Cart" });
+    const messageSeller = screen.getByRole("button", { name: "Message Seller" });
+    expect(buyNow.className).not.toEqual(addToCart.className);
+    expect(buyNow.className).not.toEqual(messageSeller.className);
+    expect(addToCart.className).not.toEqual(messageSeller.className);
+  });
+
+  it("Message Seller keeps its exact same secondary treatment and behavior alongside the new Buy Now action", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/bg-surface/);
+    expect(messageButton.className).not.toMatch(/bg-brand-action/);
+    expect(messageButton.className).not.toMatch(/bg-ink\b/);
+  });
+
+  it("Add to Cart keeps its exact same primary treatment, unaffected by adding Buy Now", () => {
+    renderActions({ isAuthenticated: true });
+    const addToCartButton = screen.getByRole("button", { name: "Add to Cart" });
+    expect(addToCartButton.className).toMatch(/bg-brand-action/);
+  });
+});
+
 describe("ListingActions -- mobile secondary-CTA sizing fix (Message Seller was rendering too thin)", () => {
   it("Message Seller is full width on mobile (w-full), not fighting a column-direction flex-1 for its height", () => {
     setViewportWidth(MOBILE_WIDTH);

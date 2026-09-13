@@ -38,7 +38,11 @@ export type GetMyCartRow = {
 };
 
 export type CartLineDisplay = {
-  cartItemId: string;
+  /** Null for a Buy Now line -- it was never added to the persistent cart,
+   * so there is no cart_items row/id to submit against. submitCartOrder's
+   * own rows always carry a real id (from get_my_cart); submitBuyNowOrder
+   * never reads this field at all. */
+  cartItemId: string | null;
   listingId: string;
   publicCode: string | null;
   title: string | null;
