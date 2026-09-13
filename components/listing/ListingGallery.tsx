@@ -39,6 +39,16 @@ export function ListingGallery({ images, title }: Props) {
         aria-label={`View full-size photo, image ${selected + 1} of ${images.length}`}
         className="relative aspect-[4/5] w-full cursor-zoom-in overflow-hidden rounded-[14px] bg-divider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       >
+        {/* object-contain (not object-cover, unlike ListingCard's own
+            unrelated thumbnail) -- the buyer's first, non-lightbox view of
+            a listing photo must show the entire uploaded image, never
+            crop it, regardless of the photo's own aspect ratio. The
+            aspect-[4/5] box above is kept exactly as-is (same gallery
+            footprint); bg-divider (already a light neutral, also used for
+            the no-image placeholder below) shows through as letterboxing
+            whenever a portrait/landscape/square photo doesn't itself fill
+            that box, matching ListingLightbox's own object-contain
+            treatment for consistency between the two views. */}
         <Image
           key={images[selected]}
           src={images[selected]}
@@ -46,7 +56,7 @@ export function ListingGallery({ images, title }: Props) {
           fill
           priority
           sizes="(max-width: 1024px) 100vw, 50vw"
-          className="object-cover"
+          className="object-contain"
         />
       </button>
 

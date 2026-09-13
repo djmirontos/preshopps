@@ -79,4 +79,38 @@ describe("ListingCard", () => {
     render(<ListingCard listing={{ ...baseListing, imageUrl: "https://example.supabase.co/storage/v1/object/public/listing-images/a.webp" }} />);
     expect(screen.getByRole("img", { name: "Test Listing Title" })).toBeInTheDocument();
   });
+
+  it("shows the entire uploaded photo (object-contain), never cropped (object-cover) -- same whole-image treatment as the listing-detail main image (ListingGallery.tsx) and the lightbox", () => {
+    render(<ListingCard listing={{ ...baseListing, imageUrl: "https://example.supabase.co/storage/v1/object/public/listing-images/a.webp" }} />);
+    const image = screen.getByRole("img", { name: "Test Listing Title" });
+    expect(image.className).toMatch(/object-contain/);
+    expect(image.className).not.toMatch(/object-cover/);
+  });
+
+  it.each([
+    ["portrait", "https://example.supabase.co/portrait.webp"],
+    ["landscape", "https://example.supabase.co/landscape.webp"],
+    ["square", "https://example.supabase.co/square.webp"],
+  ])("a %s photo gets the same whole-image (object-contain) treatment as any other -- object-contain is applied unconditionally, not per-orientation", (_label, imageUrl) => {
+    render(<ListingCard listing={{ ...baseListing, imageUrl }} />);
+    const image = screen.getByRole("img", { name: "Test Listing Title" });
+    expect(image.className).toMatch(/object-contain/);
+    expect(image.className).not.toMatch(/object-cover/);
+  });
+
+  it("keeps the exact same card footprint (aspect-[4/5] image box, same rounding/background) -- only how the photo fits inside that unchanged box changed", () => {
+    render(<ListingCard listing={{ ...baseListing, imageUrl: "https://example.supabase.co/storage/v1/object/public/listing-images/a.webp" }} />);
+    const imageBox = screen.getByRole("img", { name: "Test Listing Title" }).parentElement;
+    expect(imageBox?.className).toMatch(/aspect-\[4\/5\]/);
+    expect(imageBox?.className).toMatch(/bg-divider/);
+    expect(imageBox?.className).toMatch(/rounded-\[14px\]/);
+  });
+
+  it("does not move or resize the favorite button overlay -- it stays an absolutely-positioned sibling of the image box, unaffected by the image's own object-fit change", () => {
+    render(<ListingCard listing={{ ...baseListing, imageUrl: "https://example.supabase.co/storage/v1/object/public/listing-images/a.webp" }} />);
+    const favoriteButton = screen.getByRole("button", { name: /add test listing title to favorites/i });
+    const overlayWrapper = favoriteButton.closest("div.absolute");
+    expect(overlayWrapper?.className).toMatch(/right-2/);
+    expect(overlayWrapper?.className).toMatch(/top-2/);
+  });
 });

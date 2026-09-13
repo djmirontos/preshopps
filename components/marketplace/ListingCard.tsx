@@ -100,12 +100,25 @@ export function ListingCard({ listing }: { listing: ListingCardData }) {
       <Link href={href} className="block focus-visible:outline-none">
         <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[14px] bg-divider">
           {imageUrl ? (
+            // object-contain (not object-cover) -- the marketplace card's
+            // primary photo should show the whole uploaded image at first
+            // glance too, same as the listing-detail main image
+            // (ListingGallery.tsx) and the lightbox. The card's own box
+            // (aspect-[4/5], same size/rounding as before) and bg-divider
+            // (already the neutral/light token used here) are untouched --
+            // only how the photo fits inside that unchanged box changed,
+            // so any portrait/landscape/square photo now letterboxes
+            // instead of cropping. Every surface that reuses this one
+            // ListingCard component (homepage Fresh Finds, search/browse
+            // results, favorites, shop listings, shop featured listing)
+            // gets this automatically -- there is no second copy of this
+            // markup anywhere else.
             <Image
               src={imageUrl}
               alt={title}
               fill
               sizes="(max-width: 640px) 44vw, (max-width: 1024px) 30vw, 20vw"
-              className="object-cover"
+              className="object-contain"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
