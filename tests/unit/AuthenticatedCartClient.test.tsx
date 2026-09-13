@@ -6,9 +6,17 @@ vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ rpc: rpcMock }),
 }));
 
-import { CartProvider } from "@/components/cart/CartProvider";
+import { CartProvider, useCart } from "@/components/cart/CartProvider";
 import { AuthenticatedCartClient } from "@/components/cart/AuthenticatedCartClient";
 import type { CartLineDisplay } from "@/lib/cart/get-my-cart";
+
+/** Reads the same shared itemCount the header cart badge reads, so a test
+ * can prove Remove updates it immediately without inspecting AppHeader
+ * itself. */
+function ItemCountProbe() {
+  const { itemCount } = useCart();
+  return <p data-testid="item-count">{itemCount}</p>;
+}
 
 function makeLine(overrides: Partial<CartLineDisplay> = {}): CartLineDisplay {
   return {
@@ -39,6 +47,19 @@ function renderClient(lines: CartLineDisplay[], hadError = false) {
   return render(
     <CartProvider initialLines={lines.map((l) => ({ listingId: l.listingId, publicCode: l.publicCode, quantity: l.quantity }))} isAuthenticated>
       <AuthenticatedCartClient initialLines={lines} hadError={hadError} />
+    </CartProvider>,
+  );
+}
+
+/** Same as renderClient, but with the shared item-count probe mounted
+ * alongside -- kept as a separate helper (rather than always-on) so its
+ * own rendered number can't collide with an in-row quantity that happens
+ * to match, in tests that don't care about the count at all. */
+function renderClientWithCountProbe(lines: CartLineDisplay[]) {
+  return render(
+    <CartProvider initialLines={lines.map((l) => ({ listingId: l.listingId, publicCode: l.publicCode, quantity: l.quantity }))} isAuthenticated>
+      <ItemCountProbe />
+      <AuthenticatedCartClient initialLines={lines} hadError={false} />
     </CartProvider>,
   );
 }
@@ -123,6 +144,79 @@ describe("AuthenticatedCartClient", () => {
 
     await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("remove_cart_item", { p_listing_id: "listing-1" }));
     await waitFor(() => expect(screen.getByText("Your cart is empty.")).toBeInTheDocument());
+  });
+
+  it("removes a line with quantity greater than 1 entirely -- Remove always deletes the whole line, never just decrements it", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([makeLine({ quantity: 4 })]);
+    expect(screen.getByText("4", { selector: "span[aria-live]" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("remove_cart_item", { p_listing_id: "listing-1" }));
+    await waitFor(() => expect(screen.getByText("Your cart is empty.")).toBeInTheDocument());
+    expect(screen.queryByText("4", { selector: "span[aria-live]" })).not.toBeInTheDocument();
+  });
+
+  it("removing one of several items removes only that row -- the other stays exactly as it was", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([
+      makeLine({ listingId: "l1", title: "Nike Air Max 270" }),
+      makeLine({ listingId: "l2", title: "Vintage Jacket", quantity: 1 }),
+    ]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /remove/i })[0]);
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("remove_cart_item", { p_listing_id: "l1" }));
+    expect(screen.queryByText("Nike Air Max 270")).not.toBeInTheDocument();
+    expect(screen.getByText("Vintage Jacket")).toBeInTheDocument();
+    expect(screen.queryByText("Your cart is empty.")).not.toBeInTheDocument();
+  });
+
+  it("removing a row immediately updates the shared cart item count (the same count the header badge reads) -- no page refresh needed", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClientWithCountProbe([makeLine({ listingId: "l1", quantity: 2 }), makeLine({ listingId: "l2", quantity: 1 })]);
+    expect(screen.getByTestId("item-count")).toHaveTextContent("3");
+
+    fireEvent.click(screen.getAllByRole("button", { name: /remove/i })[0]);
+
+    await waitFor(() => expect(screen.getByTestId("item-count")).toHaveTextContent("1"));
+  });
+
+  it("removing a row immediately recalculates the displayed subtotal", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([
+      makeLine({ listingId: "l1", priceCents: 10000, quantity: 2 }), // 20000
+      makeLine({ listingId: "l2", priceCents: 5000, quantity: 3 }), // 15000
+    ]);
+    expect(screen.getAllByText("₱350").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /remove/i })[1]);
+
+    await waitFor(() => expect(screen.getAllByText("₱200").length).toBeGreaterThan(0));
+    expect(screen.queryByText("₱350")).not.toBeInTheDocument();
+  });
+
+  it("a sold/unavailable row can still be removed -- cleanup is never blocked just because the listing can no longer be purchased", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([makeLine({ isSubmittable: false, unavailableReason: "sold", availableQuantity: 0 })]);
+    expect(screen.getByText("Sold")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("remove_cart_item", { p_listing_id: "listing-1" }));
+    await waitFor(() => expect(screen.getByText("Your cart is empty.")).toBeInTheDocument());
+  });
+
+  it("removing calls no RPC besides remove_cart_item -- never touches stock, listing status, or order/reservation state", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    renderClient([makeLine()]);
+
+    fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    const calledRpcNames = rpcMock.mock.calls.map((call) => call[0]);
+    expect(calledRpcNames).toEqual(["remove_cart_item"]);
   });
 
   it("never passes a client-supplied user id to the mutation RPCs", async () => {
