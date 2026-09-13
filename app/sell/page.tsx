@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShopProfile } from "@/lib/seller/get-my-shop-profile";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
-import { ListingForm } from "@/components/seller/ListingForm";
+import { CreateListingWorkspace } from "@/components/seller/CreateListingWorkspace";
 
 export const metadata = { title: "Sell | Preshopps" };
 
@@ -55,8 +55,8 @@ export default async function SellPage() {
       <p className="mt-1 text-sm text-ink-secondary">Only a title is required to save a Draft -- fill in the rest whenever you&rsquo;re ready.</p>
 
       <div className="mt-6">
-        <ListingForm
-          mode="create"
+        <CreateListingWorkspace
+          ownerUserId={user.id}
           categories={categories}
           provinces={provinces}
           initialCities={initialCities}

@@ -21,7 +21,8 @@ vi.mock("@/lib/seller/listing-actions", async () => {
   };
 });
 
-import { ListingForm, type ListingFieldValues } from "@/components/seller/ListingForm";
+import { createRef } from "react";
+import { ListingForm, type ListingFieldValues, type ListingFormHandle } from "@/components/seller/ListingForm";
 import { EMPTY_VEHICLE_VALUES } from "@/components/seller/ListingVehicleFields";
 import { EMPTY_RENTAL_VALUES } from "@/components/seller/ListingRentalFields";
 
@@ -375,6 +376,54 @@ describe("ListingForm -- create mode", () => {
     expect(screen.getByLabelText(/^price \(optional\)/i)).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Save Draft" });
     expect(submit.className).toContain("h-11");
+  });
+});
+
+describe("ListingForm -- redundant section headings removed", () => {
+  it("never renders the 'Listing details', 'Category & condition', or 'Price & stock' headings", () => {
+    renderForm();
+    expect(screen.queryByRole("heading", { name: "Listing details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Category & condition" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Price & stock" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Listing details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Category & condition")).not.toBeInTheDocument();
+    expect(screen.queryByText("Price & stock")).not.toBeInTheDocument();
+  });
+
+  it("still renders every normal field label the removed headings used to sit above", () => {
+    renderForm();
+    expect(screen.getByLabelText("Title")).toBeInTheDocument();
+    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^category/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/listing type/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^price \(optional\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/original price/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/stock quantity/i)).toBeInTheDocument();
+  });
+
+  it("still renders every other section heading untouched (Location, Fulfillment, and the conditional Vehicle/Rental details)", () => {
+    renderForm();
+    expect(screen.getByRole("heading", { name: "Location" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Fulfillment" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    expect(screen.getByRole("heading", { name: "Vehicle details" })).toBeInTheDocument();
+  });
+
+  it("preserves validation messages and accessible describedby wiring for Title and Price despite the heading removal", async () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    const titleInput = await screen.findByLabelText("Title");
+    expect(titleInput).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Please enter a title for your listing.")).toBeInTheDocument();
+  });
+
+  it("preserves spacing between logical field groups via the shared space-y-8 form layout", () => {
+    const { container } = renderForm();
+    const form = container.querySelector("form");
+    expect(form?.className).toContain("space-y-8");
   });
 });
 
@@ -946,5 +995,296 @@ describe("ListingForm -- onDirtyChange (unsaved-changes signal for a sibling Pub
 
   it("never calls onDirtyChange when it isn't provided -- optional prop, no crash", () => {
     expect(() => renderEditForm()).not.toThrow();
+  });
+});
+
+describe("ListingForm -- create mode with an orchestrated auto-draft (existingDraftId/ensureListingId)", () => {
+  it("with no existingDraftId and no ensureListingId, behaves exactly like the original standalone create path (create_listing + redirect)", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(createListingMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sell/listing-1/edit"));
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("with existingDraftId already set, Save Draft calls update_listing against it instead of create_listing, and never navigates", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "draft-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderForm({ existingDraftId: "draft-1" });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("draft-1", { title: "Item" }));
+    expect(createListingMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("with no existingDraftId but an ensureListingId provided, Save Draft calls ensureListingId to obtain an id, then update_listing -- never create_listing directly", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("draft-2");
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "draft-2", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderForm({ ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(ensureListingId).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("draft-2", { title: "Item" }));
+    expect(createListingMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a friendly error and does not call update_listing when ensureListingId resolves to null (draft creation failed)", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue(null);
+    renderForm({ ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Something went wrong. Please try again.")).toBeInTheDocument();
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("a blank stock quantity is rejected client-side once ensureListingId is provided, even though title is the only requirement for the original standalone create path", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("draft-3");
+    renderForm({ ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.change(screen.getByLabelText(/stock quantity/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Stock quantity must be at least 1.")).toBeInTheDocument();
+    expect(ensureListingId).not.toHaveBeenCalled();
+  });
+
+  it("fires onTitleChange on every keystroke, alongside the field's own value", () => {
+    const onTitleChange = vi.fn();
+    renderForm({ onTitleChange });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Nike" } });
+
+    expect(onTitleChange).toHaveBeenLastCalledWith("Nike");
+    expect(screen.getByLabelText("Title")).toHaveValue("Nike");
+  });
+
+  it("fires onListingTypeChange whenever listing type changes", () => {
+    const onListingTypeChange = vi.fn();
+    renderForm({ onListingTypeChange });
+
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "brand_new" } });
+
+    expect(onListingTypeChange).toHaveBeenLastCalledWith("brand_new");
+  });
+
+  it("never calls onTitleChange/onListingTypeChange when they aren't provided -- optional props, no crash", () => {
+    expect(() => renderForm()).not.toThrow();
+  });
+});
+
+const COMPLETE_LOCATION = { provinceId: 1, cityId: 10, barangayId: null };
+
+/** Fills in every field publish_listing requires (per isPublishReady's own
+ * mirrored rule list), except photos -- a sibling concern this form never
+ * tracks itself. */
+function fillCompleteListing() {
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Nike Air Max 270" } });
+  fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Barely used, great condition." } });
+  fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
+  fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "good" } });
+  fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500" } });
+  fireEvent.click(screen.getByLabelText("Meetup"));
+}
+
+describe("ListingForm -- onPublishReadyChange (live publish-completeness signal, independent of Save Draft)", () => {
+  it("reports not ready on a blank create-mode form", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports ready once every required field is filled in from live current state -- no Save Draft click needed first", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    fillCompleteListing();
+
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("reports not ready again the instant a required field is cleared back out", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    fillCompleteListing();
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "" } });
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("never becomes ready while condition is Fair with no known flaws text", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    fillCompleteListing();
+    fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "fair" } });
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.change(screen.getByLabelText(/known flaws/i), { target: { value: "Small scratch." } });
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("requires a fulfillment method for an ordinary (non-inquiry-only) category", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    fillCompleteListing();
+    fireEvent.click(screen.getByLabelText("Meetup")); // uncheck the one fillCompleteListing checked
+
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not require a fulfillment method for an inquiry-only category (Cars/Motorcycles/For Rent)", () => {
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "2020 Toyota Vios" } });
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Well maintained sedan." } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
+    fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "good" } });
+    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500000" } });
+
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("never satisfies the title requirement using a server-side placeholder -- only the live current title field counts", () => {
+    // Simulates a photo-first auto-draft: the parent's baseline/server data
+    // may carry "Untitled listing", but this form's own live `title` state
+    // -- seeded from initialValues/CREATE_DEFAULTS, never from a value this
+    // test doesn't pass -- starts blank regardless, so isPublishReady must
+    // still report false until the seller actually types something.
+    const onPublishReadyChange = vi.fn();
+    renderForm({ initialLocation: COMPLETE_LOCATION, onPublishReadyChange });
+
+    expect(screen.getByLabelText("Title")).toHaveValue("");
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not require description/category/price completeness for Save Draft to still succeed while Publish stays not-ready", async () => {
+    createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
+    const onPublishReadyChange = vi.fn();
+    renderForm({ onPublishReadyChange });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(createListingMock).toHaveBeenCalled());
+    expect(onPublishReadyChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("ListingForm -- persistCurrentState imperative handle (direct-publish support)", () => {
+  it("persists current unsaved values and resolves { ok: true, listingId } when validation passes", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("draft-9");
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "draft-9", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    const ref = createRef<ListingFormHandle>();
+    render(
+      <ListingForm
+        ref={ref}
+        mode="create"
+        categories={CATEGORIES}
+        provinces={PROVINCES}
+        initialCities={[]}
+        initialBarangays={[]}
+        loadCities={vi.fn().mockResolvedValue(CITIES)}
+        loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+        ensureListingId={ensureListingId}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Nike Air Max 270" } });
+
+    const result = await ref.current!.persistCurrentState();
+
+    expect(result).toEqual({ ok: true, listingId: "draft-9" });
+    expect(ensureListingId).toHaveBeenCalledTimes(1);
+    expect(updateListingMock).toHaveBeenCalledWith("draft-9", { title: "Nike Air Max 270" });
+  });
+
+  it("resolves { ok: false } and never calls the RPC when a client-side field error exists (e.g. blank title)", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("draft-9");
+    const ref = createRef<ListingFormHandle>();
+    render(
+      <ListingForm
+        ref={ref}
+        mode="create"
+        categories={CATEGORIES}
+        provinces={PROVINCES}
+        initialCities={[]}
+        initialBarangays={[]}
+        loadCities={vi.fn().mockResolvedValue(CITIES)}
+        loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+        ensureListingId={ensureListingId}
+      />,
+    );
+
+    const result = await ref.current!.persistCurrentState();
+
+    expect(result).toEqual({ ok: false });
+    expect(ensureListingId).not.toHaveBeenCalled();
+    expect(await screen.findByText("Please enter a title for your listing.")).toBeInTheDocument();
+  });
+
+  it("resolves { ok: true, listingId } without calling update_listing when nothing changed from baseline (already persisted)", async () => {
+    const ref = createRef<ListingFormHandle>();
+    render(
+      <ListingForm
+        ref={ref}
+        mode="edit"
+        listingId="listing-1"
+        categories={CATEGORIES}
+        provinces={PROVINCES}
+        initialCities={[]}
+        initialBarangays={[]}
+        loadCities={vi.fn().mockResolvedValue(CITIES)}
+        loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+        initialValues={EMPTY_VALUES}
+      />,
+    );
+
+    const result = await ref.current!.persistCurrentState();
+
+    expect(result).toEqual({ ok: true, listingId: "listing-1" });
+    expect(updateListingMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves { ok: false } when the underlying update_listing call fails", async () => {
+    updateListingMock.mockResolvedValue({ ok: false, code: "LISTING_NOT_DRAFT" });
+    const ref = createRef<ListingFormHandle>();
+    render(
+      <ListingForm
+        ref={ref}
+        mode="edit"
+        listingId="listing-1"
+        categories={CATEGORIES}
+        provinces={PROVINCES}
+        initialCities={[]}
+        initialBarangays={[]}
+        loadCities={vi.fn().mockResolvedValue(CITIES)}
+        loadBarangays={vi.fn().mockResolvedValue(BARANGAYS)}
+        initialValues={EMPTY_VALUES}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    const result = await ref.current!.persistCurrentState();
+
+    expect(result).toEqual({ ok: false });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { forwardRef, useEffect, useId, useImperativeHandle, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import {
@@ -66,7 +66,7 @@ export type ListingFieldValues = Omit<
   "provinceId" | "cityId" | "barangayId" | "vehicleDetails" | "rentalDetails"
 >;
 
-const CREATE_DEFAULTS: ListingFieldValues = {
+export const CREATE_DEFAULTS: ListingFieldValues = {
   title: "",
   description: null,
   categoryId: null,
@@ -112,6 +112,58 @@ type Props = {
    * mutation immediately and independently, so it never contributes to
    * this signal. */
   onDirtyChange?: (isDirty: boolean) => void;
+  /** Create mode only, and only used by an orchestrating parent that has
+   * already auto-created a minimal draft on the seller's behalf (e.g. from
+   * a photo upload) -- once set, Save Draft UPDATEs this listing instead of
+   * creating a new one, reusing the exact same patch-diff logic edit mode
+   * already uses. Absent/null means "no draft exists yet from any source." */
+  existingDraftId?: string | null;
+  /** Create mode only. Called the first time Save Draft needs a listing id
+   * and `existingDraftId` is still null -- e.g. the seller clicked Save
+   * Draft before ever adding a photo. Mirrors ListingImagesPicker's own
+   * `ensureListingId` prop exactly (same shared function, same shape), so
+   * whichever of the two -- a photo upload or an explicit Save Draft --
+   * happens first is the one that actually creates the draft, and the
+   * other reuses it; the orchestrating parent's own de-duplication (a
+   * single in-flight promise) is what prevents a second, duplicate draft
+   * regardless of which side calls it first or how many times. When this
+   * prop is omitted entirely, create mode falls back to its original,
+   * unchanged standalone behavior (createListing + redirect to the edit
+   * page) -- existing callers with no auto-draft orchestration are
+   * completely unaffected. */
+  ensureListingId?: () => Promise<string | null>;
+  /** Create mode only, optional. Fires on every Title keystroke so an
+   * orchestrating parent can use whatever the seller has already typed as
+   * the auto-created draft's real title (falling back to a placeholder only
+   * when nothing has been typed yet) -- see ensureListingId's own comment. */
+  onTitleChange?: (title: string) => void;
+  /** Create mode only, optional. Fires whenever listing type changes, so a
+   * sibling ListingImagesPicker (a separate component on the same page, not
+   * fed by this form's own state) can gate its Reference/Actual toggle
+   * correctly without waiting for a server round trip -- the same gap
+   * ListingImagesPicker's own header comment already documents for the
+   * edit page, avoided here since there is no page reload to wait for. */
+  onListingTypeChange?: (listingType: ListingTypeFilter | null) => void;
+  /** Optional. Fires whenever this form's live current state (not its
+   * last-saved baseline -- unlike onDirtyChange) starts or stops matching
+   * every field-level completeness rule publish_listing itself enforces
+   * (see isPublishReady's own comment below for the exact rule list and
+   * its two deliberate exceptions). Lets an orchestrating parent enable a
+   * Publish action the instant the CURRENT form satisfies publish
+   * requirements, without requiring Save Draft first. */
+  onPublishReadyChange?: (ready: boolean) => void;
+};
+
+/** Imperative handle exposed via ref -- lets an orchestrating parent (the
+ * Create Listing page's direct-publish flow) persist every current unsaved
+ * field to the same listing Save Draft would, without a real form submit
+ * event. Reuses handleSubmit's exact same validation/patch-diff logic (see
+ * persistCurrentState below); a null-returning failure means either a
+ * client-side field error (now visible inline, same as a failed Save
+ * Draft) or a failed create/update RPC call (surfaced via this form's own
+ * existing submitError state). */
+export type ListingFormHandle = {
+  persistCurrentState: () => Promise<{ ok: true; listingId: string } | { ok: false }>;
 };
 
 type FieldErrors = {
@@ -152,21 +204,29 @@ function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): b
  * purely by whether the current value differs from the baseline, which is
  * exactly what update_listing itself needs to see.
  */
-export function ListingForm({
-  mode,
-  listingId,
-  categories,
-  provinces,
-  initialCities,
-  initialBarangays,
-  loadCities,
-  loadBarangays,
-  initialLocation = EMPTY_LOCATION,
-  initialValues,
-  initialVehicleDetails,
-  initialRentalDetails,
-  onDirtyChange,
-}: Props) {
+export const ListingForm = forwardRef<ListingFormHandle, Props>(function ListingForm(
+  {
+    mode,
+    listingId,
+    categories,
+    provinces,
+    initialCities,
+    initialBarangays,
+    loadCities,
+    loadBarangays,
+    initialLocation = EMPTY_LOCATION,
+    initialValues,
+    initialVehicleDetails,
+    initialRentalDetails,
+    onDirtyChange,
+    existingDraftId = null,
+    ensureListingId,
+    onTitleChange,
+    onListingTypeChange,
+    onPublishReadyChange,
+  }: Props,
+  ref,
+) {
   const router = useRouter();
   const titleErrorId = useId();
   const priceErrorId = useId();
@@ -254,6 +314,8 @@ export function ListingForm({
     } else if (next !== "brand_new" && condition === "brand_new") {
       setCondition(null);
     }
+
+    onListingTypeChange?.(next);
   }
 
   function toggleFulfillmentMethod(method: FulfillmentMethod) {
@@ -262,6 +324,15 @@ export function ListingForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    await persistCurrentState();
+  }
+
+  /** The actual Save Draft logic, extracted so it can be invoked either by
+   * a real form submit event (handleSubmit above) or imperatively by an
+   * orchestrating parent's direct-publish flow via the ref handle below --
+   * both paths run the exact same validation and patch-diff logic and end
+   * up at the exact same create_listing/update_listing calls. */
+  async function persistCurrentState(): Promise<{ ok: true; listingId: string } | { ok: false }> {
     setSubmitError(null);
     setSaveStatus("idle");
 
@@ -293,11 +364,16 @@ export function ListingForm({
     // Stock quantity can never be cleared once a listing exists: create_listing
     // is happy to default a blank value to 1, but update_listing's patch
     // contract rejects an explicit null for it outright (STOCK_QUANTITY_INVALID)
-    // -- so in edit mode a blank stock field is invalid, not "leave unchanged."
+    // -- so whenever this submit will end up going through update_listing
+    // (true edit mode, or a create-mode form with an auto-draft already or
+    // about to exist via ensureListingId) a blank stock field is invalid,
+    // not "leave unchanged." Only the original, unorchestrated create path
+    // (create_listing itself) tolerates a blank field by defaulting it to 1.
+    const isEditShaped = mode === "edit" || Boolean(ensureListingId);
     const trimmedStock = stockQuantity.trim();
     const stockValue = trimmedStock === "" ? null : Number(trimmedStock);
     if (stockValue === null) {
-      if (mode === "edit") {
+      if (isEditShaped) {
         errors.stockQuantity = "Stock quantity must be at least 1.";
       }
     } else if (!Number.isInteger(stockValue) || stockValue < 1) {
@@ -311,7 +387,7 @@ export function ListingForm({
 
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0 || Object.keys(nextVehicleErrors).length > 0 || Object.keys(nextRentalErrors).length > 0) {
-      return;
+      return { ok: false };
     }
 
     const currentValues: ListingFieldValues = {
@@ -330,7 +406,18 @@ export function ListingForm({
       fulfillmentMethods,
     };
 
-    if (mode === "create") {
+    // activeListingId: the id this submit already knows about -- always
+    // real in edit mode, and in create mode whenever an orchestrating
+    // parent already auto-created a draft (from a photo upload, or from
+    // this form's own previous submit -- see ensureListingId below).
+    const activeListingId = mode === "edit" ? (listingId as string) : existingDraftId;
+
+    if (activeListingId === null && !ensureListingId) {
+      // Original, unchanged standalone create-mode path: no orchestrating
+      // parent is managing an auto-draft for this form (ensureListingId was
+      // never provided), so this is exactly today's create_listing + redirect
+      // to the edit page. Every existing caller of this form keeps this
+      // behavior verbatim.
       setIsSubmitting(true);
       const input: CreateListingInput = {
         ...currentValues,
@@ -351,14 +438,37 @@ export function ListingForm({
 
       if (!result.ok) {
         setSubmitError(CREATE_LISTING_ERROR_MESSAGES[result.code]);
-        return;
+        return { ok: false };
       }
 
       router.push(`/sell/${result.listingId}/edit`);
-      return;
+      return { ok: true, listingId: result.listingId };
     }
 
-    // ===== edit mode: build a patch containing only what actually changed =====
+    setIsSubmitting(true);
+
+    // Create mode, orchestrated, no draft yet: this is the first thing (a
+    // photo upload or this very Save Draft click) to need a listing id.
+    // ensureListingId is the SAME function the sibling image picker calls,
+    // shared and de-duplicated by the orchestrating parent (a single
+    // in-flight promise there), so whichever side gets here first is the
+    // only one that ever actually calls create_listing -- this can never
+    // create a second, duplicate draft. The draft created this way carries
+    // only a title (real or a placeholder) and the seller's prefilled
+    // location -- every other field below is then sent as a normal
+    // update_listing patch immediately after, exactly like an ordinary Save
+    // Draft on an existing draft.
+    let resolvedListingId = activeListingId;
+    if (resolvedListingId === null) {
+      resolvedListingId = await ensureListingId!();
+      if (resolvedListingId === null) {
+        setIsSubmitting(false);
+        setSubmitError(CREATE_LISTING_ERROR_MESSAGES.UNKNOWN);
+        return { ok: false };
+      }
+    }
+
+    // ===== build a patch containing only what actually changed (shared by true edit mode and an orchestrated create-mode form that now has a draft) =====
     const patch: UpdateListingPatch = {};
 
     if (currentValues.title !== baseline.title) patch.title = currentValues.title;
@@ -373,7 +483,7 @@ export function ListingForm({
     if (currentValues.isNegotiable !== baseline.isNegotiable) patch.is_negotiable = currentValues.isNegotiable;
     if (currentValues.brand !== baseline.brand) patch.brand = currentValues.brand;
     if (currentValues.knownFlaws !== baseline.knownFlaws) patch.known_flaws = currentValues.knownFlaws;
-    // Guarded above: stockValue is never null when mode === "edit" reaches here.
+    // Guarded above: stockValue is never null whenever this edit-shaped branch is reached (isEditShaped).
     if (currentValues.stockQuantity !== baseline.stockQuantity) patch.stock_quantity = currentValues.stockQuantity!;
     if (currentValues.meetupNote !== baseline.meetupNote) patch.meetup_note = currentValues.meetupNote;
 
@@ -408,17 +518,17 @@ export function ListingForm({
     }
 
     if (Object.keys(patch).length === 0) {
+      setIsSubmitting(false);
       setSaveStatus("no_changes");
-      return;
+      return { ok: true, listingId: resolvedListingId };
     }
 
-    setIsSubmitting(true);
-    const result = await updateListing(listingId!, patch);
+    const result = await updateListing(resolvedListingId, patch);
     setIsSubmitting(false);
 
     if (!result.ok) {
       setSubmitError(UPDATE_LISTING_ERROR_MESSAGES[result.code]);
-      return;
+      return { ok: false };
     }
 
     // Reset the baseline to what was just saved, so an immediate second
@@ -443,7 +553,10 @@ export function ListingForm({
     // overwrite what the seller is looking at (which already matches the
     // just-saved server truth regardless).
     router.refresh();
+    return { ok: true, listingId: resolvedListingId };
   }
+
+  useImperativeHandle(ref, () => ({ persistCurrentState }));
 
   // ===== dirty-state signal for a sibling Publish action (see onDirtyChange's own comment) =====
   // Deliberately mirrors handleSubmit's own patch-diff predicates exactly,
@@ -478,11 +591,68 @@ export function ListingForm({
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
+  // ===== live "would publish_listing accept this" signal for a sibling direct-Publish action =====
+  // Mirrors publish_listing's own field-level completeness rules exactly,
+  // as confirmed by inspecting the function's current live definition via
+  // pg_get_functiondef, with two deliberate exceptions: (a) seller-policy
+  // acceptance -- a per-account flag with no client-visible form state at
+  // all, which the Publish action itself still discovers reactively via a
+  // SELLER_POLICIES_NOT_ACCEPTED response and the existing consent dialog,
+  // exactly as it already does on the edit page; and (b) vehicle/rental
+  // extension completeness -- the live publish_listing body does not
+  // actually validate this at all (it only gates whether an extension is
+  // *allowed* for a category, never whether one is *required*), so no
+  // stricter client-side rule is invented here than the backend itself
+  // enforces. Photos are excluded too -- ListingImagesPicker computes and
+  // reports its own photo-completeness signal independently, combined with
+  // this one by the orchestrating parent. Deliberately reads live current
+  // state, never the baseline -- a photo-first auto-draft's placeholder
+  // title ("Untitled listing") lives only in baseline/server state and can
+  // never satisfy the title check below regardless.
+  // originalPriceForPublishCheck's own format/cross-field checks aren't
+  // part of publish_listing's own rules at all (original_price_cents is
+  // never inspected there) -- they're included anyway because they're
+  // unconditional client-side Save Draft guards (see persistCurrentState's
+  // own errors.originalPrice logic above), so a listing that would fail
+  // Save Draft's own validation must not present Publish as ready either.
+  const isInquiryOnlyCategory = isVehicleCategory || isRentalCategory;
+  const priceForPublishCheck = parsePesosToCents(priceInput);
+  const originalPriceForPublishCheck = parsePesosToCents(originalPriceInput);
+  const trimmedStockForPublishCheck = stockQuantity.trim();
+  const stockValueForPublishCheck = trimmedStockForPublishCheck === "" ? null : Number(trimmedStockForPublishCheck);
+
+  const isPublishReady =
+    title.trim().length > 0 &&
+    description.trim().length > 0 &&
+    categoryId !== null &&
+    listingType !== null &&
+    condition !== null &&
+    !(listingType === "brand_new" && condition !== "brand_new") &&
+    !(listingType === "preloved" && condition === "brand_new") &&
+    !(condition === "fair" && knownFlaws.trim().length === 0) &&
+    priceForPublishCheck.ok &&
+    priceForPublishCheck.cents !== null &&
+    originalPriceForPublishCheck.ok &&
+    !(
+      originalPriceForPublishCheck.cents !== null &&
+      priceForPublishCheck.cents !== null &&
+      originalPriceForPublishCheck.cents < priceForPublishCheck.cents
+    ) &&
+    stockValueForPublishCheck !== null &&
+    Number.isInteger(stockValueForPublishCheck) &&
+    stockValueForPublishCheck >= 1 &&
+    location.provinceId !== null &&
+    location.cityId !== null &&
+    (isInquiryOnlyCategory || fulfillmentMethods.length > 0);
+
+  useEffect(() => {
+    onPublishReadyChange?.(isPublishReady);
+  }, [isPublishReady, onPublishReadyChange]);
+
   return (
     <form onSubmit={handleSubmit} className="space-y-8" noValidate>
       <section>
-        <h2 className="text-sm font-semibold text-ink">Listing details</h2>
-        <div className="mt-3 space-y-3">
+        <div className="space-y-3">
           <div>
             <label htmlFor="listing-title" className="text-sm font-medium text-ink">
               Title
@@ -491,7 +661,10 @@ export function ListingForm({
               id="listing-title"
               type="text"
               value={title}
-              onChange={(event) => setTitle(event.target.value)}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                onTitleChange?.(event.target.value);
+              }}
               aria-describedby={titleErrorId}
               aria-invalid={Boolean(fieldErrors.title)}
               className={INPUT_CLASS}
@@ -535,8 +708,7 @@ export function ListingForm({
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-ink">Category &amp; condition</h2>
-        <div className="mt-3 space-y-3">
+        <div className="space-y-3">
           <div>
             <label htmlFor="listing-category" className="text-sm font-medium text-ink">
               Category <span className="font-normal text-ink-muted">(optional)</span>
@@ -641,8 +813,7 @@ export function ListingForm({
       )}
 
       <section>
-        <h2 className="text-sm font-semibold text-ink">Price &amp; stock</h2>
-        <div className="mt-3 space-y-3">
+        <div className="space-y-3">
           <div>
             <label htmlFor="listing-price" className="text-sm font-medium text-ink">
               Price <span className="font-normal text-ink-muted">(optional)</span>
@@ -793,4 +964,4 @@ export function ListingForm({
       </div>
     </form>
   );
-}
+});

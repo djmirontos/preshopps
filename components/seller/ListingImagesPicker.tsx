@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ImagePlus, Loader2, RotateCcw, X } from "lucide-react";
 import { uploadImage, deleteUploadedImage, UPLOAD_IMAGE_ERROR_MESSAGES, type UploadImageErrorCode } from "@/lib/image-processing/upload-image";
 import { replaceListingImages, REPLACE_LISTING_IMAGES_ERROR_MESSAGES } from "@/lib/seller/listing-actions";
@@ -35,7 +35,11 @@ type NewSlot = {
 type Slot = ExistingSlot | NewSlot;
 
 type Props = {
-  listingId: string;
+  /** Null on the initial Create Listing page before any draft exists yet --
+   * see `ensureListingId` below, the only case that ever needs to tolerate
+   * this. The edit page always passes a real id here (unchanged; that path
+   * never calls ensureListingId at all). */
+  listingId: string | null;
   ownerUserId: string;
   /** Current listing type, sourced from the page (the same get_my_listing
    * read that prefills ListingForm) -- if the seller changes listing type
@@ -44,6 +48,27 @@ type Props = {
    * live cross-component wire was not built in this slice). */
   listingType: ListingTypeFilter | null;
   initialImages: ListingImageWithUrl[];
+  /** Create-page only. Called the first time this picker needs a real
+   * listing id and `listingId` is still null (i.e. the very first photo
+   * the seller adds) -- resolves to a freshly, minimally auto-created
+   * draft. Mirrors ListingForm's own identically-shaped `ensureListingId`
+   * prop: both point at the SAME shared, de-duplicated function on the
+   * orchestrating parent, so whichever of "add a photo" or "click Save
+   * Draft" happens first is the only one that ever actually creates the
+   * draft. Never called once `listingId` is already non-null (the edit
+   * page never passes this at all). A null return means creation failed;
+   * the attempted upload is then treated exactly like any other failure. */
+  ensureListingId?: () => Promise<string | null>;
+  /** Optional. Fires whenever the current, already-persisted set of photos
+   * (committed existing images plus any new upload that has finished --
+   * never an in-flight or failed one) starts or stops matching
+   * publish_listing's own image-completeness rules: 1-8 total, no
+   * reference images at all for Pre-loved, and at least one actual
+   * (non-reference) image for Brand New. Lets an orchestrating parent
+   * combine this with ListingForm's own onPublishReadyChange signal into a
+   * single "can Publish now" gate, without waiting for a Save Draft/page
+   * reload round trip. */
+  onPhotosReadyChange?: (ready: boolean) => void;
 };
 
 function readyPath(slot: Slot): string | null {
@@ -112,18 +137,63 @@ function toInitialSlots(images: ListingImageWithUrl[]): Slot[] {
  * object becomes an orphan in storage -- the same accepted risk already
  * documented for ShopForm's logo cleanup; no stronger guarantee exists
  * anywhere else in this codebase either.
+ *
+ * Create-page reuse (auto-draft on first photo): this same component (no
+ * parallel image-upload implementation) is also mounted on the initial
+ * Create Listing page, before any listing exists at all. There, `listingId`
+ * starts null and `ensureListingId` is provided; the first upload attempt
+ * calls it to silently create a minimal draft (see ListingForm's identical
+ * `ensureListingId` prop and CreateListingWorkspace, which owns and
+ * de-duplicates the actual creation) and reuses the id for every action
+ * from then on. The edit page is completely unaffected: it always passes a
+ * real `listingId` and no `ensureListingId`, so resolveListingId's fast
+ * path (return the already-known id) is the only path it ever takes.
  */
-export function ListingImagesPicker({ listingId, ownerUserId, listingType, initialImages }: Props) {
+export function ListingImagesPicker({
+  listingId,
+  ownerUserId,
+  listingType,
+  initialImages,
+  ensureListingId,
+  onPhotosReadyChange,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [slots, setSlotsState] = useState<Slot[]>(() => toInitialSlots(initialImages));
   const slotsRef = useRef<Slot[]>(slots);
   const [committedPaths, setCommittedPaths] = useState<string[]>(() => initialImages.map((image) => image.storagePath));
   const [isPersisting, setIsPersisting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Own local cache of the resolved id, separate from the `listingId` prop:
+  // once ensureListingId() resolves (or the edit page's own non-null prop
+  // seeds it immediately via this initializer), every later action keeps
+  // using it directly without waiting for the orchestrating parent's own
+  // state update/re-render to flow the id back down as a prop. Nothing
+  // else ever needs to re-sync this from the `listingId` prop: on the edit
+  // page it is a stable, always-non-null string from the very first render
+  // (this initializer is the only assignment it ever needs); on the create
+  // page it starts null and is set exactly once, by resolveListingId
+  // itself, the instant ensureListingId resolves -- strictly before the
+  // orchestrating parent's own re-render could ever update this prop.
+  const resolvedListingIdRef = useRef<string | null>(listingId);
 
   function setSlots(next: Slot[]) {
     slotsRef.current = next;
     setSlotsState(next);
+  }
+
+  /** Returns the real listing id to act against, creating a minimal draft
+   * via ensureListingId on first use if none exists yet. Idempotent within
+   * this component -- once resolved, later calls return the cached value
+   * immediately without calling ensureListingId again (the orchestrating
+   * parent's own de-duplication additionally protects against a concurrent
+   * caller, e.g. ListingForm's own Save Draft, from ever creating a second
+   * draft even across components). */
+  async function resolveListingId(): Promise<string | null> {
+    if (resolvedListingIdRef.current) return resolvedListingIdRef.current;
+    if (!ensureListingId) return null;
+    const id = await ensureListingId();
+    if (id) resolvedListingIdRef.current = id;
+    return id;
   }
 
   const anyUploading = slots.some(isUploading);
@@ -131,6 +201,26 @@ export function ListingImagesPicker({ listingId, ownerUserId, listingType, initi
   const canAddMore = slots.length < MAX_IMAGES;
   const allowReferenceToggle = listingType === "brand_new";
   const referenceImagesWhilePreloved = listingType === "preloved" && slots.some((slot) => slot.isReferenceImage);
+
+  // ===== live "would publish_listing accept these photos" signal =====
+  // Mirrors publish_listing's own image-completeness rules exactly (1-8
+  // total, no reference images for Pre-loved, at least one actual image
+  // for Brand New) -- counted only over slots that are actually ready to
+  // be published (already-committed existing images, or a brand-new
+  // upload that has finished uploading), never an in-flight or failed one,
+  // since those aren't part of what would actually be persisted yet.
+  const readySlots = slots.filter((slot) => readyPath(slot) !== null);
+  const readyTotal = readySlots.length;
+  const readyActualCount = readySlots.filter((slot) => !slot.isReferenceImage).length;
+  const photosReady =
+    readyTotal >= 1 &&
+    readyTotal <= MAX_IMAGES &&
+    !(listingType === "preloved" && readyTotal !== readyActualCount) &&
+    !(listingType === "brand_new" && readyActualCount === 0);
+
+  useEffect(() => {
+    onPhotosReadyChange?.(photosReady);
+  }, [photosReady, onPhotosReadyChange]);
 
   async function persist(nextSlots: Slot[]): Promise<boolean> {
     setIsPersisting(true);
@@ -140,7 +230,12 @@ export function ListingImagesPicker({ listingId, ownerUserId, listingType, initi
     const paths = readySlots.map((slot) => readyPath(slot) as string);
     const flags = readySlots.map((slot) => slot.isReferenceImage);
 
-    const result = await replaceListingImages(listingId, paths, flags);
+    // persist is only ever reached once a listing id is known: either the
+    // edit page's own non-null prop (seeded above), or a successful
+    // resolveListingId() call inside startUpload for the very first photo
+    // on the create page -- reorder/remove/toggle can only act on a slot
+    // that already exists, which itself required a prior successful upload.
+    const result = await replaceListingImages(resolvedListingIdRef.current as string, paths, flags);
     setIsPersisting(false);
 
     if (!result.ok) {
@@ -181,7 +276,18 @@ export function ListingImagesPicker({ listingId, ownerUserId, listingType, initi
   }
 
   async function startUpload(localId: string, file: File) {
-    const result = await uploadImage("listing-images", ownerUserId, listingId, file, (status) => {
+    const id = await resolveListingId();
+    if (!id) {
+      setSubmitError("Couldn't start your listing. Please try again.");
+      setSlots(
+        slotsRef.current.map((slot) =>
+          slot.kind === "new" && slot.localId === localId ? { ...slot, status: "error", errorCode: "UPLOAD_FAILED" } : slot,
+        ),
+      );
+      return;
+    }
+
+    const result = await uploadImage("listing-images", ownerUserId, id, file, (status) => {
       setSlots(slotsRef.current.map((slot) => (slot.kind === "new" && slot.localId === localId ? { ...slot, status } : slot)));
     });
 

@@ -402,6 +402,68 @@ describe("ListingImagesPicker -- race safety", () => {
   });
 });
 
+describe("ListingImagesPicker -- null listingId + ensureListingId (initial Create Listing page)", () => {
+  it("the edit page's own usage (a real listingId string, no ensureListingId) never calls ensureListingId -- unaffected by this change", async () => {
+    const ensureListingId = vi.fn();
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/listing-1/new.jpg" });
+    renderPicker({ ensureListingId });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(replaceListingImagesMock).toHaveBeenCalledWith("listing-1", ["listing-images/owner-1/listing-1/new.jpg"], [false]));
+    expect(ensureListingId).not.toHaveBeenCalled();
+  });
+
+  it("with listingId null, the first upload calls ensureListingId to obtain a real id before uploading", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("new-listing-1");
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/new-listing-1/new.jpg" });
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(ensureListingId).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(uploadImageMock).toHaveBeenCalledWith("listing-images", "owner-1", "new-listing-1", expect.any(File), expect.any(Function)),
+    );
+    await waitFor(() =>
+      expect(replaceListingImagesMock).toHaveBeenCalledWith("new-listing-1", ["listing-images/owner-1/new-listing-1/new.jpg"], [false]),
+    );
+  });
+
+  it("a second upload right after the first reuses the resolved id -- ensureListingId is called only once", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("new-listing-1");
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/new-listing-1/one.jpg" });
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"), "one.jpg");
+    await waitFor(() => expect(replaceListingImagesMock).toHaveBeenCalledTimes(1));
+
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/new-listing-1/two.jpg" });
+    selectFile(screen.getByLabelText("Add a listing photo"), "two.jpg");
+    await waitFor(() => expect(replaceListingImagesMock).toHaveBeenCalledTimes(2));
+
+    expect(ensureListingId).toHaveBeenCalledTimes(1);
+  });
+
+  it("if ensureListingId resolves to null, the upload never starts and the slot shows an error instead of a stuck spinner", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue(null);
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(uploadImageMock).not.toHaveBeenCalled();
+    expect(replaceListingImagesMock).not.toHaveBeenCalled();
+  });
+
+  it("with listingId null and no ensureListingId provided at all, an upload attempt fails gracefully instead of throwing", async () => {
+    renderPicker({ listingId: null, initialImages: [] });
+
+    expect(() => selectFile(screen.getByLabelText("Add a listing photo"))).not.toThrow();
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+});
+
 describe("ListingImagesPicker -- scope / accessibility", () => {
   it("never renders a Publish button or vehicle/rental fields", () => {
     renderPicker({ initialImages: [image({ id: "img-1", position: 0 })] });
@@ -429,5 +491,91 @@ describe("ListingImagesPicker -- scope / accessibility", () => {
     expect(screen.getByLabelText("Move image 1 right")).toBeInTheDocument();
     expect(screen.getByLabelText("Remove image 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Mark image 1 as reference")).toBeInTheDocument();
+  });
+});
+
+describe("ListingImagesPicker -- onPhotosReadyChange (live publish-completeness signal)", () => {
+  it("reports not ready with zero photos", () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({ initialImages: [], onPhotosReadyChange });
+
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports ready once an existing photo is already present, with no listing type chosen", () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({ initialImages: [image({ id: "img-1", position: 0 })], onPhotosReadyChange });
+
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("reports ready only after a fresh upload finishes -- not while it is still compressing/uploading", async () => {
+    let resolveUpload: (value: { ok: true; path: string }) => void = () => {};
+    uploadImageMock.mockReturnValue(new Promise((resolve) => (resolveUpload = resolve)));
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({ initialImages: [], onPhotosReadyChange });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(false);
+
+    resolveUpload({ ok: true, path: "listing-images/owner-1/listing-1/new.jpg" });
+    await waitFor(() => expect(onPhotosReadyChange).toHaveBeenLastCalledWith(true));
+  });
+
+  it("reports not ready for Pre-loved as soon as any reference image is present", () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({
+      listingType: "preloved",
+      initialImages: [image({ id: "img-1", position: 0, isReferenceImage: true })],
+      onPhotosReadyChange,
+    });
+
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports not ready for Brand New until at least one actual (non-reference) image exists", () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({
+      listingType: "brand_new",
+      initialImages: [image({ id: "img-1", position: 0, isReferenceImage: true })],
+      onPhotosReadyChange,
+    });
+
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports ready for Brand New once an actual image is added alongside a reference image", () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({
+      listingType: "brand_new",
+      initialImages: [
+        image({ id: "img-1", position: 0, isReferenceImage: true }),
+        image({ id: "img-2", position: 1, isReferenceImage: false }),
+      ],
+      onPhotosReadyChange,
+    });
+
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("flips back to not-ready when the seller removes the only actual photo, leaving only a reference image", async () => {
+    const onPhotosReadyChange = vi.fn();
+    renderPicker({
+      listingType: "brand_new",
+      initialImages: [
+        image({ id: "img-1", position: 0, isReferenceImage: false }),
+        image({ id: "img-2", position: 1, isReferenceImage: true }),
+      ],
+      onPhotosReadyChange,
+    });
+    expect(onPhotosReadyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    await waitFor(() => expect(onPhotosReadyChange).toHaveBeenLastCalledWith(false));
+  });
+
+  it("never calls onPhotosReadyChange when it isn't provided -- optional prop, no crash", () => {
+    expect(() => renderPicker({ initialImages: [] })).not.toThrow();
   });
 });
