@@ -69,19 +69,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 initialUnreadMessageCount={initialUnreadMessageCount}
                 initialUnreadNotificationCount={initialUnreadNotificationCount}
               >
-                {/* Root-level so the floating desktop chat panel survives
-                    normal marketplace navigation (the layout itself never
+                {/* Root-level so the persistent desktop messaging center
+                    (launcher + expanded two-column panel) survives normal
+                    marketplace navigation (the layout itself never
                     unmounts on a route change) -- see
                     FloatingMessengerProvider's own file comment. Renders
                     nothing on its own; FloatingChatPanel below is the only
-                    consumer that actually shows anything, and only once a
-                    conversation has been opened. */}
+                    consumer that actually shows anything, and only for a
+                    signed-in viewer. */}
                 <FloatingMessengerProvider>
                   <AppHeader user={user} hasShop={Boolean(myShop)} />
                   <main className="flex-1">{children}</main>
                   <ConditionalFooter />
                   <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
-                  <FloatingChatPanel />
+                  <FloatingChatPanel isAuthenticated={Boolean(user)} />
                 </FloatingMessengerProvider>
               </NotificationsProvider>
             </CartProvider>

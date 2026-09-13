@@ -6,11 +6,13 @@ function readFile(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), relativePath), "utf-8");
 }
 
-/** Every file touched or added by this slice (desktop floating Messenger-
- * style chat panel, desktop Enter-to-send/Shift+Enter, web-only tooltips).
- * Kept as one explicit list so the security checklist below reads as a
- * single audit trail, distinct from the more granular per-module
- * architecture files and from the earlier Realtime slices' own lists. */
+/** Every file touched or added across the floating-messenger slices
+ * (the original single-conversation panel, desktop Enter-to-send/Shift+
+ * Enter, web-only tooltips, and this task's own upgrade to a persistent
+ * two-column messaging center). Kept as one explicit list so the
+ * security checklist below reads as a single audit trail, distinct from
+ * the more granular per-module architecture files and from the earlier
+ * Realtime slices' own lists. */
 const FLOATING_MESSENGER_FILES = [
   "components/messaging/FloatingMessengerProvider.tsx",
   "components/messaging/FloatingChatPanel.tsx",
@@ -18,10 +20,12 @@ const FLOATING_MESSENGER_FILES = [
   "components/messaging/ConversationDetailClient.tsx",
   "components/messaging/ConversationsListClient.tsx",
   "components/messaging/ComposeMessageDialog.tsx",
+  "components/messaging/MessagesIconLink.tsx",
   "components/listing/ListingActions.tsx",
   "components/shop/ShopMessageAction.tsx",
   "components/ui/Tooltip.tsx",
   "lib/messaging/load-conversation-for-panel.ts",
+  "lib/messaging/load-conversations-for-messaging-center.ts",
   "lib/messaging/composer-keydown.ts",
   "lib/ui/viewport.ts",
   "app/layout.tsx",
@@ -43,12 +47,19 @@ describe("Floating Messenger slice -- no backend/migration/RLS change was made",
     }
   });
 
-  it("this slice introduces no new RPC name -- the floating panel's own data load reuses the exact three existing calls the full-page route already makes", () => {
-    const source = readFile("lib/messaging/load-conversation-for-panel.ts");
-    expect(source).toMatch(/getConversationContext\(/);
-    expect(source).toMatch(/getConversationMessages\(/);
-    expect(source).toMatch(/getConversationBlockState\(/);
-    expect(source).not.toMatch(/\.rpc\(/);
+  it("this slice introduces no new RPC name -- the panel's own data loads reuse the exact same canonical calls the full-page routes already make", () => {
+    const threadLoaderSource = readFile("lib/messaging/load-conversation-for-panel.ts");
+    expect(threadLoaderSource).toMatch(/getConversationContext\(/);
+    expect(threadLoaderSource).toMatch(/getConversationMessages\(/);
+    expect(threadLoaderSource).toMatch(/getConversationBlockState\(/);
+    expect(threadLoaderSource).not.toMatch(/\.rpc\(/);
+
+    // The messaging center's own left-column list loader reuses
+    // getMyConversations() -- the exact same call app/messages/page.tsx
+    // already makes -- not a second, competing inbox query/RPC.
+    const listLoaderSource = readFile("lib/messaging/load-conversations-for-messaging-center.ts");
+    expect(listLoaderSource).toMatch(/getMyConversations\(/);
+    expect(listLoaderSource).not.toMatch(/\.rpc\(/);
   });
 });
 
@@ -61,10 +72,12 @@ describe("Floating Messenger slice -- no service-role/ad-hoc client anywhere in 
     }
   });
 
-  it("the panel's Server Action uses the server Supabase client, never a browser/service-role client", () => {
-    const source = readFile("lib/messaging/load-conversation-for-panel.ts");
-    expect(source).toMatch(/^"use server";/);
-    expect(source).not.toMatch(/from ["']@\/lib\/supabase\/client["']/);
+  it("both panel Server Actions use the server Supabase client, never a browser/service-role client", () => {
+    for (const file of ["lib/messaging/load-conversation-for-panel.ts", "lib/messaging/load-conversations-for-messaging-center.ts"]) {
+      const source = readFile(file);
+      expect(source).toMatch(/^"use server";/);
+      expect(source).not.toMatch(/from ["']@\/lib\/supabase\/client["']/);
+    }
   });
 });
 
@@ -87,15 +100,21 @@ describe("Floating Messenger slice -- exactly one messaging Realtime implementat
 });
 
 describe("Floating Messenger slice -- single-window MVP, never a multi-chat-window system", () => {
-  it("FloatingMessengerProvider owns exactly one openConversationId, not a list/array/map of open conversations", () => {
+  it("FloatingMessengerProvider owns exactly one selectedConversationId, not a list/array/map of open/selected conversations", () => {
     const source = readFile("components/messaging/FloatingMessengerProvider.tsx");
-    expect(source).toMatch(/openConversationId/);
-    expect(source).not.toMatch(/openConversationIds|Set<string>|Map<string|conversations:\s*string\[\]/);
+    expect(source).toMatch(/selectedConversationId/);
+    expect(source).not.toMatch(/selectedConversationIds|openConversationIds|Set<string>|Map<string|conversations:\s*string\[\]/);
   });
 
-  it("FloatingChatPanel renders at most one panel element, never a list of panels", () => {
+  it("FloatingChatPanel itself renders at most one panel/thread element -- the only .map() in the messaging center's tree belongs to ConversationsListClient's own (separate, pre-existing) row list, not to FloatingChatPanel duplicating panels", () => {
     const source = readFile("components/messaging/FloatingChatPanel.tsx");
     expect(source).not.toMatch(/\.map\(/);
+  });
+
+  it("the right pane renders exactly one ConversationThread, keyed on the single selected conversation -- never more than one thread mounted at once", () => {
+    const source = readFile("components/messaging/FloatingChatPanel.tsx");
+    const threadMountCount = (source.match(/<ConversationThread/g) ?? []).length;
+    expect(threadMountCount).toBe(1);
   });
 });
 
@@ -116,7 +135,12 @@ describe("Floating Messenger slice -- keyboard/viewport checks never risk a hydr
   });
 
   it("no slice file evaluates isDesktopViewport at the top level of a component's render body to decide markup (only inside onClick/onKeyDown callbacks)", () => {
-    for (const file of ["components/messaging/ConversationsListClient.tsx", "components/listing/ListingActions.tsx", "components/shop/ShopMessageAction.tsx"]) {
+    for (const file of [
+      "components/messaging/ConversationsListClient.tsx",
+      "components/messaging/MessagesIconLink.tsx",
+      "components/listing/ListingActions.tsx",
+      "components/shop/ShopMessageAction.tsx",
+    ]) {
       const source = readFile(file);
       if (!source.includes("isDesktopViewport")) continue;
       // Every call site is inside a function body (an event handler), so

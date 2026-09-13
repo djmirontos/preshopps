@@ -136,8 +136,8 @@ function setViewportWidth(width: number) {
 }
 
 function OpenIdProbe() {
-  const { openConversationId } = useFloatingMessenger();
-  return <p data-testid="floating-open-id">{openConversationId ?? "none"}</p>;
+  const { selectedConversationId } = useFloatingMessenger();
+  return <p data-testid="floating-open-id">{selectedConversationId ?? "none"}</p>;
 }
 
 function renderListWithFloatingMessenger(conversations: ConversationSummary[]) {

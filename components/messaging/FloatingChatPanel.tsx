@@ -1,137 +1,163 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Minus, X } from "lucide-react";
+import { MessageCircle, Minus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
+import { useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
 import { ConversationThread } from "@/components/messaging/ConversationThread";
+import { ConversationsListClient } from "@/components/messaging/ConversationsListClient";
 import { loadConversationForPanel, loadEarlierMessagesForPanel } from "@/lib/messaging/load-conversation-for-panel";
+import { loadConversationsForMessagingCenter, loadMoreConversationsForMessagingCenter } from "@/lib/messaging/load-conversations-for-messaging-center";
 import { Tooltip } from "@/components/ui/Tooltip";
 import type { LoadConversationForPanelResult } from "@/lib/messaging/load-conversation-for-panel";
+import type { GetMyConversationsResult } from "@/lib/messaging/get-my-conversations";
 
-type PanelState =
+type ThreadState =
   | { status: "loading" }
   | { status: "error" }
   | { status: "not_found" }
   | { status: "ready"; data: Extract<LoadConversationForPanelResult, { status: "found" }> };
 
-/**
- * Desktop-only (`lg` and up) floating Messenger-style chat panel, mounted
- * once at the root layout alongside FloatingMessengerProvider. Renders
- * nothing (`return null`) whenever no conversation is open -- the common
- * case on every page for every user who hasn't clicked a conversation.
- *
- * Data loading: each time the Provider's openConversationId changes, this
- * fetches conversation context/messages/block-state via the
- * loadConversationForPanel Server Action (lib/messaging/
- * load-conversation-for-panel.ts) -- the same authoritative, RLS-scoped
- * reads the full-page route already uses, just callable without a
- * navigation. Both the minimized pill and the expanded chrome share this
- * one fetch/state machine; toggling minimize/restore never refetches
- * (loadedForRef guards on conversationId only).
- *
- * Crucially, ConversationThread itself is mounted continuously for as
- * long as a conversation is open -- minimizing only hides its container
- * with CSS (`hidden`), it never unmounts the thread. That keeps its
- * Realtime subscription alive while minimized, which is what lets a
- * minimized chat still receive live messages (so it's current when
- * restored) and light the unread pill via onIncomingMessage, while
- * ConversationThread's own isMinimized prop separately suppresses the
- * mark-read side effects for exactly as long as it's minimized.
- */
-export function FloatingChatPanel() {
-  const { openConversationId, isMinimized, minimize, restore, close } = useFloatingMessenger();
-  const [state, setState] = useState<PanelState | null>(null);
-  const [hasUnreadWhileMinimized, setHasUnreadWhileMinimized] = useState(false);
-  const loadedForRef = useRef<string | null>(null);
+type ListState = { status: "loading" } | { status: "ready"; data: GetMyConversationsResult };
 
+type Props = {
+  /** Gates the entire persistent launcher/messaging center -- messaging
+   * is sign-in-only, and unlike the previous single-conversation panel
+   * (which never rendered anything for a guest simply because nothing
+   * guest-reachable could ever set an open conversation), the launcher
+   * below is now unconditionally visible while browsing, so it needs its
+   * own explicit guard the same way NotificationsProvider already
+   * receives isAuthenticated/userId from the root layout. */
+  isAuthenticated: boolean;
+};
+
+/**
+ * Desktop-only (`lg` and up) persistent messaging center, mounted once at
+ * the root layout alongside FloatingMessengerProvider. A marketplace-
+ * style (Shopee-like in concept, not in styling) two-column upgrade of
+ * the previous single-conversation floating panel:
+ *
+ * - Collapsed: a compact "Messages" launcher pill stays at the bottom-
+ *   right at all times while signed in and browsing, showing the same
+ *   authoritative unread-conversation count the header/mobile nav badges
+ *   already use (useUnreadMessageCount()) -- always accurate with no
+ *   extra local tracking, since that count already updates continuously
+ *   via NotificationsProvider's own Realtime subscription regardless of
+ *   whether this panel is open, collapsed, or which conversation (if
+ *   any) is selected.
+ * - Expanded: a left conversation list (reusing ConversationsListClient,
+ *   the exact same component/query the full `/messages` page uses, fed
+ *   by its own small Server Action below rather than a second inbox
+ *   implementation) and a right pane rendering ConversationThread for
+ *   whichever conversation is selected -- reusing the exact same
+ *   send/Realtime/mark-read logic the full-page route and the previous
+ *   panel both already used, so there is still exactly one messaging
+ *   implementation in this app.
+ *
+ * Both the list and the selected thread stay mounted continuously once
+ * loaded -- minimizing only hides the expanded chrome with CSS (`hidden`),
+ * it never unmounts either. That keeps the selected thread's Realtime
+ * subscription alive while collapsed (so it's current when reopened, and
+ * so it correctly never auto-marks a message read while collapsed --
+ * ConversationThread's own isMinimized prop, driven by !isOpen here,
+ * already handles that unchanged), and keeps the conversation list
+ * reacting to the same shared new_message notification signal it always
+ * has, regardless of whether the center is currently visible.
+ */
+export function FloatingChatPanel({ isAuthenticated }: Props) {
+  const { isOpen, selectedConversationId, openMessenger, minimize, close } = useFloatingMessenger();
+  const unreadMessageCount = useUnreadMessageCount();
+
+  const [threadState, setThreadState] = useState<ThreadState | null>(null);
+  const loadedThreadForRef = useRef<string | null>(null);
+
+  const [listState, setListState] = useState<ListState | null>(null);
+  const listLoadedRef = useRef(false);
+
+  // Right pane: (re)load whenever the selected conversation changes.
   useEffect(() => {
-    if (!openConversationId) {
-      // No setState here -- render already returns null the moment
-      // openConversationId is falsy (below), regardless of whatever
-      // `state` still holds, and the next open reliably overwrites it
-      // via the branch below. Only the ref (safe to mutate in an effect)
-      // needs resetting, so the next open's guard doesn't short-circuit.
-      loadedForRef.current = null;
+    if (!selectedConversationId) {
+      loadedThreadForRef.current = null;
       return;
     }
-    if (loadedForRef.current === openConversationId) return;
-    loadedForRef.current = openConversationId;
-    setState({ status: "loading" });
-    setHasUnreadWhileMinimized(false);
+    if (loadedThreadForRef.current === selectedConversationId) return;
+    loadedThreadForRef.current = selectedConversationId;
+    setThreadState({ status: "loading" });
 
     let cancelled = false;
-    void loadConversationForPanel(openConversationId).then((result) => {
+    void loadConversationForPanel(selectedConversationId).then((result) => {
       if (cancelled) return;
-      setState(result.status === "found" ? { status: "ready", data: result } : { status: result.status });
+      setThreadState(result.status === "found" ? { status: "ready", data: result } : { status: result.status });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [openConversationId]);
+  }, [selectedConversationId]);
 
-  /** Restoring always clears the pill's unread indicator -- called
-   * directly from the pill's own click handler (never a separate effect
-   * reacting to isMinimized) so this stays a plain event response rather
-   * than a setState-in-effect cascade. ConversationThread's own effects
-   * separately handle the actual read-state reconciliation with the
-   * server. */
-  function handleRestore() {
-    setHasUnreadWhileMinimized(false);
-    restore();
-  }
+  // Left pane: load the conversation list lazily, once, the first time
+  // the center is actually opened -- never on every page load, so a
+  // viewer who never opens the messenger never triggers this fetch.
+  useEffect(() => {
+    if (!isOpen || listLoadedRef.current) return;
+    listLoadedRef.current = true;
+    setListState({ status: "loading" });
+    void loadConversationsForMessagingCenter().then((result) => {
+      setListState({ status: "ready", data: result });
+    });
+  }, [isOpen]);
 
-  if (!openConversationId || !state) return null;
-
-  const panelName =
-    state.status === "ready"
-      ? (state.data.context.viewerRole === "seller" ? state.data.context.otherPartyDisplayName : state.data.context.shopName) ?? "Conversation"
-      : "Conversation";
+  if (!isAuthenticated) return null;
 
   return (
-    // bottom-6/right-6 (24px each) -- both the minimized pill and the
-    // expanded chrome below are children of this one positioned wrapper,
-    // so they always share the exact same offset; nothing to keep in
-    // sync separately when toggling minimize/restore.
-    <div className="fixed bottom-6 right-6 z-40 hidden w-[360px] max-w-[calc(100vw-3rem)] lg:block">
-      {/* Minimized pill -- the only visible element while isMinimized. */}
+    <div className="fixed bottom-6 right-6 z-40 hidden lg:block">
+      {/* Collapsed launcher -- always present for a signed-in viewer;
+          only ever hidden via CSS while the center is open, never
+          unmounted, so there is always a way back into messaging. */}
       <button
         type="button"
-        onClick={handleRestore}
-        aria-label={hasUnreadWhileMinimized ? `${panelName}, new message. Restore chat` : `Restore chat with ${panelName}`}
+        onClick={openMessenger}
+        aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
         className={cn(
-          // Fully rounded + a full border on every side, not just the
-          // top -- now that the panel floats clear of the bottom edge
-          // (bottom-6 above) rather than sitting flush against it, a
-          // missing bottom border/radius would look like a cut-off box.
-          "flex h-12 w-full items-center gap-2 rounded-[14px] border border-border bg-surface px-4 shadow-lg hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-          !isMinimized && "hidden",
+          "flex h-14 items-center gap-2 rounded-full border border-border bg-surface px-5 shadow-lg hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+          isOpen && "hidden",
         )}
       >
-        {hasUnreadWhileMinimized && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-action" aria-hidden="true" />}
-        <span className="truncate text-sm font-semibold text-ink">{panelName}</span>
+        <MessageCircle className="h-5 w-5 text-ink-secondary" aria-hidden="true" />
+        <span className="text-sm font-semibold text-ink">Messages</span>
+        {unreadMessageCount > 0 && (
+          <span
+            aria-hidden="true"
+            className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-action px-1.5 text-xs font-semibold leading-none text-brand-action-text"
+          >
+            {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+          </span>
+        )}
       </button>
 
-      {/* Expanded panel chrome -- hidden (not unmounted) while minimized;
-          see this component's own file-level comment for why
-          ConversationThread itself must keep running underneath either
-          way. */}
+      {/* Expanded messaging center -- hidden (not unmounted) while
+          collapsed; see this file's own top comment for why the
+          conversation list and the selected thread both keep running
+          underneath either way. Width: ~800px on large screens (within
+          the approved 720-850px target), capped against the viewport so
+          it never overflows a narrower desktop window. Height: 75% of
+          the viewport, capped at 600px so it doesn't become excessive on
+          very tall monitors. */}
       <div
         className={cn(
-          // Same "fully rounded + full border" reasoning as the pill above.
-          "flex max-h-[75vh] flex-col overflow-hidden rounded-[14px] border border-border bg-surface shadow-xl",
-          isMinimized && "hidden",
+          "flex h-[75vh] max-h-[600px] w-[800px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[14px] border border-border bg-surface shadow-xl",
+          !isOpen && "hidden",
         )}
       >
-        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-divider px-3">
-          <span className="min-w-0 truncate text-sm font-semibold text-ink">{panelName}</span>
+        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-divider px-4">
+          <span className="text-sm font-semibold text-ink">Messages</span>
           <div className="flex shrink-0 items-center gap-0.5">
             <Tooltip label="Minimize">
               <button
                 type="button"
                 onClick={minimize}
-                aria-label="Minimize chat"
+                aria-label="Minimize messaging center"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
                 <Minus className="h-4 w-4" aria-hidden="true" />
@@ -141,7 +167,7 @@ export function FloatingChatPanel() {
               <button
                 type="button"
                 onClick={close}
-                aria-label="Close chat"
+                aria-label="Close messaging center"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
@@ -150,52 +176,72 @@ export function FloatingChatPanel() {
           </div>
         </div>
 
-        {/* No overflow-y-auto here -- ConversationThread now owns its own
-            internal scroll region (see its own file comment), so this is
-            just the flex-column chain that gives it a real bounded
-            height to fill (h-full) inside this chrome's own
-            max-h-[75vh]. A second independently-scrolling ancestor here
-            would fight with ConversationThread's own scroll handling. */}
-        <div className="flex min-h-0 flex-1 flex-col">
-          {state.status === "loading" && <p className="p-4 text-sm text-ink-secondary">Loading conversation…</p>}
-
-          {state.status === "error" && (
-            <div className="p-4 text-center">
-              <p className="text-sm text-ink-secondary">Unable to load this conversation right now.</p>
-              <button type="button" onClick={close} className="mt-3 text-sm font-semibold text-brand-link">
-                Close
-              </button>
+        <div className="flex min-h-0 flex-1">
+          {/* Left column: conversation list, ~280px (within the approved
+              260-320px target). Reuses ConversationsListClient as-is --
+              its own row click already calls openConversation() on
+              desktop, its own new_message-driven refresh already keeps
+              it live, and its own empty/error states already cover both
+              cases, so there is nothing left for this panel to duplicate. */}
+          <div className="flex w-[280px] shrink-0 flex-col border-r border-divider">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {listState === null || listState.status === "loading" ? (
+                <p className="p-2 text-sm text-ink-secondary">Loading conversations…</p>
+              ) : (
+                <ConversationsListClient
+                  initialConversations={listState.data.conversations}
+                  initialHadError={listState.data.hadError}
+                  initialCursor={listState.data.nextCursor}
+                  loadMore={loadMoreConversationsForMessagingCenter}
+                  refreshFirstPage={loadConversationsForMessagingCenter}
+                  showingArchived={false}
+                />
+              )}
             </div>
-          )}
+          </div>
 
-          {state.status === "not_found" && (
-            <div className="p-4 text-center">
-              <p className="text-sm text-ink-secondary">This conversation is no longer available.</p>
-              <button type="button" onClick={close} className="mt-3 text-sm font-semibold text-brand-link">
-                Close
-              </button>
-            </div>
-          )}
+          {/* Right column: the selected thread, or an empty state when
+              nothing has been selected yet -- never auto-selecting a
+              conversation on its own. */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {!selectedConversationId && (
+              <div className="flex flex-1 items-center justify-center p-6 text-center">
+                <p className="text-sm text-ink-secondary">Select a conversation</p>
+              </div>
+            )}
 
-          {state.status === "ready" && (
-            <div className="flex min-h-0 flex-1 flex-col px-3">
-              <ConversationThread
-                key={state.data.context.conversationId}
-                context={state.data.context}
-                initialMessages={state.data.initialMessages}
-                initialCursor={state.data.initialCursor}
-                loadEarlier={loadEarlierMessagesForPanel}
-                otherPartyId={state.data.otherPartyId}
-                initialIsBlocked={state.data.initialIsBlocked}
-                hideBackLink
-                hideIdentityHeader
-                isMinimized={isMinimized}
-                onIncomingMessage={() => {
-                  if (isMinimized) setHasUnreadWhileMinimized(true);
-                }}
-              />
-            </div>
-          )}
+            {selectedConversationId && threadState?.status === "loading" && (
+              <p className="p-4 text-sm text-ink-secondary">Loading conversation…</p>
+            )}
+
+            {selectedConversationId && threadState?.status === "error" && (
+              <div className="flex flex-1 items-center justify-center p-6 text-center">
+                <p className="text-sm text-ink-secondary">Unable to load this conversation right now.</p>
+              </div>
+            )}
+
+            {selectedConversationId && threadState?.status === "not_found" && (
+              <div className="flex flex-1 items-center justify-center p-6 text-center">
+                <p className="text-sm text-ink-secondary">This conversation is no longer available.</p>
+              </div>
+            )}
+
+            {selectedConversationId && threadState?.status === "ready" && (
+              <div className="flex min-h-0 flex-1 flex-col px-3">
+                <ConversationThread
+                  key={threadState.data.context.conversationId}
+                  context={threadState.data.context}
+                  initialMessages={threadState.data.initialMessages}
+                  initialCursor={threadState.data.initialCursor}
+                  loadEarlier={loadEarlierMessagesForPanel}
+                  otherPartyId={threadState.data.otherPartyId}
+                  initialIsBlocked={threadState.data.initialIsBlocked}
+                  hideBackLink
+                  isMinimized={!isOpen}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

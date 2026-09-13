@@ -3,11 +3,14 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { FloatingMessengerProvider, useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 
 function Probe() {
-  const { openConversationId, isMinimized, openConversation, minimize, restore, close } = useFloatingMessenger();
+  const { isOpen, selectedConversationId, openMessenger, openConversation, minimize, close } = useFloatingMessenger();
   return (
     <div>
-      <p data-testid="open-id">{openConversationId ?? "none"}</p>
-      <p data-testid="is-minimized">{String(isMinimized)}</p>
+      <p data-testid="is-open">{String(isOpen)}</p>
+      <p data-testid="selected-id">{selectedConversationId ?? "none"}</p>
+      <button type="button" onClick={openMessenger}>
+        Open messenger
+      </button>
       <button type="button" onClick={() => openConversation("conv-1")}>
         Open conv-1
       </button>
@@ -17,9 +20,6 @@ function Probe() {
       <button type="button" onClick={minimize}>
         Minimize
       </button>
-      <button type="button" onClick={restore}>
-        Restore
-      </button>
       <button type="button" onClick={close}>
         Close
       </button>
@@ -28,41 +28,55 @@ function Probe() {
 }
 
 describe("FloatingMessengerProvider", () => {
-  it("starts with no conversation open and not minimized", () => {
+  it("starts collapsed with no conversation selected", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
       </FloatingMessengerProvider>,
     );
-    expect(screen.getByTestId("open-id")).toHaveTextContent("none");
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("false");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("false");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("none");
   });
 
-  it("openConversation sets the open conversation id and (re)expands it", () => {
+  it("openMessenger opens the center without selecting any conversation", () => {
+    render(
+      <FloatingMessengerProvider>
+        <Probe />
+      </FloatingMessengerProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open messenger" }));
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("none");
+  });
+
+  it("openConversation selects the conversation and opens the center", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
       </FloatingMessengerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("false");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
   });
 
-  it("opening a second conversation replaces the first -- exactly one open at a time", () => {
+  it("selecting a second conversation swaps the right-pane selection -- it never opens a second window", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
       </FloatingMessengerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
 
     fireEvent.click(screen.getByRole("button", { name: "Open conv-2" }));
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-2");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-2");
+    // Still exactly one isOpen flag, one selectedConversationId -- no
+    // second panel/window concept exists in this state at all.
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
   });
 
-  it("minimize sets isMinimized without clearing the open conversation id", () => {
+  it("minimize collapses the center without clearing the selected conversation", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
@@ -70,11 +84,11 @@ describe("FloatingMessengerProvider", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
     fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("true");
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("false");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
   });
 
-  it("restore clears isMinimized without touching the open conversation id", () => {
+  it("reopening after minimize resumes on the same selected conversation", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
@@ -82,34 +96,26 @@ describe("FloatingMessengerProvider", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
     fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
-    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("false");
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
+    fireEvent.click(screen.getByRole("button", { name: "Open messenger" }));
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
   });
 
-  it("opening the same conversation again while minimized re-expands it", () => {
+  it("close collapses the center exactly like minimize -- desktop MVP's close is non-destructive, it never clears the selection or removes messenger access", () => {
     render(
       <FloatingMessengerProvider>
         <Probe />
       </FloatingMessengerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("false");
-  });
-
-  it("close clears both the open conversation id and isMinimized", () => {
-    render(
-      <FloatingMessengerProvider>
-        <Probe />
-      </FloatingMessengerProvider>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.getByTestId("open-id")).toHaveTextContent("none");
-    expect(screen.getByTestId("is-minimized")).toHaveTextContent("false");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("false");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
+
+    // The launcher (openMessenger) still works after close -- access was
+    // collapsed, never destroyed.
+    fireEvent.click(screen.getByRole("button", { name: "Open messenger" }));
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
   });
 
   it("state survives a swap of children -- the same Provider instance backs whatever page is currently rendered underneath it, matching a root-level mount surviving route navigation", () => {
@@ -127,7 +133,7 @@ describe("FloatingMessengerProvider", () => {
       </FloatingMessengerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
 
     // Simulates a Next.js route change: the layout (and this Provider)
     // never unmounts, only its children swap.
@@ -139,14 +145,15 @@ describe("FloatingMessengerProvider", () => {
     );
 
     expect(screen.getByText("Page two content")).toBeInTheDocument();
-    expect(screen.getByTestId("open-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
   });
 
   it("useFloatingMessenger has a safe no-op default when there is no Provider ancestor", () => {
     render(<Probe />);
-    expect(screen.getByTestId("open-id")).toHaveTextContent("none");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("none");
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
     // No Provider means openConversation is a no-op -- never throws.
-    expect(screen.getByTestId("open-id")).toHaveTextContent("none");
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("none");
   });
 });

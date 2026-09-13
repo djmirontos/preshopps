@@ -39,7 +39,7 @@ describe("Mobile conversation layout -- root layout wiring", () => {
   it("still renders FloatingMessengerProvider and FloatingChatPanel -- the desktop floating messenger is untouched by this fix", () => {
     const source = readFile("app/layout.tsx");
     expect(source).toMatch(/<FloatingMessengerProvider>/);
-    expect(source).toMatch(/<FloatingChatPanel\s*\/>/);
+    expect(source).toMatch(/<FloatingChatPanel\b/);
   });
 });
 
@@ -90,11 +90,11 @@ describe("Mobile conversation layout -- desktop (lg+) is provably unchanged", ()
     expect(source).toMatch(/scrollMessagesToBottom/);
   });
 
-  it("FloatingChatPanel and FloatingMessengerProvider source is untouched by this task", () => {
+  it("FloatingChatPanel's own desktop bottom-right positioning is unaffected by this (mobile-only) layout fix -- its internal state shape has since legitimately evolved in a later, separately-approved messaging-center task, but the fixed bottom-6/right-6 anchor from this task's own era is unchanged", () => {
     const panelSource = readFile("components/messaging/FloatingChatPanel.tsx");
     expect(panelSource).toMatch(/fixed bottom-6 right-6/);
     const providerSource = readFile("components/messaging/FloatingMessengerProvider.tsx");
-    expect(providerSource).toMatch(/openConversationId/);
+    expect(providerSource).toMatch(/selectedConversationId/);
   });
 });
 

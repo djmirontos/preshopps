@@ -16,11 +16,11 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/components/messaging/FloatingMessengerProvider", () => ({
   useFloatingMessenger: () => ({
-    openConversationId: null,
-    isMinimized: false,
+    isOpen: false,
+    selectedConversationId: null,
+    openMessenger: vi.fn(),
     openConversation: openConversationMock,
     minimize: vi.fn(),
-    restore: vi.fn(),
     close: vi.fn(),
   }),
 }));

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import { useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
+import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
+import { isDesktopViewport } from "@/lib/ui/viewport";
 import { Tooltip } from "@/components/ui/Tooltip";
 
 /**
@@ -13,9 +15,28 @@ import { Tooltip } from "@/components/ui/Tooltip";
  * Provider's own Realtime subscription and conversation-read
  * recalculation), never a prop and never fetched here. Desktop-header
  * counterpart to MobileBottomNav's own Messages tab badge.
+ *
+ * Desktop (`lg` and up): opens the persistent messaging center in place
+ * (openMessenger(), preserving whatever conversation was already
+ * selected) instead of navigating to the full-page /messages route --
+ * checked at click time only (an interactive event, never render), so
+ * there's no SSR/hydration risk, matching ConversationsListClient's own
+ * click-interception pattern exactly. A modified click (new-tab/new-
+ * window/download conventions) or anything other than a plain left click
+ * always falls through to the normal <Link> navigation. Below `lg`, this
+ * is a no-op and the existing /messages full-page navigation proceeds
+ * completely unchanged.
  */
 export function MessagesIconLink() {
   const unreadMessageCount = useUnreadMessageCount();
+  const { openMessenger } = useFloatingMessenger();
+
+  function handleClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!isDesktopViewport()) return;
+    event.preventDefault();
+    openMessenger();
+  }
 
   return (
     // Desktop-header-only icon (rendered only in AppHeader's lg:flex nav,
@@ -24,6 +45,7 @@ export function MessagesIconLink() {
     <Tooltip label="Messages" side="bottom">
       <Link
         href="/messages"
+        onClick={handleClick}
         aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
         className="relative inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-secondary transition-colors duration-150 hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       >
