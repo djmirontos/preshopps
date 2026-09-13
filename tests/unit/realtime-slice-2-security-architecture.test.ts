@@ -81,8 +81,8 @@ describe("Realtime Slice 2 -- public.conversations was not added to the Realtime
 });
 
 describe("Realtime Slice 2 -- no backend/migration change was made in this slice", () => {
-  it("no migration newer than 0089 exists -- Slice 2 itself added none; 0088 belongs to the later, separately-audited Slice 3 correction, and 0089 to the later, separately-approved Buy Now task (see their own architecture test files)", () => {
-    const latestAllowed = "0089_buy_now_order_submission.sql";
+  it("no migration newer than 0090 exists -- Slice 2 itself added none; 0088/0089/0090 all belong to later, separately-approved tasks (see their own architecture test files)", () => {
+    const latestAllowed = "0090_fix_update_listing_listing_id_ambiguity.sql";
     const files = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql") && f > latestAllowed);
     expect(files).toEqual([]);
   });

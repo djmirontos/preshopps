@@ -32,11 +32,11 @@ const FLOATING_MESSENGER_FILES = [
 ];
 
 describe("Floating Messenger slice -- no backend/migration/RLS change was made", () => {
-  it("no migration newer than 0089 exists -- this slice itself is frontend-only (0089 is a later, separately-approved Buy Now task's migration, unrelated to this slice's own scope)", () => {
+  it("no migration newer than 0090 exists -- this slice itself is frontend-only (0089/0090 are later, separately-approved migrations unrelated to this slice's own scope)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
-    const newerThan0089 = migrationFiles.filter((f) => f > "0089_buy_now_order_submission.sql");
-    expect(newerThan0089).toEqual([]);
+    const newerThan0090 = migrationFiles.filter((f) => f > "0090_fix_update_listing_listing_id_ambiguity.sql");
+    expect(newerThan0090).toEqual([]);
   });
 
   it("no slice file contains RLS/policy/grant DDL", () => {
