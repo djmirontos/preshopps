@@ -117,6 +117,129 @@ export function getSellerOrderStatusGuidance(status: OrderStatus, fulfillmentMet
   }
 }
 
+/**
+ * Seller-facing button label for the accepted -> ready transition
+ * (mark_order_ready) -- fulfillment-specific wording is a locked product
+ * decision covering all four fulfillment methods; this never changes
+ * order_status_enum itself, which still has exactly one "ready" value
+ * regardless of fulfillment method.
+ */
+export function getSellerMarkReadyActionLabel(fulfillmentMethod: FulfillmentMethod): string {
+  switch (fulfillmentMethod) {
+    case "pickup":
+      return "Ready for Pickup";
+    case "shipping":
+      return "Ready to Ship";
+    case "meetup":
+      return "Ready for Meetup";
+    case "local_delivery":
+      return "Ready for Delivery";
+  }
+}
+
+/**
+ * Seller-facing button label for the ready -> handed_over_or_shipped
+ * transition (mark_order_handed_over_or_shipped) -- same locked wording
+ * decision as getSellerMarkReadyActionLabel above. Still exactly one
+ * handed_over_or_shipped enum value underneath regardless of which label
+ * is shown.
+ */
+export function getSellerMarkHandedOverActionLabel(fulfillmentMethod: FulfillmentMethod): string {
+  switch (fulfillmentMethod) {
+    case "pickup":
+      return "Mark as Picked Up";
+    case "shipping":
+      return "Mark as Shipped";
+    case "meetup":
+      return "Item Handed Over";
+    case "local_delivery":
+      return "Mark as Delivered";
+  }
+}
+
+export type SellerFulfillmentTransitionModalCopy = {
+  title: string;
+  body: string;
+  primaryLabel: string;
+};
+
+/**
+ * Copy for the informational/confirmation modal shown before
+ * mark_order_ready is ever called (P1 fulfillment-transition-modal task) --
+ * locked product wording per fulfillment method. Note the primary label is
+ * NOT always identical to getSellerMarkReadyActionLabel's own outer-button
+ * text above (pickup's modal primary is "Mark Ready for Pickup", distinct
+ * from the outer "Ready for Pickup" button that opened it); the other three
+ * methods happen to reuse their outer label verbatim as the modal's primary
+ * label too. Both are intentional, locked wording -- not a typo.
+ */
+export function getSellerReadyTransitionModalCopy(fulfillmentMethod: FulfillmentMethod): SellerFulfillmentTransitionModalCopy {
+  switch (fulfillmentMethod) {
+    case "pickup":
+      return {
+        title: "Is the item ready for pickup?",
+        body: "Let your buyer know the item is ready and coordinate the pickup through Preshopps chat.",
+        primaryLabel: "Mark Ready for Pickup",
+      };
+    case "shipping":
+      return {
+        title: "Is the item ready to ship?",
+        body: "Make sure the item is packed and coordinate shipping details with your buyer before continuing.",
+        primaryLabel: "Ready to Ship",
+      };
+    case "meetup":
+      return {
+        title: "Ready to meet your buyer?",
+        body: "Coordinate the meetup time and location with your buyer before handing over the item.",
+        primaryLabel: "Ready for Meetup",
+      };
+    case "local_delivery":
+      return {
+        title: "Ready to deliver the item?",
+        body: "Coordinate the delivery details with your buyer before starting the delivery.",
+        primaryLabel: "Ready for Delivery",
+      };
+  }
+}
+
+/**
+ * Copy for the informational/confirmation modal shown before
+ * mark_order_handed_over_or_shipped is ever called -- same locked-wording
+ * decision as getSellerReadyTransitionModalCopy above. Every method's
+ * primary label here is deliberately distinct from
+ * getSellerMarkHandedOverActionLabel's own outer-button text (e.g. outer
+ * "Mark as Picked Up" vs modal primary "Confirm Picked Up") -- the modal is
+ * always the final, explicit "yes, this really happened" confirmation.
+ */
+export function getSellerHandedOverTransitionModalCopy(fulfillmentMethod: FulfillmentMethod): SellerFulfillmentTransitionModalCopy {
+  switch (fulfillmentMethod) {
+    case "pickup":
+      return {
+        title: "Has the buyer collected the item?",
+        body: "Only confirm this after the item has actually been handed to the buyer.",
+        primaryLabel: "Confirm Picked Up",
+      };
+    case "shipping":
+      return {
+        title: "Has the item been shipped?",
+        body: "Confirm only after the parcel has actually been handed to the courier or shipping provider.",
+        primaryLabel: "Confirm Shipped",
+      };
+    case "meetup":
+      return {
+        title: "Was the item handed over?",
+        body: "Confirm only after the buyer has received the item in person.",
+        primaryLabel: "Confirm Handover",
+      };
+    case "local_delivery":
+      return {
+        title: "Has the item been delivered?",
+        body: "Confirm only after the buyer has actually received the item.",
+        primaryLabel: "Confirm Delivered",
+      };
+  }
+}
+
 /** Used only to pick a Badge tone -- guidance/label text is always present
  * too, so status is never communicated by color alone. */
 export function isPositiveOrderStatus(status: OrderStatus): boolean {

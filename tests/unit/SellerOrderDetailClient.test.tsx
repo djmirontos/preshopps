@@ -2,18 +2,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import type { SellerOrderDetail } from "@/lib/seller/get-my-shop-order-detail";
 
-const { refreshMock, acceptOrderItemsMock, markOrderReadyMock, markOrderHandedOverOrShippedMock, cancelAcceptedOrderMock, resolveOrderCancellationMock } =
-  vi.hoisted(() => ({
-    refreshMock: vi.fn(),
-    acceptOrderItemsMock: vi.fn(),
-    markOrderReadyMock: vi.fn(),
-    markOrderHandedOverOrShippedMock: vi.fn(),
-    cancelAcceptedOrderMock: vi.fn(),
-    resolveOrderCancellationMock: vi.fn(),
-  }));
+const {
+  refreshMock,
+  pushMock,
+  acceptOrderItemsMock,
+  markOrderReadyMock,
+  markOrderHandedOverOrShippedMock,
+  cancelAcceptedOrderMock,
+  resolveOrderCancellationMock,
+} = vi.hoisted(() => ({
+  refreshMock: vi.fn(),
+  pushMock: vi.fn(),
+  acceptOrderItemsMock: vi.fn(),
+  markOrderReadyMock: vi.fn(),
+  markOrderHandedOverOrShippedMock: vi.fn(),
+  cancelAcceptedOrderMock: vi.fn(),
+  resolveOrderCancellationMock: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: refreshMock }),
+  useRouter: () => ({ refresh: refreshMock, push: pushMock }),
 }));
 
 vi.mock("@/lib/seller/seller-order-actions", async () => {
@@ -120,24 +128,31 @@ describe("SellerOrderDetailClient -- pending order item acceptance", () => {
 });
 
 describe("SellerOrderDetailClient -- accepted/ready lifecycle", () => {
-  it("shows Mark ready and Cancel order for an accepted order with no pending cancellation request", () => {
+  it("shows the fulfillment-specific ready-stage label (default sample order is meetup) and Cancel order for an accepted order with no pending cancellation request", () => {
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "accepted", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
-    expect(screen.getByRole("button", { name: "Mark ready" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ready for Meetup" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel order" })).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("calls mark_order_ready with only the order id and refreshes on success", async () => {
+  it("opens the informational modal first, and only calls mark_order_ready (with only the order id) once the seller explicitly confirms inside it", async () => {
     markOrderReadyMock.mockResolvedValue({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "accepted", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Ready to meet your buyer?");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+
     await waitFor(() => expect(markOrderReadyMock).toHaveBeenCalledWith("order-1"));
     expect(refreshMock).toHaveBeenCalled();
   });
 
-  it("shows Mark shipped (not Mark handed over) for a ready order with shipping fulfillment", () => {
+  it("shows Mark as Shipped (not Item Handed Over or Mark as Picked Up) for a ready order with shipping fulfillment", () => {
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "ready", fulfillmentMethod: "shipping", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
-    expect(screen.getByRole("button", { name: "Mark shipped" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark as Shipped" })).toBeInTheDocument();
   });
 
   it("requires a reason before allowing seller cancellation to be confirmed", async () => {
@@ -167,7 +182,7 @@ describe("SellerOrderDetailClient -- accepted/ready lifecycle", () => {
         })}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Mark ready" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ready for Meetup" })).not.toBeInTheDocument();
     expect(screen.getByText(/changed my mind/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve cancellation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject request" })).toBeInTheDocument();
@@ -202,6 +217,409 @@ describe("SellerOrderDetailClient -- accepted/ready lifecycle", () => {
   it("hides every lifecycle action for a status with no seller action (handed_over_or_shipped)", () => {
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "handed_over_or_shipped", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+});
+
+describe("SellerOrderDetailClient -- fulfillment-specific action wording (locked product decision, status/RPC unchanged underneath)", () => {
+  function acceptedOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery") {
+    return sampleOrder({ status: "accepted", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  function readyOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery") {
+    return sampleOrder({ status: "ready", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  it("1. Pickup gets 'Ready for Pickup' at the accepted stage", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
+    expect(screen.getByRole("button", { name: "Ready for Pickup" })).toBeInTheDocument();
+  });
+
+  it("2. Pickup gets 'Mark as Picked Up' at the ready stage", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+    expect(screen.getByRole("button", { name: "Mark as Picked Up" })).toBeInTheDocument();
+  });
+
+  it("3. Shipping gets 'Ready to Ship' at the accepted stage", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("shipping")} />);
+    expect(screen.getByRole("button", { name: "Ready to Ship" })).toBeInTheDocument();
+  });
+
+  it("4. Shipping gets 'Mark as Shipped' at the ready stage", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+    expect(screen.getByRole("button", { name: "Mark as Shipped" })).toBeInTheDocument();
+  });
+
+  it("5. Meetup gets 'Ready for Meetup' at the accepted stage", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("meetup")} />);
+    expect(screen.getByRole("button", { name: "Ready for Meetup" })).toBeInTheDocument();
+  });
+
+  it("6. Meetup gets 'Item Handed Over' at the ready stage", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("meetup")} />);
+    expect(screen.getByRole("button", { name: "Item Handed Over" })).toBeInTheDocument();
+  });
+
+  it("Local delivery gets 'Ready for Delivery' at the accepted stage", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("local_delivery")} />);
+    expect(screen.getByRole("button", { name: "Ready for Delivery" })).toBeInTheDocument();
+  });
+
+  it("Local delivery gets 'Mark as Delivered' at the ready stage", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("local_delivery")} />);
+    expect(screen.getByRole("button", { name: "Mark as Delivered" })).toBeInTheDocument();
+  });
+
+  const OUTER_READY_LABEL = { pickup: "Ready for Pickup", shipping: "Ready to Ship", meetup: "Ready for Meetup", local_delivery: "Ready for Delivery" } as const;
+  const MODAL_READY_PRIMARY_LABEL = {
+    pickup: "Mark Ready for Pickup",
+    shipping: "Ready to Ship",
+    meetup: "Ready for Meetup",
+    local_delivery: "Ready for Delivery",
+  } as const;
+  const OUTER_HANDED_OVER_LABEL = {
+    pickup: "Mark as Picked Up",
+    shipping: "Mark as Shipped",
+    meetup: "Item Handed Over",
+    local_delivery: "Mark as Delivered",
+  } as const;
+  const MODAL_HANDED_OVER_PRIMARY_LABEL = {
+    pickup: "Confirm Picked Up",
+    shipping: "Confirm Shipped",
+    meetup: "Confirm Handover",
+    local_delivery: "Confirm Delivered",
+  } as const;
+
+  it("7. the underlying mark_order_ready RPC call is identical (order id only) regardless of which fulfillment-specific label triggered it, and only fires after the modal's own primary confirm", async () => {
+    for (const fulfillmentMethod of ["pickup", "shipping", "meetup", "local_delivery"] as const) {
+      markOrderReadyMock.mockClear();
+      markOrderReadyMock.mockResolvedValue({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
+      const { unmount } = render(<SellerOrderDetailClient initialOrder={acceptedOrder(fulfillmentMethod)} />);
+
+      fireEvent.click(screen.getByRole("button", { name: OUTER_READY_LABEL[fulfillmentMethod] }));
+      expect(markOrderReadyMock).not.toHaveBeenCalled();
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: MODAL_READY_PRIMARY_LABEL[fulfillmentMethod] }));
+
+      await waitFor(() => expect(markOrderReadyMock).toHaveBeenCalledWith("order-1"));
+      expect(markOrderReadyMock).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it("7. the underlying mark_order_handed_over_or_shipped RPC call is identical (order id only) regardless of which fulfillment-specific label triggered it, and only fires after the modal's own primary confirm", async () => {
+    for (const fulfillmentMethod of ["pickup", "shipping", "meetup", "local_delivery"] as const) {
+      markOrderHandedOverOrShippedMock.mockClear();
+      markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+      const { unmount } = render(<SellerOrderDetailClient initialOrder={readyOrder(fulfillmentMethod)} />);
+
+      fireEvent.click(screen.getByRole("button", { name: OUTER_HANDED_OVER_LABEL[fulfillmentMethod] }));
+      expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: MODAL_HANDED_OVER_PRIMARY_LABEL[fulfillmentMethod] }));
+
+      await waitFor(() => expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledWith("order-1"));
+      expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it("8. button sizing classes remain the robust min-height strategy regardless of which fulfillment-specific label is shown", () => {
+    for (const fulfillmentMethod of ["pickup", "shipping", "meetup", "local_delivery"] as const) {
+      const { unmount } = render(<SellerOrderDetailClient initialOrder={acceptedOrder(fulfillmentMethod)} />);
+      expectRobustActionButtonSizing(
+        screen.getByRole("button", {
+          name: { pickup: "Ready for Pickup", shipping: "Ready to Ship", meetup: "Ready for Meetup", local_delivery: "Ready for Delivery" }[
+            fulfillmentMethod
+          ],
+        }),
+      );
+      unmount();
+    }
+  });
+
+  it("10. other seller actions (Accept order, Decline order, Cancel order) keep their exact existing labels regardless of fulfillment method", () => {
+    render(<SellerOrderDetailClient initialOrder={sampleOrder({ fulfillmentMethod: "pickup" })} />);
+    expect(screen.getByRole("button", { name: "Accept order" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Decline order" })).toBeInTheDocument();
+
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("shipping")} />);
+    expect(screen.getByRole("button", { name: "Cancel order" })).toBeInTheDocument();
+  });
+});
+
+describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruction modals", () => {
+  function acceptedOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery") {
+    return sampleOrder({ status: "accepted", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  function readyOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery") {
+    return sampleOrder({ status: "ready", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  // ===== 1-3: Pickup, ready stage =====
+  it("1. Ready for Pickup opens the informational modal first, with the locked title/body and both actions, before any RPC call", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Pickup" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Is the item ready for pickup?");
+    expect(dialog).toHaveTextContent("Let your buyer know the item is ready and coordinate the pickup through Preshopps chat.");
+    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Mark Ready for Pickup" })).toBeInTheDocument();
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+  });
+
+  it("2. Mark Ready for Pickup calls mark_order_ready only after this explicit confirmation, then refreshes", async () => {
+    markOrderReadyMock.mockResolvedValue({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Pickup" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Ready for Pickup" }));
+
+    await waitFor(() => expect(markOrderReadyMock).toHaveBeenCalledWith("order-1"));
+    expect(markOrderReadyMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    // The modal closes on success -- back to the plain order-detail screen.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("3. Open Messages from the pickup readiness modal never calls the status RPC", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Pickup" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open Messages" }));
+
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+  });
+
+  // ===== 4-6: Pickup, handed-over stage =====
+  it("4. Mark as Picked Up opens the locked confirmation modal, with 'Not Yet' and 'Confirm Picked Up', before any RPC call", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Picked Up" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Has the buyer collected the item?");
+    expect(dialog).toHaveTextContent("Only confirm this after the item has actually been handed to the buyer.");
+    expect(within(dialog).getByRole("button", { name: "Not Yet" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirm Picked Up" })).toBeInTheDocument();
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+  });
+
+  it("5. Not Yet closes the modal without ever calling the status RPC", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Picked Up" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Not Yet" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+    // The order is visibly unchanged -- the trigger button is still there.
+    expect(screen.getByRole("button", { name: "Mark as Picked Up" })).toBeInTheDocument();
+  });
+
+  it("6. Confirm Picked Up calls the existing mark_order_handed_over_or_shipped RPC", async () => {
+    markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+    render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Picked Up" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm Picked Up" }));
+
+    await waitFor(() => expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledWith("order-1"));
+  });
+
+  // ===== 7-8: Shipping =====
+  it("7. Ready to Ship modal shows the locked copy and both actions", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("shipping")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready to Ship" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Is the item ready to ship?");
+    expect(dialog).toHaveTextContent("Make sure the item is packed and coordinate shipping details with your buyer before continuing.");
+    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Ready to Ship" })).toBeInTheDocument();
+  });
+
+  it("8. Confirm Shipped calls the existing RPC only after confirmation", async () => {
+    markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+    render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Shipped" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Has the item been shipped?");
+    expect(dialog).toHaveTextContent("Confirm only after the parcel has actually been handed to the courier or shipping provider.");
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Shipped" }));
+
+    await waitFor(() => expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledWith("order-1"));
+  });
+
+  // ===== 9-10: Meetup =====
+  it("9. Ready for Meetup modal shows the locked copy and both actions", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("meetup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Ready to meet your buyer?");
+    expect(dialog).toHaveTextContent("Coordinate the meetup time and location with your buyer before handing over the item.");
+    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Ready for Meetup" })).toBeInTheDocument();
+  });
+
+  it("10. Confirm Handover calls the existing RPC only after confirmation", async () => {
+    markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+    render(<SellerOrderDetailClient initialOrder={readyOrder("meetup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Item Handed Over" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Was the item handed over?");
+    expect(dialog).toHaveTextContent("Confirm only after the buyer has received the item in person.");
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Handover" }));
+
+    await waitFor(() => expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledWith("order-1"));
+  });
+
+  // ===== 11-12: Local delivery =====
+  it("11. Ready for Delivery modal shows the locked copy and both actions", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("local_delivery")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Delivery" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Ready to deliver the item?");
+    expect(dialog).toHaveTextContent("Coordinate the delivery details with your buyer before starting the delivery.");
+    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Ready for Delivery" })).toBeInTheDocument();
+  });
+
+  it("12. Confirm Delivered calls the existing RPC only after confirmation", async () => {
+    markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+    render(<SellerOrderDetailClient initialOrder={readyOrder("local_delivery")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Delivered" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Has the item been delivered?");
+    expect(dialog).toHaveTextContent("Confirm only after the buyer has actually received the item.");
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Delivered" }));
+
+    await waitFor(() => expect(markOrderHandedOverOrShippedMock).toHaveBeenCalledWith("order-1"));
+  });
+
+  // ===== 13: dismissal never changes status =====
+  it("13. closing the modal via the X button never calls any status RPC", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("meetup")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+  });
+
+  it("13. closing the modal via Escape never calls any status RPC", () => {
+    render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Shipped" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+  });
+
+  it("13. closing the modal via the backdrop never calls any status RPC", () => {
+    const { container } = render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Pickup" }));
+
+    const backdrop = container.querySelector('[aria-hidden="true"].bg-ink\\/40');
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop as Element);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+  });
+
+  // ===== 14: no double-fire =====
+  it("14. the primary confirm button is disabled while the RPC is pending, so a second click cannot double-fire it", async () => {
+    let resolveRpc: (value: { ok: true; orderStatus: "ready"; wasAlreadyReady: boolean }) => void = () => {};
+    markOrderReadyMock.mockReturnValue(new Promise((resolve) => (resolveRpc = resolve)));
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("meetup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+    const dialog = screen.getByRole("dialog");
+    const primaryButton = within(dialog).getByRole("button", { name: "Ready for Meetup" });
+    fireEvent.click(primaryButton);
+
+    const pendingButton = await within(dialog).findByRole("button", { name: "Updating…" });
+    expect(pendingButton).toBeDisabled();
+    fireEvent.click(pendingButton);
+    expect(markOrderReadyMock).toHaveBeenCalledTimes(1);
+
+    resolveRpc({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("14. the secondary action (Open Messages / Not Yet) is also disabled while the RPC is pending", async () => {
+    let resolveRpc: (value: { ok: true; orderStatus: "handed_over_or_shipped"; wasAlreadyHandedOverOrShipped: boolean }) => void = () => {};
+    markOrderHandedOverOrShippedMock.mockReturnValue(new Promise((resolve) => (resolveRpc = resolve)));
+    render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Picked Up" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Picked Up" }));
+
+    expect(within(dialog).getByRole("button", { name: "Not Yet" })).toBeDisabled();
+
+    resolveRpc({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  // ===== 15: RPC failure does not falsely advance status =====
+  it("15. a failed mark_order_ready call keeps the modal open, shows the error, and never advances the visible status", async () => {
+    markOrderReadyMock.mockResolvedValue({ ok: false, code: "CANCELLATION_REQUEST_PENDING" });
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("meetup")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+
+    await waitFor(() => expect(within(dialog).getByText(/resolve the buyer's pending cancellation request/i)).toBeInTheDocument());
+    // The modal stayed open (never called closeDialog on failure) --
+    // status was never optimistically advanced.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("15. a failed mark_order_handed_over_or_shipped call keeps the modal open and shows the error", async () => {
+    markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: false, code: "CANCELLATION_REQUEST_PENDING" });
+    render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as Shipped" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Shipped" }));
+
+    await waitFor(() => expect(within(dialog).getByText(/resolve the buyer's pending cancellation request/i)).toBeInTheDocument());
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  // ===== 16: Open Messages reuses existing messaging flow =====
+  it("16. Open Messages navigates to the existing Messages inbox and never calls a status RPC or any new messaging RPC", () => {
+    render(<SellerOrderDetailClient initialOrder={acceptedOrder("shipping")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready to Ship" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open Messages" }));
+
+    expect(pushMock).toHaveBeenCalledWith("/messages");
+    expect(markOrderReadyMock).not.toHaveBeenCalled();
+    expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 
@@ -250,20 +668,20 @@ describe("SellerOrderDetailClient -- mobile tap-target consistency across every 
     }
   });
 
-  it("Mark ready and Cancel order use the robust min-height sizing strategy", () => {
+  it("the ready-stage action (default sample order is meetup: Ready for Meetup) and Cancel order use the robust min-height sizing strategy", () => {
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "accepted", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
-    for (const name of ["Mark ready", "Cancel order"]) {
+    for (const name of ["Ready for Meetup", "Cancel order"]) {
       expectRobustActionButtonSizing(screen.getByRole("button", { name }));
     }
   });
 
-  it("Mark shipped/handed over uses the robust min-height sizing strategy", () => {
+  it("the handed-over-stage action (Mark as Shipped for shipping fulfillment) uses the robust min-height sizing strategy", () => {
     render(
       <SellerOrderDetailClient
         initialOrder={sampleOrder({ status: "ready", fulfillmentMethod: "shipping", items: [{ ...sampleOrder().items[0], status: "accepted" }] })}
       />,
     );
-    expectRobustActionButtonSizing(screen.getByRole("button", { name: "Mark shipped" }));
+    expectRobustActionButtonSizing(screen.getByRole("button", { name: "Mark as Shipped" }));
   });
 
   it("Approve cancellation and Reject request match every other seller order action button's robust min-height sizing strategy -- previously a thinner h-10 outlier, then a still-collapsing plain h-12", () => {

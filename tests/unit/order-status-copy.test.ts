@@ -3,6 +3,10 @@ import {
   getOrderStatusLabel,
   getOrderStatusGuidance,
   getSellerOrderStatusGuidance,
+  getSellerMarkReadyActionLabel,
+  getSellerMarkHandedOverActionLabel,
+  getSellerReadyTransitionModalCopy,
+  getSellerHandedOverTransitionModalCopy,
   getAllowedSellerActions,
   getAllowedBuyerActions,
   isPositiveOrderStatus,
@@ -76,6 +80,74 @@ describe("order-status-copy", () => {
     expect(isPositiveOrderStatus("handed_over_or_shipped")).toBe(true);
     expect(isPositiveOrderStatus("received_confirmed")).toBe(true);
     expect(isPositiveOrderStatus("completed")).toBe(true);
+  });
+
+  describe("getSellerMarkReadyActionLabel -- locked fulfillment-specific wording for the accepted -> ready button", () => {
+    it("returns the exact locked label for each of the four fulfillment methods", () => {
+      expect(getSellerMarkReadyActionLabel("pickup")).toBe("Ready for Pickup");
+      expect(getSellerMarkReadyActionLabel("shipping")).toBe("Ready to Ship");
+      expect(getSellerMarkReadyActionLabel("meetup")).toBe("Ready for Meetup");
+      expect(getSellerMarkReadyActionLabel("local_delivery")).toBe("Ready for Delivery");
+    });
+  });
+
+  describe("getSellerMarkHandedOverActionLabel -- locked fulfillment-specific wording for the ready -> handed_over_or_shipped button", () => {
+    it("returns the exact locked label for each of the four fulfillment methods", () => {
+      expect(getSellerMarkHandedOverActionLabel("pickup")).toBe("Mark as Picked Up");
+      expect(getSellerMarkHandedOverActionLabel("shipping")).toBe("Mark as Shipped");
+      expect(getSellerMarkHandedOverActionLabel("meetup")).toBe("Item Handed Over");
+      expect(getSellerMarkHandedOverActionLabel("local_delivery")).toBe("Mark as Delivered");
+    });
+  });
+
+  describe("getSellerReadyTransitionModalCopy -- locked confirmation-modal copy shown before mark_order_ready", () => {
+    it("returns the exact locked title/body/primary label for each of the four fulfillment methods", () => {
+      expect(getSellerReadyTransitionModalCopy("pickup")).toEqual({
+        title: "Is the item ready for pickup?",
+        body: "Let your buyer know the item is ready and coordinate the pickup through Preshopps chat.",
+        primaryLabel: "Mark Ready for Pickup",
+      });
+      expect(getSellerReadyTransitionModalCopy("shipping")).toEqual({
+        title: "Is the item ready to ship?",
+        body: "Make sure the item is packed and coordinate shipping details with your buyer before continuing.",
+        primaryLabel: "Ready to Ship",
+      });
+      expect(getSellerReadyTransitionModalCopy("meetup")).toEqual({
+        title: "Ready to meet your buyer?",
+        body: "Coordinate the meetup time and location with your buyer before handing over the item.",
+        primaryLabel: "Ready for Meetup",
+      });
+      expect(getSellerReadyTransitionModalCopy("local_delivery")).toEqual({
+        title: "Ready to deliver the item?",
+        body: "Coordinate the delivery details with your buyer before starting the delivery.",
+        primaryLabel: "Ready for Delivery",
+      });
+    });
+  });
+
+  describe("getSellerHandedOverTransitionModalCopy -- locked confirmation-modal copy shown before mark_order_handed_over_or_shipped", () => {
+    it("returns the exact locked title/body/primary label for each of the four fulfillment methods", () => {
+      expect(getSellerHandedOverTransitionModalCopy("pickup")).toEqual({
+        title: "Has the buyer collected the item?",
+        body: "Only confirm this after the item has actually been handed to the buyer.",
+        primaryLabel: "Confirm Picked Up",
+      });
+      expect(getSellerHandedOverTransitionModalCopy("shipping")).toEqual({
+        title: "Has the item been shipped?",
+        body: "Confirm only after the parcel has actually been handed to the courier or shipping provider.",
+        primaryLabel: "Confirm Shipped",
+      });
+      expect(getSellerHandedOverTransitionModalCopy("meetup")).toEqual({
+        title: "Was the item handed over?",
+        body: "Confirm only after the buyer has received the item in person.",
+        primaryLabel: "Confirm Handover",
+      });
+      expect(getSellerHandedOverTransitionModalCopy("local_delivery")).toEqual({
+        title: "Has the item been delivered?",
+        body: "Confirm only after the buyer has actually received the item.",
+        primaryLabel: "Confirm Delivered",
+      });
+    });
   });
 
   describe("getAllowedSellerActions", () => {

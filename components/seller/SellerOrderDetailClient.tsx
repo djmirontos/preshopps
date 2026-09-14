@@ -9,8 +9,16 @@ import { formatOrderDate } from "@/lib/orders/format-order-date";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
+import { SellerFulfillmentTransitionModal } from "@/components/seller/SellerFulfillmentTransitionModal";
 import { FULFILLMENT_LABELS } from "@/lib/marketplace/search-params";
-import { getSellerOrderStatusGuidance, getAllowedSellerActions } from "@/lib/orders/order-status-copy";
+import {
+  getSellerOrderStatusGuidance,
+  getAllowedSellerActions,
+  getSellerMarkReadyActionLabel,
+  getSellerMarkHandedOverActionLabel,
+  getSellerReadyTransitionModalCopy,
+  getSellerHandedOverTransitionModalCopy,
+} from "@/lib/orders/order-status-copy";
 import type { SellerOrderDetail } from "@/lib/seller/get-my-shop-order-detail";
 import {
   acceptOrderItems,
@@ -29,7 +37,7 @@ type Props = {
   initialOrder: SellerOrderDetail;
 };
 
-type DialogKind = "decline" | "cancel_accepted" | "resolve_approve" | "resolve_reject" | null;
+type DialogKind = "decline" | "cancel_accepted" | "resolve_approve" | "resolve_reject" | "mark_ready" | "mark_handed_over_or_shipped" | null;
 
 /**
  * All lifecycle mutation is driven by the centralized
@@ -118,8 +126,11 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
 
     if (!result.ok) {
       setActionError(MARK_ORDER_READY_ERROR_MESSAGES[result.code]);
+      router.refresh();
+      return;
     }
 
+    closeDialog();
     router.refresh();
   }
 
@@ -132,9 +143,29 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
 
     if (!result.ok) {
       setActionError(MARK_ORDER_HANDED_OVER_OR_SHIPPED_ERROR_MESSAGES[result.code]);
+      router.refresh();
+      return;
     }
 
+    closeDialog();
     router.refresh();
+  }
+
+  /** The readiness-modal secondary action must never change order status --
+   * this handler makes no RPC call of any kind. Labeled "Open Messages"
+   * (not "Message Buyer") because it can only open the general Messages
+   * inbox, not a specific conversation with this order's buyer:
+   * get_my_shop_order_detail exposes no buyer_id, and the existing
+   * start_conversation RPC is buyer-initiated-to-shop only (it explicitly
+   * rejects a shop owner messaging their own shop) -- there is currently no
+   * seller-initiated "message this buyer" capability anywhere in the
+   * messaging architecture to reuse, and adding one would require a
+   * migration, out of scope for this task. Reported as a known gap rather
+   * than silently building a broken deep link or inventing new backend
+   * plumbing. */
+  function handleMessageBuyer() {
+    closeDialog();
+    router.push("/messages");
   }
 
   async function handleCancelAccepted(reason: string) {
@@ -308,25 +339,21 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
           {allowedActions.includes("mark_ready") && (
             <button
               type="button"
-              onClick={handleMarkReady}
+              onClick={() => setDialog("mark_ready")}
               disabled={actionPending !== null}
               className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-brand-action px-4 py-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
             >
-              {actionPending === "mark_ready" ? "Updating…" : "Mark ready"}
+              {getSellerMarkReadyActionLabel(order.fulfillmentMethod)}
             </button>
           )}
           {allowedActions.includes("mark_handed_over_or_shipped") && (
             <button
               type="button"
-              onClick={handleMarkHandedOverOrShipped}
+              onClick={() => setDialog("mark_handed_over_or_shipped")}
               disabled={actionPending !== null}
               className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-brand-action px-4 py-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
             >
-              {actionPending === "mark_handed_over_or_shipped"
-                ? "Updating…"
-                : order.fulfillmentMethod === "shipping"
-                  ? "Mark shipped"
-                  : "Mark handed over"}
+              {getSellerMarkHandedOverActionLabel(order.fulfillmentMethod)}
             </button>
           )}
           {allowedActions.includes("cancel_accepted") && (
@@ -394,6 +421,44 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
           onClose={closeDialog}
         />
       )}
+
+      {dialog === "mark_ready" &&
+        (() => {
+          const copy = getSellerReadyTransitionModalCopy(order.fulfillmentMethod);
+          return (
+            <SellerFulfillmentTransitionModal
+              title={copy.title}
+              body={copy.body}
+              primaryLabel={copy.primaryLabel}
+              pendingPrimaryLabel="Updating…"
+              secondaryLabel="Open Messages"
+              isPending={actionPending === "mark_ready"}
+              errorMessage={actionError}
+              onPrimaryConfirm={handleMarkReady}
+              onSecondaryAction={handleMessageBuyer}
+              onClose={closeDialog}
+            />
+          );
+        })()}
+
+      {dialog === "mark_handed_over_or_shipped" &&
+        (() => {
+          const copy = getSellerHandedOverTransitionModalCopy(order.fulfillmentMethod);
+          return (
+            <SellerFulfillmentTransitionModal
+              title={copy.title}
+              body={copy.body}
+              primaryLabel={copy.primaryLabel}
+              pendingPrimaryLabel="Updating…"
+              secondaryLabel="Not Yet"
+              isPending={actionPending === "mark_handed_over_or_shipped"}
+              errorMessage={actionError}
+              onPrimaryConfirm={handleMarkHandedOverOrShipped}
+              onSecondaryAction={closeDialog}
+              onClose={closeDialog}
+            />
+          );
+        })()}
     </>
   );
 }
