@@ -38,6 +38,15 @@ function setViewportWidth(width: number) {
   Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
 }
 
+/** Exact class-token check -- a substring/regex check like
+ * `not.toMatch(/bg-brand-action/)` would false-positive against
+ * `hover:bg-brand-action/5` (which legitimately contains "bg-brand-action"
+ * as a substring), so this splits on whitespace and compares whole class
+ * tokens instead. */
+function hasClassToken(el: HTMLElement, token: string): boolean {
+  return el.className.split(/\s+/).includes(token);
+}
+
 beforeEach(() => {
   rpcMock.mockReset();
   pushMock.mockReset();
@@ -320,7 +329,7 @@ describe("ListingActions -- Buy Now", () => {
     renderActions({ isAuthenticated: true });
     const messageButton = screen.getByRole("button", { name: "Message Seller" });
     expect(messageButton.className).toMatch(/bg-surface/);
-    expect(messageButton.className).not.toMatch(/bg-brand-action/);
+    expect(hasClassToken(messageButton, "bg-brand-action")).toBe(false);
     expect(messageButton.className).not.toMatch(/bg-ink\b/);
   });
 
@@ -328,6 +337,78 @@ describe("ListingActions -- Buy Now", () => {
     renderActions({ isAuthenticated: true });
     const addToCartButton = screen.getByRole("button", { name: "Add to Cart" });
     expect(addToCartButton.className).toMatch(/bg-brand-action/);
+  });
+});
+
+describe("ListingActions -- Message Seller orange outline CTA polish", () => {
+  it("1/2/3. uses an orange border on a white/outlined (never filled) background, with accessible dark ink text (not orange text, which fails WCAG AA contrast on white per this codebase's own documented brand-action rationale)", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/\bborder\b/);
+    expect(messageButton.className).toMatch(/\bborder-brand-action\b/);
+    expect(hasClassToken(messageButton, "text-ink")).toBe(true);
+    expect(messageButton.className).toMatch(/\bbg-surface\b/);
+    // Never the filled treatment Add to Cart/Buy Now use, and never orange
+    // text (approved accessibility correction).
+    expect(hasClassToken(messageButton, "bg-brand-action")).toBe(false);
+    expect(hasClassToken(messageButton, "text-brand-action")).toBe(false);
+    expect(messageButton.className).not.toMatch(/text-brand-action-text/);
+  });
+
+  it("uses a subtle orange-tinted hover, matching this codebase's own established outlined-button hover convention (e.g. the danger-outlined buttons' hover:bg-danger/5)", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/hover:bg-brand-action\/5/);
+  });
+
+  it("no longer uses the previous neutral/gray border or hover treatment (text-ink is intentionally retained for the label -- see the accessibility-corrected style above)", () => {
+    renderActions({ isAuthenticated: true });
+    const messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).not.toMatch(/\bborder-border\b/);
+    expect(messageButton.className).not.toMatch(/hover:bg-canvas/);
+  });
+
+  it("4. Buy Now remains visually primary (filled, dark) -- unaffected by Message Seller's new orange outline", () => {
+    renderActions({ isAuthenticated: true });
+    const buyNow = screen.getByRole("button", { name: "Buy Now" });
+    expect(buyNow.className).toMatch(/\bbg-ink\b/);
+    expect(buyNow.className).not.toMatch(/border-brand-action/);
+  });
+
+  it("5. Add to Cart remains unaffected by Message Seller's new orange outline -- still the filled primary action", () => {
+    renderActions({ isAuthenticated: true });
+    const addToCart = screen.getByRole("button", { name: "Add to Cart" });
+    expect(addToCart.className).toMatch(/\bbg-brand-action\b/);
+    expect(addToCart.className).toMatch(/text-brand-action-text/);
+  });
+
+  it("Message Seller still visually differs from both primary actions -- three distinct treatments, not converted to a filled button", () => {
+    renderActions({ isAuthenticated: true });
+    const buyNow = screen.getByRole("button", { name: "Buy Now" });
+    const addToCart = screen.getByRole("button", { name: "Add to Cart" });
+    const messageSeller = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageSeller.className).not.toEqual(buyNow.className);
+    expect(messageSeller.className).not.toEqual(addToCart.className);
+  });
+
+  it("6/7. mobile and desktop sizing (h-12, full width on mobile, sm:w-auto/sm:flex-1 on desktop) are unchanged by the color-only fix", () => {
+    setViewportWidth(MOBILE_WIDTH);
+    renderActions({ isAuthenticated: true });
+    let messageButton = screen.getByRole("button", { name: "Message Seller" });
+    expect(messageButton.className).toMatch(/\bh-12\b/);
+    expect(messageButton.className).toMatch(/\bw-full\b/);
+
+    setViewportWidth(DESKTOP_WIDTH);
+    renderActions({ isAuthenticated: true });
+    messageButton = screen.getAllByRole("button", { name: "Message Seller" })[1];
+    expect(messageButton.className).toMatch(/sm:w-auto/);
+    expect(messageButton.className).toMatch(/sm:flex-1/);
+  });
+
+  it("guest, own-listing, and inquiry-only Message Seller states keep their exact same visibility/behavior -- only the eligible-and-visible button's color changed", () => {
+    // Own listing: hidden entirely (unchanged).
+    renderActions({ isAuthenticated: true, isOwnListing: true });
+    expect(screen.queryByRole("button", { name: "Message Seller" })).not.toBeInTheDocument();
   });
 });
 
@@ -350,7 +431,7 @@ describe("ListingActions -- mobile secondary-CTA sizing fix (Message Seller was 
     const messageButton = screen.getByRole("button", { name: "Message Seller" });
     expect(messageButton.className).toMatch(/bg-surface/);
     expect(messageButton.className).toMatch(/\bborder\b/);
-    expect(messageButton.className).not.toMatch(/bg-brand-action/);
+    expect(hasClassToken(messageButton, "bg-brand-action")).toBe(false);
   });
 
   it("Add to Cart remains the full-width, orange primary CTA, unchanged by this fix", () => {

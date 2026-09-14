@@ -164,7 +164,7 @@ export function ListingActions({
           <button
             type="button"
             onClick={() => (isAuthenticated ? setIsComposeOpen(true) : setIsMessageGateOpen(true))}
-            className={cn(buttonBaseClass, "border border-border bg-surface text-ink hover:bg-canvas")}
+            className={cn(buttonBaseClass, "border border-brand-action bg-surface text-ink hover:bg-brand-action/5")}
           >
             Message Seller
           </button>
