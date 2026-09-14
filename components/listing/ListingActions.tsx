@@ -18,6 +18,10 @@ type Props = {
   publicCode: string;
   shopId: string;
   availableQuantity: number;
+  /** Passed straight through to AddToCartButton's success modal (optional
+   * thumbnail/title row) -- see that component's own comment. */
+  listingTitle: string;
+  listingImageUrl: string | undefined;
   status: ListingStatus;
   isInquiryOnly: boolean;
   isAuthenticated: boolean;
@@ -52,6 +56,8 @@ export function ListingActions({
   publicCode,
   shopId,
   availableQuantity,
+  listingTitle,
+  listingImageUrl,
   status,
   isInquiryOnly,
   isAuthenticated,
@@ -133,6 +139,8 @@ export function ListingActions({
                 listingId={listingId}
                 publicCode={publicCode}
                 availableQuantity={availableQuantity}
+                listingTitle={listingTitle}
+                listingImageUrl={listingImageUrl}
                 className="flex-1"
               />
               <button

@@ -55,6 +55,8 @@ function renderActions({
   publicCode = "PLS-ABC123",
   shopId = "shop-1",
   isOwnListing = false,
+  listingTitle = "Nike Air Max 270",
+  listingImageUrl = "https://example.supabase.co/storage/v1/object/public/listing-images/shop-1/listing-1/a.jpg",
 }: {
   isAuthenticated: boolean;
   status?: "available" | "reserved" | "sold" | "archived";
@@ -64,6 +66,8 @@ function renderActions({
   publicCode?: string;
   shopId?: string;
   isOwnListing?: boolean;
+  listingTitle?: string;
+  listingImageUrl?: string | undefined;
 }) {
   return render(
     <AuthStatusProvider isAuthenticated={isAuthenticated}>
@@ -73,6 +77,8 @@ function renderActions({
           publicCode={publicCode}
           shopId={shopId}
           availableQuantity={availableQuantity}
+          listingTitle={listingTitle}
+          listingImageUrl={listingImageUrl}
           status={status}
           isInquiryOnly={isInquiryOnly}
           isAuthenticated={isAuthenticated}
@@ -379,14 +385,14 @@ describe("ListingActions -- mobile secondary-CTA sizing fix (Message Seller was 
 });
 
 describe("ListingActions (guest)", () => {
-  it("adds to the local guest cart with no auth gate", () => {
+  it("adds to the local guest cart with no auth gate, opening the success modal instead", () => {
     renderActions({ isAuthenticated: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
 
     fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(rpcMock).not.toHaveBeenCalled();
-    expect(screen.getByText("1 in cart")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Added to cart");
+    expect(screen.queryByText("Sign in to message this seller")).not.toBeInTheDocument();
   });
 
   it("still opens the auth gate when a guest clicks Message Seller", () => {
@@ -430,7 +436,7 @@ describe("ListingActions (guest)", () => {
   it("adds to the local guest cart exactly as before when isOwnListing is false (unaffected by the self-purchase guard)", () => {
     renderActions({ isAuthenticated: false, isOwnListing: false, listingId: "listing-1", publicCode: "PLS-ABC123" });
     fireEvent.click(screen.getByRole("button", { name: "Add to Cart" }));
-    expect(screen.getByText("1 in cart")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Added to cart");
   });
 });
 

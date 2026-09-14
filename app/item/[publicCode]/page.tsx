@@ -127,6 +127,8 @@ export default async function ItemPage({ params }: ItemPageProps) {
             publicCode={listing.publicCode}
             shopId={listing.shop.id}
             availableQuantity={listing.availableQuantity}
+            listingTitle={listing.title}
+            listingImageUrl={listing.imageUrls[0]}
             status={listing.status}
             isInquiryOnly={listing.isInquiryOnly}
             isAuthenticated={Boolean(user)}
