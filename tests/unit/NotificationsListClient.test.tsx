@@ -1,10 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { NotificationItem } from "@/lib/notifications/get-my-notifications";
 
-const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock, channelOnCalls, channelNameCalls, removeChannelMock, getSessionMock } = vi.hoisted(() => ({
+const {
+  markNotificationReadMock,
+  markAllNotificationsReadMock,
+  dismissNotificationMock,
+  dismissAllNotificationsMock,
+  refreshMock,
+  channelOnCalls,
+  channelNameCalls,
+  removeChannelMock,
+  getSessionMock,
+} = vi.hoisted(() => ({
   markNotificationReadMock: vi.fn(),
   markAllNotificationsReadMock: vi.fn(),
+  dismissNotificationMock: vi.fn(),
+  dismissAllNotificationsMock: vi.fn(),
   refreshMock: vi.fn(),
   channelOnCalls: [] as Array<{ event: string; config: unknown; callback: (payload: { new: unknown }) => void }>,
   channelNameCalls: [] as string[],
@@ -15,6 +27,8 @@ const { markNotificationReadMock, markAllNotificationsReadMock, refreshMock, cha
 vi.mock("@/lib/notifications/notification-actions", () => ({
   markNotificationRead: markNotificationReadMock,
   markAllNotificationsRead: markAllNotificationsReadMock,
+  dismissNotification: dismissNotificationMock,
+  dismissAllNotifications: dismissAllNotificationsMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -44,7 +58,7 @@ vi.mock("@/lib/supabase/client", () => ({
 }));
 
 import { NotificationsListClient } from "@/components/notifications/NotificationsListClient";
-import { NotificationsProvider, useUnreadNotificationCount } from "@/components/notifications/NotificationsProvider";
+import { NotificationsProvider, useUnreadNotificationCount, useUnreadMessageCount } from "@/components/notifications/NotificationsProvider";
 
 function makeNotification(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
@@ -64,6 +78,11 @@ function makeNotification(overrides: Partial<NotificationItem> = {}): Notificati
 }
 
 const loadMoreMock = vi.fn();
+
+function UnreadMessageCountProbe() {
+  const count = useUnreadMessageCount();
+  return <p data-testid="probe-message-count">{count}</p>;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -118,10 +137,15 @@ function UnreadCountProbe() {
  * that the list's local row state changes. Uses unreadNotificationCount
  * specifically (the Bell's own count) -- this list is general
  * notifications, never messages. */
-function renderListWithProvider(notifications: NotificationItem[], initialUnreadNotificationCount = notifications.filter((n) => n.readAt === null).length) {
+function renderListWithProvider(
+  notifications: NotificationItem[],
+  initialUnreadNotificationCount = notifications.filter((n) => n.readAt === null).length,
+  initialUnreadMessageCount = 0,
+) {
   return render(
-    <NotificationsProvider isAuthenticated userId="me" initialUnreadMessageCount={0} initialUnreadNotificationCount={initialUnreadNotificationCount}>
+    <NotificationsProvider isAuthenticated userId="me" initialUnreadMessageCount={initialUnreadMessageCount} initialUnreadNotificationCount={initialUnreadNotificationCount}>
       <UnreadCountProbe />
+      <UnreadMessageCountProbe />
       <NotificationsListClient initialNotifications={notifications} initialHadError={false} initialCursor={null} loadMore={loadMoreMock} />
     </NotificationsProvider>,
   );
@@ -352,5 +376,151 @@ describe("NotificationsListClient -- live updates via the shared Provider", () =
     fireEvent.click(screen.getByRole("button", { name: /mark all read/i }));
 
     await waitFor(() => expect(screen.getByTestId("probe-count")).toHaveTextContent("0"));
+  });
+});
+
+describe("NotificationsListClient -- individual dismiss (no confirmation)", () => {
+  it("every row has an accessible Dismiss notification control", () => {
+    renderList([makeNotification()]);
+    expect(screen.getByRole("button", { name: "Dismiss notification" })).toBeInTheDocument();
+  });
+
+  it("dismissing an unread general notification removes the row immediately and decrements the Bell count exactly once, with no confirmation dialog", async () => {
+    dismissNotificationMock.mockResolvedValue({ ok: true });
+    renderListWithProvider([makeNotification({ notificationId: "notif-1", type: "order_accepted", readAt: null })], 1);
+
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+    // No confirmation dialog appears for a single dismiss.
+    expect(screen.queryByText("Clear all notifications?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Order accepted")).not.toBeInTheDocument();
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("0");
+    await waitFor(() => expect(dismissNotificationMock).toHaveBeenCalledWith("notif-1"));
+  });
+
+  it("dismissing a read general notification removes the row but leaves the Bell count unchanged", async () => {
+    dismissNotificationMock.mockResolvedValue({ ok: true });
+    renderListWithProvider(
+      [makeNotification({ notificationId: "notif-1", type: "order_accepted", readAt: "2026-02-01T11:00:00.000Z" })],
+      0,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+    expect(screen.queryByText("Order accepted")).not.toBeInTheDocument();
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("0");
+    await waitFor(() => expect(dismissNotificationMock).toHaveBeenCalledWith("notif-1"));
+  });
+
+  it("dismissing an unread new_message notification removes the row but never touches the Bell count or the Messages badge", async () => {
+    dismissNotificationMock.mockResolvedValue({ ok: true });
+    renderListWithProvider(
+      [makeNotification({ notificationId: "notif-1", type: "new_message", conversationId: "conv-1", readAt: null })],
+      0,
+      3,
+    );
+
+    expect(screen.getByTestId("probe-message-count")).toHaveTextContent("3");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+    expect(screen.queryByText("New message")).not.toBeInTheDocument();
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("probe-message-count")).toHaveTextContent("3");
+    await waitFor(() => expect(dismissNotificationMock).toHaveBeenCalledWith("notif-1"));
+  });
+
+  it("clicking the X does not navigate the linkable row's Link (X is a sibling, not nested inside it)", () => {
+    renderList([makeNotification({ notificationId: "notif-1" })]);
+    const dismissButton = screen.getByRole("button", { name: "Dismiss notification" });
+    const link = screen.getByRole("link", { name: /order accepted/i });
+    expect(link).not.toContainElement(dismissButton);
+  });
+
+  it("restores the row and the Bell count, and shows a safe error, when the dismiss RPC fails", async () => {
+    dismissNotificationMock.mockResolvedValue({ ok: false });
+    renderListWithProvider([makeNotification({ notificationId: "notif-1", type: "order_accepted", readAt: null })], 1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+    // Optimistic removal happens immediately...
+    expect(screen.queryByText("Order accepted")).not.toBeInTheDocument();
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("0");
+
+    // ...then rolls back once the RPC reports failure, with no raw backend error shown.
+    await waitFor(() => expect(screen.getByText("Order accepted")).toBeInTheDocument());
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("1");
+    expect(screen.getByText(/unable to dismiss that notification/i)).toBeInTheDocument();
+  });
+
+  it("calls dismiss_notification with only the notification id, never a user id", async () => {
+    dismissNotificationMock.mockResolvedValue({ ok: true });
+    renderList([makeNotification({ notificationId: "notif-1" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    await waitFor(() => expect(dismissNotificationMock).toHaveBeenCalledWith("notif-1"));
+    expect(dismissNotificationMock.mock.calls[0]).toHaveLength(1);
+  });
+});
+
+describe("NotificationsListClient -- Clear All requires confirmation", () => {
+  it("clicking Clear all opens a confirmation dialog with the exact locked copy, without dismissing anything yet", () => {
+    renderList([makeNotification()]);
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+
+    expect(screen.getByText("Clear all notifications?")).toBeInTheDocument();
+    expect(
+      screen.getByText("This will remove all notifications from your list. This won't affect your orders, messages, or other marketplace activity."),
+    ).toBeInTheDocument();
+    expect(dismissAllNotificationsMock).not.toHaveBeenCalled();
+  });
+
+  it("Cancel closes the dialog and changes nothing", () => {
+    renderList([makeNotification()]);
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Clear all notifications?")).not.toBeInTheDocument();
+    expect(screen.getByText("Order accepted")).toBeInTheDocument();
+    expect(dismissAllNotificationsMock).not.toHaveBeenCalled();
+  });
+
+  it("confirming Clear All dismisses every visible notification, including new_message rows, and zeros the Bell count", async () => {
+    dismissAllNotificationsMock.mockResolvedValue({ ok: true, dismissedCount: 2 });
+    renderListWithProvider(
+      [
+        makeNotification({ notificationId: "notif-1", type: "order_accepted", readAt: null }),
+        makeNotification({ notificationId: "notif-2", type: "new_message", conversationId: "conv-1", readAt: null }),
+      ],
+      1,
+      5,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear all" }));
+
+    await waitFor(() => expect(screen.getByText("No notifications yet.")).toBeInTheDocument());
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("0");
+    // Messages badge (unread conversations) is untouched by Clear All.
+    expect(screen.getByTestId("probe-message-count")).toHaveTextContent("5");
+  });
+
+  it("keeps notifications visible and shows an error, without implying success, when Clear All fails", async () => {
+    dismissAllNotificationsMock.mockResolvedValue({ ok: false });
+    renderListWithProvider([makeNotification({ notificationId: "notif-1", readAt: null })], 1);
+
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear all" }));
+
+    await waitFor(() => expect(screen.getByText(/unable to clear notifications/i)).toBeInTheDocument());
+    expect(screen.getByText("Order accepted")).toBeInTheDocument();
+    expect(screen.getByTestId("probe-count")).toHaveTextContent("1");
+  });
+
+  it("calls dismiss_all_notifications with no arguments", async () => {
+    dismissAllNotificationsMock.mockResolvedValue({ ok: true, dismissedCount: 1 });
+    renderList([makeNotification()]);
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear all" }));
+    await waitFor(() => expect(dismissAllNotificationsMock).toHaveBeenCalledWith());
   });
 });

@@ -3,11 +3,21 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Bell, CheckCheck } from "lucide-react";
+import { Bell, CheckCheck, Trash2, X } from "lucide-react";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { getNotificationTitle, getNotificationMessage, getNotificationHref } from "@/lib/notifications/notification-copy";
-import { markNotificationRead, markAllNotificationsRead } from "@/lib/notifications/notification-actions";
-import { useLatestNotificationEvent, useNotificationsMarkRead } from "@/components/notifications/NotificationsProvider";
+import {
+  markNotificationRead,
+  markAllNotificationsRead,
+  dismissNotification,
+  dismissAllNotifications,
+} from "@/lib/notifications/notification-actions";
+import {
+  useLatestNotificationEvent,
+  useNotificationsMarkRead,
+  useNotificationsDismiss,
+} from "@/components/notifications/NotificationsProvider";
+import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import type { NotificationItem, NotificationsCursor } from "@/lib/notifications/get-my-notifications";
 
 type LoadMoreResult = {
@@ -43,8 +53,13 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
   const [markAllPending, setMarkAllPending] = useState(false);
   const [markAllError, setMarkAllError] = useState<string | null>(null);
   const [markingIds, setMarkingIds] = useState<ReadonlySet<string>>(new Set());
+  const [dismissError, setDismissError] = useState<string | null>(null);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+  const [clearAllPending, setClearAllPending] = useState(false);
+  const [clearAllError, setClearAllError] = useState<string | null>(null);
 
   const { markOneRead, markAllRead } = useNotificationsMarkRead();
+  const { decrementGeneralUnreadByOne, restoreGeneralUnreadByOne, clearGeneralUnreadCount } = useNotificationsDismiss();
 
   // Live prepend while this page is mounted: reuses the shared
   // NotificationsProvider's own Realtime subscription (no second
@@ -134,6 +149,60 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
     setNotifications((prev) => prev.map((n) => (n.readAt === null ? { ...n, readAt: new Date().toISOString() } : n)));
   }
 
+  /**
+   * Individual dismiss -- no confirmation, works on ANY notification type
+   * including new_message (0091 product decision: dismissal only ever
+   * writes notifications.dismissed_at, never conversation_user_states/
+   * messages/conversations, so it's safe uniformly). Optimistic: the row
+   * disappears and the Bell count adjusts immediately, before the RPC
+   * resolves; on failure both are rolled back and a generic error shown
+   * (never a raw database error), per this feature's own error-behavior
+   * requirement.
+   */
+  async function handleDismiss(item: NotificationItem) {
+    setDismissError(null);
+    const wasGeneralUnread = item.readAt === null && item.type !== "new_message";
+    const snapshot = notifications;
+
+    setNotifications((prev) => prev.filter((n) => n.notificationId !== item.notificationId));
+    if (wasGeneralUnread) decrementGeneralUnreadByOne();
+
+    const result = await dismissNotification(item.notificationId);
+    if (!result.ok) {
+      setNotifications(snapshot);
+      if (wasGeneralUnread) restoreGeneralUnreadByOne();
+      setDismissError("Unable to dismiss that notification right now. Please try again.");
+    }
+  }
+
+  /**
+   * Clear All -- requires the confirmation dialog above it (opened via
+   * showClearAllConfirm), unlike single dismiss. Deliberately NOT
+   * optimistic (mirrors handleMarkAllRead's own pattern): the list and
+   * Bell count only change once the RPC confirms success, so a failure
+   * never has to "undo" a false success and the dialog can show the
+   * error in place without misleadingly implying the clear happened.
+   * dismiss_all_notifications (0091) dismisses every type including
+   * new_message, so on success the entire local list is cleared.
+   */
+  async function handleConfirmClearAll() {
+    setClearAllPending(true);
+    setClearAllError(null);
+    const result = await dismissAllNotifications();
+    setClearAllPending(false);
+
+    if (!result.ok) {
+      setClearAllError("Unable to clear notifications right now. Please try again.");
+      return;
+    }
+
+    setShowClearAllConfirm(false);
+    clearGeneralUnreadCount();
+    router.refresh();
+    setNotifications([]);
+    setCursor(null);
+  }
+
   function handleLoadMore() {
     if (!cursor) return;
     setLoadMoreFailed(false);
@@ -164,8 +233,8 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
 
   return (
     <div>
-      {hasUnread && (
-        <div className="mb-3 flex items-center justify-end gap-2">
+      <div className="mb-3 flex items-center justify-end gap-2">
+        {hasUnread && (
           <button
             type="button"
             onClick={handleMarkAllRead}
@@ -175,9 +244,35 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
             <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
             {markAllPending ? "Marking…" : "Mark all read"}
           </button>
-        </div>
-      )}
+        )}
+        <button
+          type="button"
+          onClick={() => setShowClearAllConfirm(true)}
+          className="inline-flex h-8 items-center gap-1.5 rounded-[10px] px-2.5 text-xs font-medium text-ink-secondary hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+          Clear all
+        </button>
+      </div>
       {markAllError && <p className="mb-3 text-xs text-danger">{markAllError}</p>}
+      {dismissError && <p className="mb-3 text-xs text-danger">{dismissError}</p>}
+
+      {showClearAllConfirm && (
+        <ConfirmDialog
+          title="Clear all notifications?"
+          description="This will remove all notifications from your list. This won't affect your orders, messages, or other marketplace activity."
+          confirmLabel="Clear all"
+          destructive
+          isPending={clearAllPending}
+          errorMessage={clearAllError}
+          onConfirm={() => void handleConfirmClearAll()}
+          onClose={() => {
+            if (clearAllPending) return;
+            setShowClearAllConfirm(false);
+            setClearAllError(null);
+          }}
+        />
+      )}
 
       <ul className="space-y-2">
         {notifications.map((item) => {
@@ -200,22 +295,41 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
             </>
           );
 
+          // The dismiss X is always rendered as a sibling of the Link, never
+          // a child of it -- nesting an interactive control inside an <a>
+          // is both invalid HTML and would make an X click also fire
+          // navigation. The <li> is the positioning context (relative) so
+          // the X can sit visually in the row's top-right corner regardless
+          // of which branch renders below it; the row content itself gets
+          // right padding so its own timestamp text never sits under it.
+          const dismissButton = (
+            <button
+              type="button"
+              aria-label="Dismiss notification"
+              onClick={() => void handleDismiss(item)}
+              className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:right-2.5 sm:top-2.5"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          );
+
           if (href) {
             return (
-              <li key={item.notificationId}>
+              <li key={item.notificationId} className="relative">
                 <Link
                   href={href}
                   onClick={() => handleLinkClick(item)}
-                  className="block rounded-[14px] border border-border bg-surface p-3 hover:border-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:p-4"
+                  className="block rounded-[14px] border border-border bg-surface p-3 pr-9 hover:border-brand-link focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:p-4 sm:pr-10"
                 >
                   {rowContent}
                 </Link>
+                {dismissButton}
               </li>
             );
           }
 
           return (
-            <li key={item.notificationId} className="rounded-[14px] border border-border bg-surface p-3 sm:p-4">
+            <li key={item.notificationId} className="relative rounded-[14px] border border-border bg-surface p-3 pr-9 sm:p-4 sm:pr-10">
               {rowContent}
               {isUnread && (
                 <button
@@ -227,6 +341,7 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
                   {markingIds.has(item.notificationId) ? "Marking…" : "Mark read"}
                 </button>
               )}
+              {dismissButton}
             </li>
           );
         })}

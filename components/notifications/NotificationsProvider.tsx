@@ -54,6 +54,18 @@ type NotificationsContextValue = {
   lastEvent: NewNotificationEvent | null;
   markOneRead: () => void;
   markAllRead: () => void;
+  /** Dismiss-specific count adjustments -- deliberately NOT the same
+   * methods as markOneRead/markAllRead above, even though dismissing an
+   * unread item has the same net effect on this one number. Dismissal
+   * and read-state are orthogonal concepts (a dismissed notification was
+   * not necessarily read, and marking read never dismisses), so they get
+   * their own clearly-named methods rather than overloading the
+   * mark-read ones. */
+  decrementGeneralUnreadByOne: () => void;
+  /** Rollback-only: restores the count after an optimistic dismiss-one
+   * that turned out to fail server-side. Never called on success. */
+  restoreGeneralUnreadByOne: () => void;
+  clearGeneralUnreadCount: () => void;
   /** Authoritative recalculation of unreadMessageCount from the server --
    * used after a conversation is marked read, instead of guessing how
    * much to decrement locally (opening one conversation says nothing by
@@ -67,6 +79,9 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   lastEvent: null,
   markOneRead: () => {},
   markAllRead: () => {},
+  decrementGeneralUnreadByOne: () => {},
+  restoreGeneralUnreadByOne: () => {},
+  clearGeneralUnreadCount: () => {},
   refreshUnreadMessageCount: () => {},
 });
 
@@ -164,6 +179,9 @@ export function NotificationsProvider({
   // unreadMessageCount/unreadNotificationCount/lastEvent changed.
   const markOneRead = useCallback(() => setUnreadNotificationCount((prev) => Math.max(0, prev - 1)), []);
   const markAllRead = useCallback(() => setUnreadNotificationCount(0), []);
+  const decrementGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => Math.max(0, prev - 1)), []);
+  const restoreGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => prev + 1), []);
+  const clearGeneralUnreadCount = useCallback(() => setUnreadNotificationCount(0), []);
   const refreshUnreadMessageCount = useCallback(() => {
     void getMyUnreadConversationCount().then((count) => setUnreadMessageCount(count));
   }, []);
@@ -258,9 +276,22 @@ export function NotificationsProvider({
       lastEvent,
       markOneRead,
       markAllRead,
+      decrementGeneralUnreadByOne,
+      restoreGeneralUnreadByOne,
+      clearGeneralUnreadCount,
       refreshUnreadMessageCount,
     }),
-    [unreadMessageCount, unreadNotificationCount, lastEvent, markOneRead, markAllRead, refreshUnreadMessageCount],
+    [
+      unreadMessageCount,
+      unreadNotificationCount,
+      lastEvent,
+      markOneRead,
+      markAllRead,
+      decrementGeneralUnreadByOne,
+      restoreGeneralUnreadByOne,
+      clearGeneralUnreadCount,
+      refreshUnreadMessageCount,
+    ],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
@@ -281,6 +312,15 @@ export function useLatestNotificationEvent(): NewNotificationEvent | null {
 export function useNotificationsMarkRead(): { markOneRead: () => void; markAllRead: () => void } {
   const { markOneRead, markAllRead } = useContext(NotificationsContext);
   return { markOneRead, markAllRead };
+}
+
+export function useNotificationsDismiss(): {
+  decrementGeneralUnreadByOne: () => void;
+  restoreGeneralUnreadByOne: () => void;
+  clearGeneralUnreadCount: () => void;
+} {
+  const { decrementGeneralUnreadByOne, restoreGeneralUnreadByOne, clearGeneralUnreadCount } = useContext(NotificationsContext);
+  return { decrementGeneralUnreadByOne, restoreGeneralUnreadByOne, clearGeneralUnreadCount };
 }
 
 export function useRefreshUnreadMessageCount(): () => void {

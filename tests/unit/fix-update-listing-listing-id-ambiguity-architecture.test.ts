@@ -26,11 +26,11 @@ function getFunctionBody(source: string): string {
 }
 
 describe("0090 -- migration numbering and scope", () => {
-  it("0090_fix_update_listing_listing_id_ambiguity.sql exists, and no migration newer than it exists yet", () => {
+  it("0090_fix_update_listing_listing_id_ambiguity.sql exists, and no migration newer than 0091 exists yet (0091 is a later, separately-approved notification-dismiss migration)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0090_fix_update_listing_listing_id_ambiguity.sql");
-    const newerThan0090 = migrationFiles.filter((f) => f > "0090_fix_update_listing_listing_id_ambiguity.sql");
-    expect(newerThan0090).toEqual([]);
+    const newerThan0091 = migrationFiles.filter((f) => f > "0091_notification_dismiss.sql");
+    expect(newerThan0091).toEqual([]);
   });
 
   it("0086 remains intentionally unused, and 0087/0088/0089 are untouched (still present, unmodified filenames)", () => {

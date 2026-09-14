@@ -25,6 +25,13 @@ describe("Notifications UI never trusts client-supplied identity", () => {
     expect(source).not.toMatch(/p_user_id|p_recipient_id|p_caller_id/);
   });
 
+  it("notification-actions.ts's dismiss functions (0091) also send only a notification id -- never a user/recipient id", () => {
+    const source = readFile("lib/notifications/notification-actions.ts");
+    expect(source).toMatch(/rpc\(\s*["']dismiss_notification["']/);
+    expect(source).toMatch(/rpc\(\s*["']dismiss_all_notifications["']\s*\)/);
+    expect(source).not.toMatch(/p_user_id|p_recipient_id|p_caller_id/);
+  });
+
   it("no notification module ever selects the notifications table directly", () => {
     for (const file of ["lib/notifications/get-my-notifications.ts", "lib/notifications/get-my-notification-unread-count.ts", "lib/notifications/notification-actions.ts"]) {
       const source = readFile(file);
@@ -290,5 +297,109 @@ describe("header unread badges are seeded by root-level queries, then kept live 
     const source = readFile("lib/notifications/get-my-notification-unread-count.ts");
     expect(source).toMatch(/export async function getMyNotificationUnreadCount/);
     expect(source).toMatch(/rpc\(\s*["']get_my_notification_unread_count["']\s*\)/);
+  });
+});
+
+/**
+ * P1 dismiss/clear-all (0091). Dismissal is soft (dismissed_at), never a
+ * hard DELETE, and only ever touches public.notifications -- it must
+ * never mark a conversation read or change any business record. Clear
+ * All is explicitly allowed to dismiss new_message rows too (the locked
+ * product decision correcting the original audit's suggestion), since
+ * dismissal has zero relationship to conversation_user_states.
+ */
+describe("Notification dismiss / Clear All (0091) never touches business data or the Messages badge", () => {
+  const migrationSource = readFile("supabase/migrations/0091_notification_dismiss.sql");
+
+  /** Extracts just the plpgsql body ($$...$$) of one function definition,
+   * with SQL line comments stripped -- so assertions about what the
+   * function actually DOES aren't tripped up by prose in an adjacent
+   * comment block that merely explains what it must never touch. */
+  function extractFunctionBody(functionName: string): string {
+    const startMarker = `create or replace function public.${functionName}(`;
+    const startIndex = migrationSource.indexOf(startMarker);
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+    const bodyStart = migrationSource.indexOf("as $$", startIndex);
+    const bodyEnd = migrationSource.indexOf("$$;", bodyStart);
+    const rawBody = migrationSource.slice(bodyStart, bodyEnd);
+    return rawBody
+      .split("\n")
+      .map((line) => line.replace(/--.*$/, ""))
+      .join("\n");
+  }
+
+  it("adds a soft-dismiss column rather than any hard-delete path", () => {
+    expect(migrationSource).toMatch(/add column dismissed_at timestamptz/i);
+    expect(migrationSource).not.toMatch(/delete from public\.notifications/i);
+  });
+
+  it("dismiss_notification and dismiss_all_notifications only ever write notifications.dismissed_at -- never any other table", () => {
+    for (const fn of ["dismiss_notification", "dismiss_all_notifications"]) {
+      const body = extractFunctionBody(fn);
+      expect(body).toMatch(/update public\.notifications/);
+      expect(body).not.toMatch(/conversation_user_states|public\.conversations|public\.messages\b|public\.orders|public\.order_items|public\.listings|public\.reviews|public\.disputes/);
+    }
+  });
+
+  it("dismiss_all_notifications does NOT filter out new_message -- Clear All dismisses every type, per the locked product decision", () => {
+    const dismissAllBody = extractFunctionBody("dismiss_all_notifications");
+    expect(dismissAllBody).not.toMatch(/type\s*<>\s*['"]new_message['"]/);
+  });
+
+  it("get_my_notifications and both unread-count RPCs exclude dismissed rows", () => {
+    const listBody = extractFunctionBody("get_my_notifications");
+    const generalCountBody = extractFunctionBody("get_my_general_notification_unread_count");
+    const legacyCountBody = extractFunctionBody("get_my_notification_unread_count");
+
+    expect(listBody).toMatch(/dismissed_at is null/);
+    expect(generalCountBody).toMatch(/dismissed_at is null/);
+    expect(legacyCountBody).toMatch(/dismissed_at is null/);
+    // The Bell's own general count still excludes new_message (0088), unchanged.
+    expect(generalCountBody).toMatch(/type\s*<>\s*['"]new_message['"]/);
+  });
+
+  it("both new RPCs are authenticated-only: SECURITY DEFINER, empty search_path, revoked from public/anon, granted only to authenticated", () => {
+    for (const fn of ["dismiss_notification", "dismiss_all_notifications"]) {
+      expect(migrationSource).toMatch(new RegExp(`revoke all on function public\\.${fn}\\([^)]*\\) from public;`));
+      expect(migrationSource).toMatch(new RegExp(`revoke all on function public\\.${fn}\\([^)]*\\) from anon;`));
+      expect(migrationSource).toMatch(new RegExp(`grant execute on function public\\.${fn}\\([^)]*\\) to authenticated;`));
+    }
+    expect(migrationSource).toMatch(/security definer/gi);
+    expect(migrationSource.match(/set search_path = ''/g)?.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("dismiss_notification scopes its update to the caller's own recipient_id -- cannot dismiss another user's notification", () => {
+    const dismissOneBody = migrationSource.split("create or replace function public.dismiss_notification")[1]!;
+    expect(dismissOneBody).toMatch(/recipient_id = v_caller/);
+    expect(dismissOneBody).toMatch(/auth\.uid\(\)/);
+  });
+
+  it("does not modify any pre-0091 migration file", () => {
+    // 0091 is additive-only; earlier migrations (including 0086's
+    // intentional gap) are never touched by this feature.
+    expect(migrationSource).not.toMatch(/drop function|drop table|alter table public\.notifications drop/i);
+  });
+});
+
+describe("Dismiss count methods are distinct from mark-read methods (never overloaded)", () => {
+  it("NotificationsProvider exposes dedicated dismiss-count methods, not a reuse of markOneRead/markAllRead", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/decrementGeneralUnreadByOne/);
+    expect(source).toMatch(/restoreGeneralUnreadByOne/);
+    expect(source).toMatch(/clearGeneralUnreadCount/);
+    expect(source).toMatch(/useNotificationsDismiss/);
+  });
+
+  it("NotificationsListClient's dismiss/clear-all handlers call the dismiss-named methods, not markOneRead/markAllRead", () => {
+    const source = readFile("components/notifications/NotificationsListClient.tsx");
+    const dismissFn = source.split("async function handleDismiss")[1]!.split("async function handleConfirmClearAll")[0]!;
+    const clearAllFn = source.split("async function handleConfirmClearAll")[1]!.split("function handleLoadMore")[0]!;
+
+    expect(dismissFn).toMatch(/decrementGeneralUnreadByOne\(\)/);
+    expect(dismissFn).toMatch(/restoreGeneralUnreadByOne\(\)/);
+    expect(dismissFn).not.toMatch(/markOneRead\(\)|markAllRead\(\)/);
+
+    expect(clearAllFn).toMatch(/clearGeneralUnreadCount\(\)/);
+    expect(clearAllFn).not.toMatch(/markOneRead\(\)|markAllRead\(\)/);
   });
 });
