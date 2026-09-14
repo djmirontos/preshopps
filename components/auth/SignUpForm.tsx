@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
 import { getAppUrl } from "@/lib/env";
+import { setPendingSignupEmail } from "@/lib/auth/pending-signup-email";
 import { mergeGuestCartOnAuth } from "@/lib/cart/merge-guest-cart-on-auth";
 import { PasswordInput } from "@/components/auth/PasswordInput";
 import { AUTH_INPUT_CLASS, AUTH_BUTTON_CLASS } from "@/components/auth/auth-field-styles";
@@ -20,7 +21,12 @@ type Props = {
  * with no session (confirmation required -- the canon default). This
  * form branches on the actual response rather than assuming either way,
  * per instruction, since that toggle isn't something this task can
- * change or directly inspect.
+ * change or directly inspect. The no-session branch now hands off to
+ * /verify-email (P0 Signup Verification Slice 1) for 6-digit-code entry,
+ * instead of the previous inline "check your email" panel -- the email
+ * itself travels via sessionStorage (lib/auth/pending-signup-email.ts),
+ * never the URL, per that task's own locked decision. The session branch
+ * below is completely unchanged.
  *
  * PRD 5.5 signup-time Terms of Use / Privacy Policy acceptance: one
  * unchecked-by-default combined checkbox gates the submit button and is
@@ -39,7 +45,6 @@ export function SignUpForm({ next }: Props) {
   const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [checkEmailAddress, setCheckEmailAddress] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,25 +92,16 @@ export function SignUpForm({ next }: Props) {
       return;
     }
 
-    setIsSubmitting(false);
-    setCheckEmailAddress(email);
-  }
-
-  if (checkEmailAddress) {
-    return (
-      <div className="space-y-3 text-sm text-ink-secondary">
-        <p>
-          We sent a verification link to <span className="font-medium text-ink">{checkEmailAddress}</span>.
-        </p>
-        <p>Verify your email, then sign in.</p>
-        <Link
-          href="/sign-in"
-          className="inline-flex h-11 items-center rounded-[10px] border border-border px-4 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          Go to sign in
-        </Link>
-      </div>
-    );
+    // No session yet -- email confirmation required (canon default). Hand
+    // off to /verify-email for 6-digit-code entry rather than staying on
+    // this form. The email is carried via sessionStorage, never the URL;
+    // only `next` travels in the URL, through the same getSafeNextPath()
+    // architecture every other auth route already uses. Deliberately does
+    // not call setIsSubmitting(false) here, matching the session branch
+    // above -- both branches now navigate away rather than one of them
+    // staying on this same page.
+    setPendingSignupEmail(email);
+    router.push(`/verify-email?next=${encodeURIComponent(next)}`);
   }
 
   return (

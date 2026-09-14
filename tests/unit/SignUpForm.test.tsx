@@ -20,6 +20,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { SignUpForm } from "@/components/auth/SignUpForm";
+import { getPendingSignupEmail } from "@/lib/auth/pending-signup-email";
 
 /** Fills the three fields and, unless `skipConsent`, checks the combined
  * Terms/Privacy checkbox -- the one new precondition every previously-
@@ -39,6 +40,7 @@ describe("SignUpForm", () => {
     signUpMock.mockReset();
     pushMock.mockReset();
     refreshMock.mockReset();
+    sessionStorage.clear();
   });
 
   it("renders email, password, and confirm-password fields", () => {
@@ -68,27 +70,53 @@ describe("SignUpForm", () => {
     expect(refreshMock).toHaveBeenCalled();
   });
 
-  it("shows the check-email state when Supabase returns no session (confirmation required)", async () => {
+  it("1. stores the pending signup email in sessionStorage when Supabase returns no session (confirmation required)", async () => {
     signUpMock.mockResolvedValue({ data: { session: null, user: { id: "u1" } }, error: null });
     render(<SignUpForm next="/" />);
 
-    fillForm();
+    fillForm({ email: "new@example.com" });
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
-    expect(await screen.findByText(/new@example\.com/)).toBeInTheDocument();
-    expect(screen.getByText(/verify your email/i)).toBeInTheDocument();
-    expect(pushMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(getPendingSignupEmail()).toBe("new@example.com"));
   });
 
-  it("does not claim the user is signed in when verification is required", async () => {
+  it("2. redirects to /verify-email (never establishing a session) when Supabase returns no session", async () => {
     signUpMock.mockResolvedValue({ data: { session: null, user: { id: "u1" } }, error: null });
     render(<SignUpForm next="/" />);
 
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
-    await screen.findByText(/verify your email/i);
-    expect(screen.queryByText(/you're signed in/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/verify-email?next=%2F"));
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("3. preserves the given next destination in the /verify-email redirect", async () => {
+    signUpMock.mockResolvedValue({ data: { session: null, user: { id: "u1" } }, error: null });
+    render(<SignUpForm next="/item/PSO-ABC" />);
+
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith(`/verify-email?next=${encodeURIComponent("/item/PSO-ABC")}`));
+  });
+
+  it("4. never stores the password anywhere in sessionStorage or localStorage", async () => {
+    signUpMock.mockResolvedValue({ data: { session: null, user: { id: "u1" } }, error: null });
+    render(<SignUpForm next="/" />);
+
+    fillForm({ email: "new@example.com", password: "super-secret-pw" });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i) as string;
+      expect(sessionStorage.getItem(key)).not.toContain("super-secret-pw");
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) as string;
+      expect(localStorage.getItem(key)).not.toContain("super-secret-pw");
+    }
   });
 
   it("shows a safe error for an already-registered email", async () => {
