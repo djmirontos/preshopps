@@ -89,7 +89,7 @@ describe("SellerOrdersPage", () => {
     render(await SellerOrdersPage());
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1, name: "Seller Orders" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Customer Orders" })).toBeInTheDocument();
     expect(screen.getByText("PSO-NEWEST")).toBeInTheDocument();
     expect(screen.getByText("Jane D.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /PSO-NEWEST/ })).toHaveAttribute("href", "/seller/orders/PSO-NEWEST");

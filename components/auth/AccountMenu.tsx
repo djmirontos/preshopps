@@ -10,10 +10,32 @@ type Props = {
   email: string | null;
 };
 
-/** Small authenticated-account menu: Account + Sign out only, per the
- * approved scope -- no Orders/Dashboard/Favorites/Messages entries until
- * those routes actually exist. Closes on Escape and on outside click,
- * returns focus to the trigger on close. */
+/** Exact locked order and canonical routes -- every href already exists
+ * and is used elsewhere (My Orders/Customer Orders/My Shop/My Listings
+ * from app/account/page.tsx, Favorites from AppHeader's own heart icon).
+ * "Account" itself stays last of the direct links so this menu still
+ * leads back to the full account page, not just replaces it. */
+const MENU_LINKS: ReadonlyArray<{ href: string; label: string }> = [
+  { href: "/orders", label: "My Orders" },
+  { href: "/seller/orders", label: "Customer Orders" },
+  { href: "/seller/shop", label: "My Shop" },
+  { href: "/seller/listings", label: "My Listings" },
+  { href: "/favorites", label: "Favorites" },
+  { href: "/account", label: "Account" },
+];
+
+/** Authenticated-account menu: direct shortcuts to the main account and
+ * marketplace destinations (My Orders, Customer Orders, My Shop, My
+ * Listings, Favorites, Account) plus Sign out, so a desktop user doesn't
+ * have to open /account first just to reach these -- all reuse the exact
+ * same canonical routes /account itself already links to
+ * (app/account/page.tsx), never a new URL. "My Orders" = orders placed as
+ * a buyer (/orders); "Customer Orders" = orders customers placed with
+ * this account's own shop/listings (/seller/orders) -- the same locked
+ * distinction /account's own labels use. Desktop-only: this component is
+ * never rendered by MobileBottomNav, which keeps its own unrelated
+ * Account tab. Closes on Escape and on outside click, returns focus to
+ * the trigger on close. */
 export function AccountMenu({ email }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,23 +90,28 @@ export function AccountMenu({ email }: Props) {
           className="absolute right-0 top-full z-40 mt-2 w-56 rounded-[14px] border border-border bg-surface p-2 shadow-lg"
         >
           {email && <p className="truncate px-3 py-2 text-xs text-ink-muted">{email}</p>}
-          <Link
-            role="menuitem"
-            href="/account"
-            onClick={() => setIsOpen(false)}
-            className="flex h-11 items-center rounded-[10px] px-3 text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-          >
-            Account
-          </Link>
-          <form action={signOutAction}>
-            <button
-              type="submit"
+          {MENU_LINKS.map((link) => (
+            <Link
+              key={link.href}
               role="menuitem"
-              className="flex h-11 w-full items-center rounded-[10px] px-3 text-left text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              href={link.href}
+              onClick={() => setIsOpen(false)}
+              className="flex h-11 items-center rounded-[10px] px-3 text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
-              Sign out
-            </button>
-          </form>
+              {link.label}
+            </Link>
+          ))}
+          <div className="mt-1 border-t border-border pt-1">
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                role="menuitem"
+                className="flex h-11 w-full items-center rounded-[10px] px-3 text-left text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>

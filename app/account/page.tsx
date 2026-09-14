@@ -12,17 +12,25 @@ export const metadata = { title: "Account | Preshopps" };
  * (getAuthUser() runs before anything renders), not by a hidden client
  * check, so no account data is ever sent to an unauthenticated request.
  *
- * Favorites, Orders, My Shop, My Listings, and Seller Orders are reachable
- * here rather than as extra bottom-nav tabs -- the canonical mobile bottom
- * nav stays Home/Search/Sell/Messages/Account (see MobileBottomNav.tsx) --
- * so these links are mobile's only path to /favorites, /orders,
- * /seller/shop, /seller/listings, and /seller/orders (desktop also has the
- * header heart icon for Favorites in AppHeader.tsx; the others have no
- * header entry). My Shop, My Listings, and Seller Orders are all shown to
- * every signed-in account, not only accounts that already have a shop --
- * /seller/shop itself renders the setup form for an account with no shop
- * yet, and /seller/listings and /seller/orders each show their own
- * explanatory state, rather than hiding any entry point entirely.
+ * Favorites, My Orders, My Shop, My Listings, and Customer Orders are
+ * reachable here rather than as extra bottom-nav tabs -- the canonical
+ * mobile bottom nav stays Home/Search/Sell/Messages/Account (see
+ * MobileBottomNav.tsx) -- so these links are mobile's only path to
+ * /favorites, /orders, /seller/shop, /seller/listings, and /seller/orders.
+ * Desktop also has these same destinations as direct shortcuts in
+ * AccountMenu.tsx's dropdown now, plus the header heart icon for
+ * Favorites in AppHeader.tsx; this page itself is unchanged and still the
+ * only path to all of them on mobile. My Shop, My Listings, and Customer
+ * Orders are all shown to every signed-in account, not only accounts that
+ * already have a shop -- /seller/shop itself renders the setup form for
+ * an account with no shop yet, and /seller/listings and /seller/orders
+ * each show their own explanatory state, rather than hiding any entry
+ * point entirely.
+ *
+ * "My Orders" = orders this account placed as a buyer (/orders).
+ * "Customer Orders" = orders customers placed with this account's own
+ * shop/listings (/seller/orders). Labels only -- routes/ownership/
+ * permissions are unchanged.
  */
 export default async function AccountPage() {
   const user = await getAuthUser();
@@ -57,7 +65,7 @@ export default async function AccountPage() {
         >
           <span className="flex items-center gap-2">
             <Package className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            Orders
+            My Orders
           </span>
           <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
         </Link>
@@ -90,7 +98,7 @@ export default async function AccountPage() {
         >
           <span className="flex items-center gap-2">
             <Store className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            Seller Orders
+            Customer Orders
           </span>
           <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
         </Link>

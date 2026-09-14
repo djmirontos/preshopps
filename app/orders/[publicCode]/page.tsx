@@ -66,7 +66,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link href="/orders" className="text-sm text-ink-secondary hover:text-ink">
-        ← Back to Orders
+        ← Back to My Orders
       </Link>
 
       <div className="mt-3 flex items-center justify-between gap-3">

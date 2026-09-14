@@ -4,7 +4,7 @@ import { getMyOrders } from "@/lib/orders/get-my-orders";
 import { OrdersListClient } from "@/components/orders/OrdersListClient";
 import type { OrdersCursor } from "@/lib/orders/get-my-orders";
 
-export const metadata = { title: "Orders | Preshopps" };
+export const metadata = { title: "My Orders | Preshopps" };
 
 const ORDERS_LIMIT = 20;
 
@@ -31,7 +31,7 @@ export default async function OrdersPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-xl font-bold text-ink lg:text-2xl">Orders</h1>
+      <h1 className="text-xl font-bold text-ink lg:text-2xl">My Orders</h1>
       <p className="mt-1 text-sm text-ink-secondary">Orders you&apos;ve placed, newest first.</p>
 
       <div className="mt-6">

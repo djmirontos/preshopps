@@ -5,7 +5,7 @@ import { getMyShopOrders } from "@/lib/seller/get-my-shop-orders";
 import { SellerOrdersListClient } from "@/components/seller/SellerOrdersListClient";
 import type { SellerOrdersCursor } from "@/lib/seller/get-my-shop-orders";
 
-export const metadata = { title: "Seller Orders | Preshopps" };
+export const metadata = { title: "Customer Orders | Preshopps" };
 
 const ORDERS_LIMIT = 20;
 
@@ -30,7 +30,7 @@ export default async function SellerOrdersPage() {
   if (!shop) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-        <h1 className="text-xl font-bold text-ink lg:text-2xl">Seller Orders</h1>
+        <h1 className="text-xl font-bold text-ink lg:text-2xl">Customer Orders</h1>
         <div className="mt-6 rounded-[14px] border border-border bg-canvas px-4 py-10 text-center">
           <p className="text-sm font-medium text-ink">You don&apos;t have a shop yet.</p>
           <p className="mt-1 text-sm text-ink-muted">Orders for your shop will appear here once you start selling.</p>
@@ -48,7 +48,7 @@ export default async function SellerOrdersPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-xl font-bold text-ink lg:text-2xl">Seller Orders</h1>
+      <h1 className="text-xl font-bold text-ink lg:text-2xl">Customer Orders</h1>
       <p className="mt-1 text-sm text-ink-secondary">Orders placed with your shop, newest first.</p>
 
       <div className="mt-6">

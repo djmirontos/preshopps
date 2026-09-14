@@ -49,18 +49,18 @@ describe("AccountPage", () => {
     expect(screen.getByRole("link", { name: /favorites/i })).toHaveAttribute("href", "/favorites");
   });
 
-  it("renders an Orders link pointing at /orders for an authenticated user", async () => {
+  it("renders a My Orders link pointing at /orders for an authenticated user", async () => {
     getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
     render(await AccountPage());
 
-    expect(screen.getByRole("link", { name: "Orders" })).toHaveAttribute("href", "/orders");
+    expect(screen.getByRole("link", { name: "My Orders" })).toHaveAttribute("href", "/orders");
   });
 
-  it("renders a Seller Orders link pointing at /seller/orders for an authenticated user", async () => {
+  it("renders a Customer Orders link pointing at /seller/orders for an authenticated user", async () => {
     getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
     render(await AccountPage());
 
-    expect(screen.getByRole("link", { name: "Seller Orders" })).toHaveAttribute("href", "/seller/orders");
+    expect(screen.getByRole("link", { name: "Customer Orders" })).toHaveAttribute("href", "/seller/orders");
   });
 
   it("renders a My Shop link pointing at /seller/shop for an authenticated user", async () => {

@@ -57,7 +57,7 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
       <Link href="/seller/orders" className="text-sm text-ink-secondary hover:text-ink">
-        ← Back to Seller Orders
+        ← Back to Customer Orders
       </Link>
 
       <SellerOrderDetailClient initialOrder={result.order} />

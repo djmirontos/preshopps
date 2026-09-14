@@ -74,7 +74,7 @@ describe("OrdersPage", () => {
     render(await OrdersPage());
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1, name: "Orders" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "My Orders" })).toBeInTheDocument();
     expect(screen.getByText("PSO-NEWEST")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /PSO-NEWEST/ })).toHaveAttribute("href", "/orders/PSO-NEWEST");
   });
