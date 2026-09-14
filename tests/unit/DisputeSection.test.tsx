@@ -51,6 +51,22 @@ describe("DisputeSection -- eligibility (buyer and seller both use this same com
     render(<DisputeSection orderId="order-1" orderStatus="received_confirmed" viewerUserId="u1" existingDispute={null} />);
     expect(screen.getByRole("button", { name: "Open Dispute" })).toBeInTheDocument();
   });
+
+  it("Open Dispute uses the same robust min-height sizing strategy as the other seller order-detail action buttons, and stays full width on mobile", () => {
+    render(<DisputeSection orderId="order-1" orderStatus="accepted" viewerUserId="u1" existingDispute={null} />);
+    const button = screen.getByRole("button", { name: "Open Dispute" });
+    // Exact-token check (not substring) -- "h-12" is a substring of
+    // "min-h-12", so a naive toContain("h-12") would false-positive here.
+    const tokens = button.className.split(/\s+/).filter(Boolean);
+    expect(tokens).toContain("min-h-12");
+    expect(tokens).toContain("flex");
+    expect(tokens).toContain("items-center");
+    expect(tokens).toContain("justify-center");
+    expect(tokens).toContain("py-3");
+    expect(tokens).toContain("w-full");
+    expect(tokens).not.toContain("h-12");
+    expect(tokens).not.toContain("h-11");
+  });
 });
 
 describe("DisputeSection -- existing dispute", () => {

@@ -218,7 +218,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               type="button"
               onClick={() => setDialog("resolve_approve")}
               disabled={actionPending !== null}
-              className="h-10 rounded-[10px] bg-danger px-4 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-danger px-4 py-3 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
             >
               Approve cancellation
             </button>
@@ -226,7 +226,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               type="button"
               onClick={() => setDialog("resolve_reject")}
               disabled={actionPending !== null}
-              className="h-10 rounded-[10px] border border-border px-4 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] border border-border px-4 py-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
             >
               Reject request
             </button>
@@ -288,7 +288,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
             type="button"
             onClick={handleAcceptDecisions}
             disabled={actionPending !== null}
-            className="h-11 flex-1 rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+            className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-brand-action px-4 py-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
           >
             {actionPending === "decide_items" ? "Saving…" : allChecked ? "Accept order" : "Save decisions"}
           </button>
@@ -296,7 +296,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
             type="button"
             onClick={() => setDialog("decline")}
             disabled={actionPending !== null}
-            className="h-11 flex-1 rounded-[10px] border border-danger px-4 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+            className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] border border-danger px-4 py-3 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
           >
             Decline order
           </button>
@@ -310,7 +310,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               type="button"
               onClick={handleMarkReady}
               disabled={actionPending !== null}
-              className="h-11 flex-1 rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-brand-action px-4 py-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
             >
               {actionPending === "mark_ready" ? "Updating…" : "Mark ready"}
             </button>
@@ -320,7 +320,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               type="button"
               onClick={handleMarkHandedOverOrShipped}
               disabled={actionPending !== null}
-              className="h-11 flex-1 rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] bg-brand-action px-4 py-3 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
             >
               {actionPending === "mark_handed_over_or_shipped"
                 ? "Updating…"
@@ -334,7 +334,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               type="button"
               onClick={() => setDialog("cancel_accepted")}
               disabled={actionPending !== null}
-              className="h-11 flex-1 rounded-[10px] border border-danger px-4 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+              className="flex min-h-12 flex-1 items-center justify-center rounded-[10px] border border-danger px-4 py-3 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
             >
               Cancel order
             </button>

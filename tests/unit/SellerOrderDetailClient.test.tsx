@@ -204,3 +204,92 @@ describe("SellerOrderDetailClient -- accepted/ready lifecycle", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
+
+/** Exact-token class check (not substring) -- a substring check like
+ * `className.toContain("h-12")` would false-positive on `min-h-12` (which
+ * legitimately contains "h-12" as a trailing substring), so this splits on
+ * whitespace and compares whole class tokens instead. */
+function classTokens(el: HTMLElement): string[] {
+  return el.className.split(/\s+/).filter(Boolean);
+}
+
+/** Asserts the exact, final tap-target sizing strategy every visible
+ * seller order-action button must share: a robust `min-h-12` floor (never
+ * a competing fixed `h-*`, which is what silently collapsed below 48px
+ * when combined with `flex-1` inside a `flex-col` mobile layout -- see
+ * this file's own header comment / the task report for the root-cause
+ * explanation), explicit flex centering so the label stays vertically
+ * centered regardless of the box's final resolved height, comfortable
+ * vertical padding as a content-based floor independent of min-height, and
+ * full-width mobile distribution via `flex-1`. */
+function expectRobustActionButtonSizing(button: HTMLElement) {
+  const tokens = classTokens(button);
+  expect(tokens).toContain("min-h-12");
+  expect(tokens).toContain("flex");
+  expect(tokens).toContain("items-center");
+  expect(tokens).toContain("justify-center");
+  expect(tokens).toContain("py-3");
+  expect(tokens).toContain("flex-1");
+  expect(tokens).not.toContain("h-12");
+  expect(tokens).not.toContain("h-11");
+  expect(tokens).not.toContain("h-10");
+}
+
+describe("SellerOrderDetailClient -- mobile tap-target consistency across every lifecycle action button", () => {
+  // A fixed h-* utility on a flex-1 (flex: 1 1 0%) child inside a
+  // `flex-col` mobile layout can be squeezed down toward the button's tiny
+  // intrinsic content size instead of the intended height -- min-height is
+  // a hard floor the flex sizing algorithm always respects, so every
+  // visible seller order-action button now uses min-h-12 (48px) instead of
+  // a plain h-12, plus explicit flex centering and real vertical padding
+  // as a content-based safety net.
+  it("Accept order, Save decisions, and Decline order all use the robust min-height sizing strategy", () => {
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+    for (const name of ["Accept order", "Decline order"]) {
+      expectRobustActionButtonSizing(screen.getByRole("button", { name }));
+    }
+  });
+
+  it("Mark ready and Cancel order use the robust min-height sizing strategy", () => {
+    render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "accepted", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
+    for (const name of ["Mark ready", "Cancel order"]) {
+      expectRobustActionButtonSizing(screen.getByRole("button", { name }));
+    }
+  });
+
+  it("Mark shipped/handed over uses the robust min-height sizing strategy", () => {
+    render(
+      <SellerOrderDetailClient
+        initialOrder={sampleOrder({ status: "ready", fulfillmentMethod: "shipping", items: [{ ...sampleOrder().items[0], status: "accepted" }] })}
+      />,
+    );
+    expectRobustActionButtonSizing(screen.getByRole("button", { name: "Mark shipped" }));
+  });
+
+  it("Approve cancellation and Reject request match every other seller order action button's robust min-height sizing strategy -- previously a thinner h-10 outlier, then a still-collapsing plain h-12", () => {
+    render(
+      <SellerOrderDetailClient
+        initialOrder={sampleOrder({
+          status: "accepted",
+          items: [{ ...sampleOrder().items[0], status: "accepted" }],
+          pendingCancellationRequestId: "req-1",
+          pendingCancellationReason: "Changed my mind",
+        })}
+      />,
+    );
+    for (const name of ["Approve cancellation", "Reject request"]) {
+      expectRobustActionButtonSizing(screen.getByRole("button", { name }));
+    }
+  });
+
+  it("the confirmation-dialog buttons underneath (e.g. the Decline order confirm/cancel pair) are NOT part of this standardization -- they are not flex-1 children of a flex-col row, so their own plain h-11 already renders correctly and is left untouched", () => {
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Decline order" }));
+    const dialog = screen.getByRole("dialog");
+    const confirmButton = within(dialog).getByRole("button", { name: "Decline order" });
+    const tokens = classTokens(confirmButton);
+    expect(tokens).toContain("h-11");
+    expect(tokens).not.toContain("min-h-12");
+    expect(tokens).not.toContain("flex-1");
+  });
+});

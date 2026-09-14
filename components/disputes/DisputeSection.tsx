@@ -77,7 +77,7 @@ export function DisputeSection({ orderId, orderStatus, viewerUserId, existingDis
       <button
         type="button"
         onClick={() => setIsDialogOpen(true)}
-        className="h-11 w-full rounded-[10px] border border-danger px-4 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:w-auto"
+        className="flex min-h-12 w-full items-center justify-center rounded-[10px] border border-danger px-4 py-3 text-sm font-semibold text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:w-auto"
       >
         Open Dispute
       </button>
