@@ -15,10 +15,10 @@ function readFile(relativePath: string): string {
  * specific account/order destinations, and no backend touched.
  */
 describe("Account navigation cleanup stays frontend-only -- no backend/migration change", () => {
-  it("no migration newer than 0091 exists -- this task added no schema/RPC change", () => {
+  it("no migration newer than 0092 exists -- this task added no schema/RPC change", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
-    const newerThan0091 = migrationFiles.filter((f) => f > "0091_notification_dismiss.sql");
-    expect(newerThan0091).toEqual([]);
+    const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
+    expect(newerThan0092).toEqual([]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });
 });

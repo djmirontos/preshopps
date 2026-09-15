@@ -41,11 +41,11 @@ const MIGRATION_PATH = "supabase/migrations/0089_buy_now_order_submission.sql";
  * ListingActions.test.tsx.
  */
 describe("Buy Now -- migration 0089 exists and touches nothing else", () => {
-  it("0089_buy_now_order_submission.sql exists, and no migration newer than 0091 exists yet (0090/0091 are later, separately-approved migrations, unrelated to Buy Now)", () => {
+  it("0089_buy_now_order_submission.sql exists, and no migration newer than 0092 exists yet (0090/0091/0092 are later, separately-approved migrations, unrelated to Buy Now)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0089_buy_now_order_submission.sql");
-    const newerThan0091 = migrationFiles.filter((f) => f > "0091_notification_dismiss.sql");
-    expect(newerThan0091).toEqual([]);
+    const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
+    expect(newerThan0092).toEqual([]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });
 
@@ -294,10 +294,10 @@ describe("Buy Now -- guest gating reuses the existing AuthGate convention, not a
 });
 
 describe("Buy Now -- post-submit terminal-success fix (P2) stayed frontend-only", () => {
-  it("no migration newer than 0091 exists -- this fix touched no backend/RPC/schema (0090/0091 are later, separately-approved migrations)", () => {
+  it("no migration newer than 0092 exists -- this fix touched no backend/RPC/schema (0090/0091/0092 are later, separately-approved migrations)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
-    const newerThan0091 = migrationFiles.filter((f) => f > "0091_notification_dismiss.sql");
-    expect(newerThan0091).toEqual([]);
+    const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
+    expect(newerThan0092).toEqual([]);
   });
 
   it("OrderReviewSubmit still calls only submit_cart_order/get_my_cart as its own defaults -- this fix changed when the form renders, not what it submits to", () => {
@@ -334,10 +334,10 @@ describe("Buy Now -- post-submit terminal-success fix (P2) stayed frontend-only"
 });
 
 describe("Buy Now -- post-submit navigation fix (P3): straight to order detail, no intermediate success card", () => {
-  it("no migration newer than 0091 exists -- this fix is frontend-only (0090/0091 are later, separately-approved migrations)", () => {
+  it("no migration newer than 0092 exists -- this fix is frontend-only (0090/0091/0092 are later, separately-approved migrations)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
-    const newerThan0091 = migrationFiles.filter((f) => f > "0091_notification_dismiss.sql");
-    expect(newerThan0091).toEqual([]);
+    const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
+    expect(newerThan0092).toEqual([]);
   });
 
   it("OrderReviewSubmit exposes an optional onSuccess callback that defaults to undefined -- /cart's own usage is unaffected unless it opts in", () => {
