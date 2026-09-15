@@ -2,10 +2,11 @@ import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/image-processing/compress-image";
 
 /**
- * Exactly the three buckets created by 0048_media_storage_foundation.sql.
- * Never invent a fourth without a matching migration.
+ * The three buckets created by 0048_media_storage_foundation.sql, plus
+ * avatar-images (0092_account_profile_management.sql). Never invent a
+ * bucket here without a matching migration already live.
  */
-export type MediaBucket = "listing-images" | "review-images" | "shop-images" | "dispute-images";
+export type MediaBucket = "listing-images" | "review-images" | "shop-images" | "dispute-images" | "avatar-images";
 
 const MAX_SOURCE_FILE_BYTES = 20 * 1024 * 1024;
 

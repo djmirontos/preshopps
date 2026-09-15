@@ -1,31 +1,30 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, Heart, List, Package, Settings, Store } from "lucide-react";
+import { ChevronRight, Heart, List, Package, Store } from "lucide-react";
 import { getAuthUser } from "@/lib/auth/session";
 import { signOutAction } from "@/lib/auth/actions";
+import { getMyProfile } from "@/lib/account/get-my-profile";
+import { getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
+import { AccountProfileForm } from "@/components/account/AccountProfileForm";
 
 export const metadata = { title: "Account | Preshopps" };
 
 /**
- * Minimal account page: signed-in email, a Favorites entry, and Sign out,
- * per the approved MVP scope -- no profile editing yet. Guarded server-side
- * (getAuthUser() runs before anything renders), not by a hidden client
- * check, so no account data is ever sent to an unauthenticated request.
+ * Responsive Account/Profile page built on the 0092 backend
+ * (get_my_profile/update_my_profile/avatar-images) -- still the single
+ * /account route, still the only path mobile's bottom-nav Account tab
+ * reaches (MobileBottomNav.tsx is untouched). Guarded server-side exactly
+ * like before: getAuthUser() runs before anything renders, so no account
+ * data is ever sent to an unauthenticated request.
  *
- * Favorites, My Orders, My Shop, My Listings, and Customer Orders are
- * reachable here rather than as extra bottom-nav tabs -- the canonical
- * mobile bottom nav stays Home/Search/Sell/Messages/Account (see
- * MobileBottomNav.tsx) -- so these links are mobile's only path to
- * /favorites, /orders, /seller/shop, /seller/listings, and /seller/orders.
- * Desktop also has these same destinations as direct shortcuts in
- * AccountMenu.tsx's dropdown now, plus the header heart icon for
- * Favorites in AppHeader.tsx; this page itself is unchanged and still the
- * only path to all of them on mobile. My Shop, My Listings, and Customer
- * Orders are all shown to every signed-in account, not only accounts that
- * already have a shop -- /seller/shop itself renders the setup form for
- * an account with no shop yet, and /seller/listings and /seller/orders
- * each show their own explanatory state, rather than hiding any entry
- * point entirely.
+ * Sections: Profile/Location/Contact live inside AccountProfileForm (the
+ * one stateful piece, with its own single "Save Changes" action).
+ * Marketplace and Account (Sign out, Request account deletion) stay
+ * server-rendered links/forms here, unchanged in spirit from the
+ * page's earlier link-list shape -- they need no client state.
+ *
+ * No Security section yet (Change Email/Password land in a later
+ * slice) -- this page does not add, link to, or imply either.
  *
  * "My Orders" = orders this account placed as a buyer (/orders).
  * "Customer Orders" = orders customers placed with this account's own
@@ -41,77 +40,146 @@ export default async function AccountPage() {
     redirect(`/sign-in?next=${encodeURIComponent("/account")}`);
   }
 
-  return (
-    <div className="mx-auto max-w-sm px-4 py-10 sm:py-16">
-      <div className="rounded-[14px] border border-border bg-surface p-6 sm:p-8">
-        <h1 className="text-xl font-bold text-ink">Account</h1>
-        <p className="mt-4 text-sm text-ink-secondary">Signed in as</p>
-        <p className="text-sm font-medium text-ink">{user.email}</p>
+  const [profileResult, provinces] = await Promise.all([getMyProfile(), getProvinces()]);
 
-        <Link
-          href="/favorites"
-          className="mt-6 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <span className="flex items-center gap-2">
-            <Heart className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            Favorites
-          </span>
-          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-        </Link>
+  async function loadCitiesAction(provinceId: number): Promise<LocationRef[]> {
+    "use server";
+    return getCitiesForProvince(provinceId);
+  }
 
-        <Link
-          href="/orders"
-          className="mt-3 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <span className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            My Orders
-          </span>
-          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-        </Link>
+  async function loadBarangaysAction(cityId: number): Promise<LocationRef[]> {
+    "use server";
+    return getBarangaysForCity(cityId);
+  }
 
-        <Link
-          href="/seller/shop"
-          className="mt-3 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <span className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            My Shop
-          </span>
-          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-        </Link>
-
-        <Link
-          href="/seller/listings"
-          className="mt-3 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <span className="flex items-center gap-2">
-            <List className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            My Listings
-          </span>
-          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-        </Link>
-
-        <Link
-          href="/seller/orders"
-          className="mt-3 flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        >
-          <span className="flex items-center gap-2">
-            <Store className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-            Customer Orders
-          </span>
-          <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
-        </Link>
-
-        <form action={signOutAction} className="mt-3">
-          <button
-            type="submit"
-            className="h-11 w-full rounded-[10px] border border-border text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+  if (profileResult.hadError) {
+    return (
+      <div className="mx-auto max-w-sm px-4 py-10 sm:py-16">
+        <div className="rounded-[14px] border border-border bg-surface p-6 text-center sm:p-8">
+          <h1 className="text-xl font-bold text-ink">Account</h1>
+          <p className="mt-4 text-sm text-ink-secondary">We couldn&rsquo;t load your account details. Please try again.</p>
+          <Link
+            href="/account"
+            className="mt-4 inline-flex h-11 items-center justify-center rounded-[10px] border border-border px-4 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            Sign out
-          </button>
-        </form>
+            Try again
+          </Link>
+        </div>
       </div>
+    );
+  }
+
+  const { profile } = profileResult;
+
+  const [initialCities, initialBarangays] = await Promise.all([
+    profile.provinceId !== null ? getCitiesForProvince(profile.provinceId) : Promise.resolve([] as LocationRef[]),
+    profile.cityId !== null ? getBarangaysForCity(profile.cityId) : Promise.resolve([] as LocationRef[]),
+  ]);
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+      <h1 className="text-xl font-bold text-ink lg:text-2xl">Account</h1>
+      <p className="mt-1 text-sm text-ink-secondary">Manage your profile, location, and contact details.</p>
+
+      <div className="mt-6">
+        <AccountProfileForm
+          userId={user.id}
+          email={user.email ?? ""}
+          initialProfile={profile}
+          provinces={provinces}
+          initialCities={initialCities}
+          initialBarangays={initialBarangays}
+          loadCities={loadCitiesAction}
+          loadBarangays={loadBarangaysAction}
+        />
+      </div>
+
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold text-ink">Marketplace</h2>
+        <div className="mt-3 space-y-3">
+          <Link
+            href="/orders"
+            className="flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <span className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+              My Orders
+            </span>
+            <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+          </Link>
+
+          <Link
+            href="/seller/orders"
+            className="flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <span className="flex items-center gap-2">
+              <Store className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+              Customer Orders
+            </span>
+            <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+          </Link>
+
+          <Link
+            href="/seller/shop"
+            className="flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <span className="flex items-center gap-2">
+              <Store className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+              My Shop
+            </span>
+            <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+          </Link>
+
+          <Link
+            href="/seller/listings"
+            className="flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <span className="flex items-center gap-2">
+              <List className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+              My Listings
+            </span>
+            <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+          </Link>
+
+          <Link
+            href="/favorites"
+            className="flex h-11 items-center justify-between rounded-[10px] border border-border px-3 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <span className="flex items-center gap-2">
+              <Heart className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+              Favorites
+            </span>
+            <ChevronRight className="h-4 w-4 text-ink-secondary" aria-hidden="true" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold text-ink">Account</h2>
+        <div className="mt-3 space-y-3">
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              className="h-11 w-full rounded-[10px] border border-border text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              Sign out
+            </button>
+          </form>
+
+          <div className="rounded-[10px] border border-border p-3">
+            <p className="text-sm font-medium text-ink">Request account deletion</p>
+            <p className="mt-1 text-xs text-ink-secondary">
+              Account deletion is handled through a support request, not an automatic action. Choose &ldquo;Account issue&rdquo; when you submit it.
+            </p>
+            <Link
+              href="/support"
+              className="mt-2 inline-block rounded text-sm font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              Go to Support →
+            </Link>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
