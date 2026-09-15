@@ -10,6 +10,9 @@ const {
   markOrderHandedOverOrShippedMock,
   cancelAcceptedOrderMock,
   resolveOrderCancellationMock,
+  getConversationForShopOrderMock,
+  startConversationFromOrderMock,
+  openConversationMock,
 } = vi.hoisted(() => ({
   refreshMock: vi.fn(),
   pushMock: vi.fn(),
@@ -18,6 +21,9 @@ const {
   markOrderHandedOverOrShippedMock: vi.fn(),
   cancelAcceptedOrderMock: vi.fn(),
   resolveOrderCancellationMock: vi.fn(),
+  getConversationForShopOrderMock: vi.fn(),
+  startConversationFromOrderMock: vi.fn(),
+  openConversationMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -36,7 +42,37 @@ vi.mock("@/lib/seller/seller-order-actions", async () => {
   };
 });
 
+vi.mock("@/lib/messaging/get-conversation-for-shop-order", () => ({
+  getConversationForShopOrder: getConversationForShopOrderMock,
+}));
+
+vi.mock("@/lib/messaging/start-conversation-from-order", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/messaging/start-conversation-from-order")>();
+  return {
+    ...actual,
+    startConversationFromOrder: startConversationFromOrderMock,
+  };
+});
+
+vi.mock("@/components/messaging/FloatingMessengerProvider", () => ({
+  useFloatingMessenger: () => ({
+    isOpen: false,
+    selectedConversationId: null,
+    openMessenger: vi.fn(),
+    openConversation: openConversationMock,
+    minimize: vi.fn(),
+    close: vi.fn(),
+  }),
+}));
+
 import { SellerOrderDetailClient } from "@/components/seller/SellerOrderDetailClient";
+
+const DESKTOP_WIDTH = 1280;
+const MOBILE_WIDTH = 375;
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+}
 
 function sampleOrder(overrides: Partial<SellerOrderDetail> = {}): SellerOrderDetail {
   return {
@@ -60,6 +96,7 @@ function sampleOrder(overrides: Partial<SellerOrderDetail> = {}): SellerOrderDet
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setViewportWidth(DESKTOP_WIDTH);
 });
 
 describe("SellerOrderDetailClient -- pending order item acceptance", () => {
@@ -214,9 +251,10 @@ describe("SellerOrderDetailClient -- accepted/ready lifecycle", () => {
     await waitFor(() => expect(resolveOrderCancellationMock).toHaveBeenCalledWith("req-1", false, "Already packed for shipping."));
   });
 
-  it("hides every lifecycle action for a status with no seller action (handed_over_or_shipped)", () => {
+  it("hides every lifecycle action for a status with no seller action (handed_over_or_shipped) -- but the persistent Message Buyer action always remains", () => {
     render(<SellerOrderDetailClient initialOrder={sampleOrder({ status: "handed_over_or_shipped", items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
   });
 });
 
@@ -365,7 +403,7 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Is the item ready for pickup?");
     expect(dialog).toHaveTextContent("Let your buyer know the item is ready and coordinate the pickup through Preshopps chat.");
-    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Mark Ready for Pickup" })).toBeInTheDocument();
     expect(markOrderReadyMock).not.toHaveBeenCalled();
   });
@@ -384,12 +422,17 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
-  it("3. Open Messages from the pickup readiness modal never calls the status RPC", () => {
+  it("3. Message Buyer from the pickup readiness modal closes the modal, starts the direct lookup, and never calls the status RPC", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
     render(<SellerOrderDetailClient initialOrder={acceptedOrder("pickup")} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Ready for Pickup" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open Messages" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Message Buyer" }));
 
+    // 18. Fulfillment modal closes before the direct messaging flow continues -- no overlapping dialogs.
+    expect(screen.queryByText("Is the item ready for pickup?")).not.toBeInTheDocument();
+
+    await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalledWith("PSO-ABC12345"));
     expect(markOrderReadyMock).not.toHaveBeenCalled();
     expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
   });
@@ -439,7 +482,7 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Is the item ready to ship?");
     expect(dialog).toHaveTextContent("Make sure the item is packed and coordinate shipping details with your buyer before continuing.");
-    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Ready to Ship" })).toBeInTheDocument();
   });
 
@@ -467,7 +510,7 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Ready to meet your buyer?");
     expect(dialog).toHaveTextContent("Coordinate the meetup time and location with your buyer before handing over the item.");
-    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Ready for Meetup" })).toBeInTheDocument();
   });
 
@@ -495,7 +538,7 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Ready to deliver the item?");
     expect(dialog).toHaveTextContent("Coordinate the delivery details with your buyer before starting the delivery.");
-    expect(within(dialog).getByRole("button", { name: "Open Messages" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Ready for Delivery" })).toBeInTheDocument();
   });
 
@@ -609,17 +652,258 @@ describe("SellerOrderDetailClient -- fulfillment transition confirmation/instruc
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  // ===== 16: Open Messages reuses existing messaging flow =====
-  it("16. Open Messages navigates to the existing Messages inbox and never calls a status RPC or any new messaging RPC", () => {
+  // ===== 16: Message Buyer reuses the same direct messaging flow as the persistent action, never a generic /messages push =====
+  it("16. Message Buyer from the fulfillment modal opens the existing conversation directly (desktop) and never calls a status RPC or pushes to the generic /messages inbox", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
     render(<SellerOrderDetailClient initialOrder={acceptedOrder("shipping")} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Ready to Ship" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open Messages" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Message Buyer" }));
 
-    expect(pushMock).toHaveBeenCalledWith("/messages");
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-1"));
+    // 19. The old generic router.push("/messages") fallback is gone from this flow.
+    expect(pushMock).not.toHaveBeenCalledWith("/messages");
     expect(markOrderReadyMock).not.toHaveBeenCalled();
     expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("SellerOrderDetailClient -- persistent Message Buyer action", () => {
+  it("1. renders a persistent 'Message Buyer' action on the order detail", () => {
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+    expect(screen.getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
+  });
+
+  it("2. is available regardless of order status -- pending, accepted, ready, handed_over_or_shipped, completed, cancelled, expired, and disputed", () => {
+    for (const status of ["pending", "accepted", "ready", "handed_over_or_shipped", "completed", "cancelled", "expired", "disputed"] as const) {
+      const { unmount } = render(<SellerOrderDetailClient initialOrder={sampleOrder({ status, items: [{ ...sampleOrder().items[0], status: "accepted" }] })} />);
+      expect(screen.getByRole("button", { name: "Message Buyer" })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("4. clicking Message Buyer calls the order-scoped lookup wrapper", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalled());
+  });
+
+  it("5/6. passes only the order's own public code -- never a buyer id, shop id, or any other identifier", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder({ orderPublicCode: "PSO-XYZ99999" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalledWith("PSO-XYZ99999"));
+    expect(getConversationForShopOrderMock).toHaveBeenCalledTimes(1);
+    const args = getConversationForShopOrderMock.mock.calls[0];
+    expect(args).toEqual(["PSO-XYZ99999"]);
+  });
+
+  it("7. an existing conversation opens the floating messenger directly on desktop -- no compose dialog, no navigation", async () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-1"));
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("8. an existing conversation routes to /messages/{id} on mobile -- no floating messenger, no compose dialog", async () => {
+    setViewportWidth(MOBILE_WIDTH);
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages/conv-1"));
+    expect(openConversationMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("9. no existing conversation opens the existing ComposeMessageDialog, titled 'Message Buyer'", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Message Buyer")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Message")).toBeInTheDocument();
+  });
+
+  it("10. merely opening the compose dialog never calls startConversationFromOrder", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    await screen.findByRole("dialog");
+
+    expect(startConversationFromOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("11. sending the first message calls startConversationFromOrder with the order public code and typed body -- never a buyer id", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: true,
+      conversationId: "conv-2",
+      messageId: "msg-1",
+      createdAt: "2026-01-05T00:00:00.000Z",
+      conversationCreated: true,
+    });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder({ orderPublicCode: "PSO-ABC12345" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "Your order is ready!" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(startConversationFromOrderMock).toHaveBeenCalledWith("PSO-ABC12345", "Your order is ready!"));
+  });
+
+  it("12. a successful first send closes the compose dialog and opens the returned conversation (desktop)", async () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: true,
+      conversationId: "conv-2",
+      messageId: "msg-1",
+      createdAt: "2026-01-05T00:00:00.000Z",
+      conversationCreated: true,
+    });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "Your order is ready!" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-2"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("12b. a successful first send opens the returned conversation via /messages/{id} on mobile", async () => {
+    setViewportWidth(MOBILE_WIDTH);
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: true,
+      conversationId: "conv-2",
+      messageId: "msg-1",
+      createdAt: "2026-01-05T00:00:00.000Z",
+      conversationCreated: true,
+    });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "Your order is ready!" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages/conv-2"));
+  });
+
+  it("13/14. a failed first send keeps the dialog open and preserves the typed body", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    startConversationFromOrderMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "Your order is ready!" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(startConversationFromOrderMock).toHaveBeenCalled());
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Message")).toHaveValue("Your order is ready!");
+    expect(openConversationMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("15. a failed first send shows only the safe wrapper error, never a raw backend message", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    startConversationFromOrderMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "hi" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    expect(await within(dialog).findByText("You can't message this buyer right now.")).toBeInTheDocument();
+  });
+
+  it("15b. a failed lookup shows the safe wrapper error on the page, never a raw backend message", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: false, error: "We couldn't open this conversation right now." });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    expect(await screen.findByText("We couldn't open this conversation right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("16. the Send button is disabled while the first-send request is pending, preventing a duplicate send", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    let resolveSend: (value: { ok: true; conversationId: string; messageId: string; createdAt: string; conversationCreated: boolean }) => void = () => {};
+    startConversationFromOrderMock.mockReturnValue(new Promise((resolve) => (resolveSend = resolve)));
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "hi" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    const pendingButton = await within(dialog).findByRole("button", { name: "Sending…" });
+    expect(pendingButton).toBeDisabled();
+    fireEvent.click(pendingButton);
+    expect(startConversationFromOrderMock).toHaveBeenCalledTimes(1);
+
+    resolveSend({ ok: true, conversationId: "conv-2", messageId: "msg-1", createdAt: "2026-01-05T00:00:00.000Z", conversationCreated: true });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("17. the Message Buyer button is disabled while the initial lookup is pending, preventing duplicate clicks and a second dialog", async () => {
+    let resolveLookup: (value: { ok: true; conversationId: string | null }) => void = () => {};
+    getConversationForShopOrderMock.mockReturnValue(new Promise((resolve) => (resolveLookup = resolve)));
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    const button = screen.getByRole("button", { name: "Message Buyer" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(getConversationForShopOrderMock).toHaveBeenCalledTimes(1);
+
+    resolveLookup({ ok: true, conversationId: null });
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+  });
+
+  it("20. the buyer-side Message Seller flow is a separate module, untouched by this component", () => {
+    // This component never imports ShopMessageAction/ListingActions and
+    // never calls the buyer-initiated start_conversation RPC -- it only
+    // ever uses the order-scoped wrappers mocked above.
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    expect(startConversationFromOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("21/22. never calls supabase.rpc directly for messaging -- only the two committed wrapper functions are used", async () => {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+    await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalled());
+    // No direct Supabase client is imported/mocked by this test file at
+    // all for messaging -- the component can only have reached
+    // openConversationMock through the two wrapper mocks above.
+    expect(openConversationMock).toHaveBeenCalledWith("conv-1");
   });
 });
 

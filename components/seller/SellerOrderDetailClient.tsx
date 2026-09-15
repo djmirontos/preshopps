@@ -10,6 +10,11 @@ import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import { SellerFulfillmentTransitionModal } from "@/components/seller/SellerFulfillmentTransitionModal";
+import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
+import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
+import { isDesktopViewport } from "@/lib/ui/viewport";
+import { getConversationForShopOrder } from "@/lib/messaging/get-conversation-for-shop-order";
+import { startConversationFromOrder, START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES } from "@/lib/messaging/start-conversation-from-order";
 import { FULFILLMENT_LABELS } from "@/lib/marketplace/search-params";
 import {
   getSellerOrderStatusGuidance,
@@ -58,12 +63,16 @@ function decisionsFor(order: SellerOrderDetail): Record<string, boolean> {
 
 export function SellerOrderDetailClient({ initialOrder }: Props) {
   const router = useRouter();
+  const { openConversation } = useFloatingMessenger();
   const [prevInitialOrder, setPrevInitialOrder] = useState(initialOrder);
   const [order, setOrder] = useState(initialOrder);
   const [decisions, setDecisions] = useState<Record<string, boolean>>(() => decisionsFor(initialOrder));
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isMessageBuyerComposeOpen, setIsMessageBuyerComposeOpen] = useState(false);
+  const [isSendingFirstMessage, setIsSendingFirstMessage] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
 
   if (initialOrder !== prevInitialOrder) {
     setPrevInitialOrder(initialOrder);
@@ -151,21 +160,82 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     router.refresh();
   }
 
-  /** The readiness-modal secondary action must never change order status --
-   * this handler makes no RPC call of any kind. Labeled "Open Messages"
-   * (not "Message Buyer") because it can only open the general Messages
-   * inbox, not a specific conversation with this order's buyer:
-   * get_my_shop_order_detail exposes no buyer_id, and the existing
-   * start_conversation RPC is buyer-initiated-to-shop only (it explicitly
-   * rejects a shop owner messaging their own shop) -- there is currently no
-   * seller-initiated "message this buyer" capability anywhere in the
-   * messaging architecture to reuse, and adding one would require a
-   * migration, out of scope for this task. Reported as a known gap rather
-   * than silently building a broken deep link or inventing new backend
-   * plumbing. */
-  function handleMessageBuyer() {
+  /** Opens the floating messenger on desktop, or navigates to the
+   * full-page conversation route on mobile -- the exact same split
+   * ShopMessageAction/ListingActions already use for the buyer-side
+   * "Message Seller" flow. No second messaging panel, no separate
+   * viewport system. */
+  function openConversationEverywhere(conversationId: string) {
+    if (isDesktopViewport()) {
+      openConversation(conversationId);
+    } else {
+      router.push(`/messages/${conversationId}`);
+    }
+  }
+
+  /** Order-scoped seller->buyer messaging entry point, shared by the
+   * persistent "Message Buyer" action and the ready-transition modal's
+   * secondary button. Never supplies a buyer id anywhere -- only the
+   * order's own public code, exactly like get_my_shop_order_detail's own
+   * authorization shape. If a dialog (e.g. the fulfillment modal) is
+   * open, it is closed first so nothing overlaps with the messaging flow
+   * that follows.
+   *
+   * Reuses `actionPending`/`actionError` (the same state every other
+   * lifecycle action on this page already uses) for the lookup itself --
+   * this both disables every other action button while the lookup is in
+   * flight and prevents a duplicate click on this same button, with no
+   * separate pending flag needed. A lookup failure surfaces through the
+   * existing page-level error paragraph, the same one every other action
+   * here already uses.
+   */
+  async function handleMessageBuyer() {
+    if (actionPending !== null) return;
     closeDialog();
-    router.push("/messages");
+    setActionPending("message_buyer_lookup");
+
+    const result = await getConversationForShopOrder(order.orderPublicCode);
+
+    setActionPending(null);
+
+    if (!result.ok) {
+      setActionError(result.error);
+      return;
+    }
+
+    if (result.conversationId) {
+      openConversationEverywhere(result.conversationId);
+      return;
+    }
+
+    // No GENERAL conversation exists yet -- never create one just from
+    // opening this dialog. The seller's first real message (below) is
+    // what atomically creates it, via start_conversation_from_order.
+    setComposeError(null);
+    setIsMessageBuyerComposeOpen(true);
+  }
+
+  /** Sends the seller's first/next real message to this order's buyer.
+   * On failure, the compose dialog stays open (its own typed body is
+   * untouched -- ComposeMessageDialog never clears its internal state
+   * itself, only unmounting does, and this handler only unmounts it on
+   * success) and shows the safe wrapper error, allowing retry. */
+  async function handleSendFirstMessage(body: string) {
+    if (isSendingFirstMessage) return;
+    setIsSendingFirstMessage(true);
+    setComposeError(null);
+
+    const result = await startConversationFromOrder(order.orderPublicCode, body);
+
+    setIsSendingFirstMessage(false);
+
+    if (!result.ok) {
+      setComposeError(START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES[result.code]);
+      return;
+    }
+
+    setIsMessageBuyerComposeOpen(false);
+    openConversationEverywhere(result.conversationId);
   }
 
   async function handleCancelAccepted(reason: string) {
@@ -238,6 +308,20 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
             <p className="mt-1 text-sm text-ink">{order.buyerNote}</p>
           </div>
         )}
+      </div>
+
+      {/* Always available regardless of order status/lifecycle -- messaging
+          is buyer<->shop communication, not gated by pending/completed/
+          cancelled/disputed state. */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={handleMessageBuyer}
+          disabled={actionPending !== null}
+          className="flex h-11 w-full items-center justify-center rounded-[10px] border border-border px-4 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 sm:w-auto"
+        >
+          {actionPending === "message_buyer_lookup" ? "Opening…" : "Message Buyer"}
+        </button>
       </div>
 
       {hasPendingCancellationRequest && allowedActions.includes("resolve_cancellation") && (
@@ -431,7 +515,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
               body={copy.body}
               primaryLabel={copy.primaryLabel}
               pendingPrimaryLabel="Updating…"
-              secondaryLabel="Open Messages"
+              secondaryLabel="Message Buyer"
               isPending={actionPending === "mark_ready"}
               errorMessage={actionError}
               onPrimaryConfirm={handleMarkReady}
@@ -459,6 +543,19 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
             />
           );
         })()}
+
+      {isMessageBuyerComposeOpen && (
+        <ComposeMessageDialog
+          title="Message Buyer"
+          isPending={isSendingFirstMessage}
+          errorMessage={composeError}
+          onSend={handleSendFirstMessage}
+          onClose={() => {
+            setIsMessageBuyerComposeOpen(false);
+            setComposeError(null);
+          }}
+        />
+      )}
     </>
   );
 }

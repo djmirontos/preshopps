@@ -12,10 +12,11 @@ type Props = {
   isPending: boolean;
   errorMessage?: string | null;
   onPrimaryConfirm: () => void;
-  /** Fired by the secondary button -- either "Open Messages" (navigates
-   * away, never touches order status) or "Not Yet" (simply closes). Which
-   * one is passed in is entirely the caller's decision; this component
-   * has no opinion on what the secondary action actually does. */
+  /** Fired by the secondary button -- either "Message Buyer" (opens the
+   * direct buyer messaging flow, never touches order status) or "Not Yet"
+   * (simply closes). Which one is passed in is entirely the caller's
+   * decision; this component has no opinion on what the secondary action
+   * actually does. */
   onSecondaryAction: () => void;
   onClose: () => void;
 };
@@ -29,7 +30,7 @@ type Props = {
  * than an extra ConfirmDialog mode: ConfirmDialog's API (confirmLabel +
  * cancelLabel, an optional required-note textarea, one destructive/one
  * neutral visual style) has no notion of a secondary action that performs a
- * real navigation (Open Messages) as opposed to a plain dismiss (Not Yet or
+ * real navigation (Message Buyer) as opposed to a plain dismiss (Not Yet or
  * the close affordances) -- bending it to cover both would make its API
  * more confusing for its own five existing call sites, which is exactly the
  * "if it would become awkward" case this task's own instructions call out.
