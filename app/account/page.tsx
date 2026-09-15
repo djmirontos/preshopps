@@ -6,6 +6,7 @@ import { signOutAction } from "@/lib/auth/actions";
 import { getMyProfile } from "@/lib/account/get-my-profile";
 import { getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { AccountProfileForm } from "@/components/account/AccountProfileForm";
+import { SecuritySection } from "@/components/account/SecuritySection";
 
 export const metadata = { title: "Account | Preshopps" };
 
@@ -17,14 +18,13 @@ export const metadata = { title: "Account | Preshopps" };
  * like before: getAuthUser() runs before anything renders, so no account
  * data is ever sent to an unauthenticated request.
  *
- * Sections: Profile/Location/Contact live inside AccountProfileForm (the
- * one stateful piece, with its own single "Save Changes" action).
- * Marketplace and Account (Sign out, Request account deletion) stay
- * server-rendered links/forms here, unchanged in spirit from the
- * page's earlier link-list shape -- they need no client state.
- *
- * No Security section yet (Change Email/Password land in a later
- * slice) -- this page does not add, link to, or imply either.
+ * Sections, in order: Profile/Location/Contact (inside AccountProfileForm,
+ * the one stateful piece with its own single "Save Changes" action),
+ * Security (SecuritySection -- Change Email/Change Password/Sign out
+ * other devices, entirely Supabase Auth-native, fully independent of
+ * AccountProfileForm's own get_my_profile/update_my_profile save flow),
+ * then Marketplace and Account (Sign out, Request account deletion),
+ * server-rendered links/forms needing no client state.
  *
  * "My Orders" = orders this account placed as a buyer (/orders).
  * "Customer Orders" = orders customers placed with this account's own
@@ -92,6 +92,10 @@ export default async function AccountPage() {
           loadCities={loadCitiesAction}
           loadBarangays={loadBarangaysAction}
         />
+      </div>
+
+      <div className="mt-8">
+        <SecuritySection />
       </div>
 
       <section className="mt-10">

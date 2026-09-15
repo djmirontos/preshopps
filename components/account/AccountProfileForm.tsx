@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import Link from "next/link";
 import { AvatarPicker } from "@/components/account/AvatarPicker";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import { deleteUploadedImage } from "@/lib/image-processing/upload-image";
@@ -383,7 +384,13 @@ export function AccountProfileForm({ userId, email, initialProfile, provinces, i
               Email <PrivacyTag level="private" />
             </p>
             <p className="mt-1.5 h-11 flex items-center rounded-[10px] border border-border bg-canvas px-3 text-sm text-ink-secondary">{email}</p>
-            <p className="mt-1 text-xs text-ink-muted">From your sign-in. Never shown publicly.</p>
+            <p className="mt-1 text-xs text-ink-muted">
+              From your sign-in. Never shown publicly. Need to change your email?{" "}
+              <Link href="/support" className="font-medium text-brand-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                Contact Support
+              </Link>
+              .
+            </p>
           </div>
 
           <div>

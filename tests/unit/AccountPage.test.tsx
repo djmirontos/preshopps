@@ -113,6 +113,16 @@ describe("AccountPage", () => {
     expect(screen.getByLabelText(/display name/i)).toHaveValue("Anne's Closet");
   });
 
+  it("Contact section offers a Support link for email-change help, using the existing /support flow only", async () => {
+    getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+    getMyProfileMock.mockResolvedValue({ profile: sampleProfile(), hadError: false });
+
+    render(await AccountPage());
+
+    const supportLink = screen.getByRole("link", { name: /contact support/i });
+    expect(supportLink).toHaveAttribute("href", "/support");
+  });
+
   describe("Marketplace section -- correct labels and routes", () => {
     beforeEach(() => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
@@ -153,7 +163,7 @@ describe("AccountPage", () => {
 
     it("renders a Sign out control unchanged", async () => {
       render(await AccountPage());
-      expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     });
 
     it("Request account deletion links to the existing /support flow only -- no new query-param mechanism invented", async () => {
@@ -167,11 +177,33 @@ describe("AccountPage", () => {
       expect(screen.getByText(/handled through a support request/i)).toBeInTheDocument();
     });
 
-    it("does not add a Security section, Change Email, or Change Password UI", async () => {
+  });
+
+  describe("Security section", () => {
+    beforeEach(() => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+      getMyProfileMock.mockResolvedValue({ profile: sampleProfile(), hadError: false });
+    });
+
+    it("renders with exactly Change password and Sign out other devices actions", async () => {
       render(await AccountPage());
-      expect(screen.queryByText(/security/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/change email/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/change password/i)).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /change password/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /sign out other devices/i })).toBeInTheDocument();
+    });
+
+    it("does not render a self-service Change Email action -- email changes go through Support", async () => {
+      render(await AccountPage());
+      expect(screen.queryByRole("button", { name: /change email/i })).not.toBeInTheDocument();
+    });
+
+    it("appears between the Profile/Location/Contact form and the Marketplace section", async () => {
+      render(await AccountPage());
+      const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+      const securityIndex = headings.indexOf("Security");
+      const marketplaceIndex = headings.indexOf("Marketplace");
+      expect(securityIndex).toBeGreaterThan(-1);
+      expect(marketplaceIndex).toBeGreaterThan(securityIndex);
     });
   });
 });

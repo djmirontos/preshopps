@@ -1,0 +1,187 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { mapChangePasswordError, PASSWORD_CHANGED_SIGN_OUT_FAILED_MESSAGE } from "@/lib/auth/security-errors";
+
+const PASSWORD_MIN_LENGTH = 6;
+
+type Props = {
+  onUpdatingChange: (isUpdating: boolean) => void;
+};
+
+/**
+ * Locked product decision: no reauthentication OTP flow. This form asks
+ * for the current password directly and verifies it via the installed
+ * Supabase Auth SDK's own native support --
+ * `updateUser({ password, current_password })` -- never a custom
+ * signInWithPassword check and never sent through our own RPCs.
+ *
+ * A successful change is immediately followed by a mandatory GLOBAL
+ * sign-out (`signOut({ scope: "global" })`), then a hard redirect to
+ * /sign-in: the user must re-authenticate with their new password on
+ * every device, including this one. This is intentional -- there is no
+ * "stay signed in" success state here. If the sign-out call itself
+ * fails, the password change already succeeded and cannot be undone, so
+ * this shows safe recovery copy and points at the existing "Sign out
+ * other devices" action instead of silently claiming success or
+ * retrying indefinitely.
+ *
+ * Current/new/confirm password values live only in this component's own
+ * transient state -- never logged, never written to localStorage/
+ * sessionStorage, and cleared immediately once the update succeeds.
+ */
+export function ChangePasswordForm({ onUpdatingChange }: Props) {
+  const router = useRouter();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [signOutFailedNotice, setSignOutFailedNotice] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (isUpdating) return;
+    setFieldError(null);
+    setSubmitError(null);
+
+    if (currentPassword.length === 0) {
+      setFieldError("Enter your current password.");
+      return;
+    }
+    if (newPassword.length === 0) {
+      setFieldError("Enter a new password.");
+      return;
+    }
+    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+      setFieldError("Password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setFieldError("Passwords don't match.");
+      return;
+    }
+
+    setIsUpdating(true);
+    onUpdatingChange(true);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+      current_password: currentPassword,
+    });
+
+    if (error) {
+      setIsUpdating(false);
+      onUpdatingChange(false);
+      setSubmitError(mapChangePasswordError(error));
+      // The password fields are never persisted anywhere outside this
+      // component's own state, but a wrong current-password attempt
+      // still shouldn't linger in the DOM longer than necessary.
+      setCurrentPassword("");
+      return;
+    }
+
+    // Success: clear every password field immediately -- none of this
+    // may remain in the DOM/state after completion, per this feature's
+    // own locked requirement.
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+
+    const { error: signOutError } = await supabase.auth.signOut({ scope: "global" });
+
+    setIsUpdating(false);
+    onUpdatingChange(false);
+
+    if (signOutError) {
+      // The password change itself already succeeded and can't be
+      // undone -- never claim other sessions were revoked when we
+      // can't confirm that, never auto-retry, and never expose why the
+      // sign-out call itself failed.
+      console.error("Global sign-out after password change failed:", signOutError.message);
+      setSignOutFailedNotice(true);
+      return;
+    }
+
+    setIsRedirecting(true);
+    router.push("/sign-in");
+    router.refresh();
+  }
+
+  if (signOutFailedNotice) {
+    return <p role="alert" className="text-sm text-danger">{PASSWORD_CHANGED_SIGN_OUT_FAILED_MESSAGE}</p>;
+  }
+
+  if (isRedirecting) {
+    return <p role="status" className="text-sm text-ink-secondary">Password updated. Signing you out…</p>;
+  }
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <div>
+        <label htmlFor="security-current-password" className="mb-1.5 block text-sm font-medium text-ink">
+          Current password
+        </label>
+        <input
+          id="security-current-password"
+          type="password"
+          autoComplete="current-password"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+          disabled={isUpdating}
+          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+        />
+      </div>
+
+      <div>
+        <label htmlFor="security-new-password" className="mb-1.5 block text-sm font-medium text-ink">
+          New password
+        </label>
+        <input
+          id="security-new-password"
+          type="password"
+          autoComplete="new-password"
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+          disabled={isUpdating}
+          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+        />
+        <p className="mt-1 text-xs text-ink-muted">At least 6 characters.</p>
+      </div>
+
+      <div>
+        <label htmlFor="security-confirm-password" className="mb-1.5 block text-sm font-medium text-ink">
+          Confirm new password
+        </label>
+        <input
+          id="security-confirm-password"
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(event) => setConfirmPassword(event.target.value)}
+          disabled={isUpdating}
+          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+        />
+      </div>
+
+      {(fieldError ?? submitError) && (
+        <p role="alert" className="text-sm text-danger">
+          {fieldError ?? submitError}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={isUpdating}
+        className="h-11 w-full rounded-[10px] bg-brand-action text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {isUpdating ? "Updating…" : "Update password"}
+      </button>
+    </form>
+  );
+}
