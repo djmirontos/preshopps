@@ -208,6 +208,65 @@ describe("ChangePasswordForm -- password values are cleared and never persisted"
   });
 });
 
+describe("ChangePasswordForm -- password visibility toggles", () => {
+  it("Current password starts hidden", () => {
+    renderForm();
+    expect(screen.getByLabelText("Current password")).toHaveAttribute("type", "password");
+  });
+
+  it("New password starts hidden", () => {
+    renderForm();
+    expect(screen.getByLabelText("New password")).toHaveAttribute("type", "password");
+  });
+
+  it("Confirm new password starts hidden", () => {
+    renderForm();
+    expect(screen.getByLabelText("Confirm new password")).toHaveAttribute("type", "password");
+  });
+
+  it("each toggle controls only its own field", () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Show new password" }));
+
+    expect(screen.getByLabelText("New password")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Current password")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("Confirm new password")).toHaveAttribute("type", "password");
+  });
+
+  it("toggling Current password does not reveal New password or the confirmation", () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Show current password" }));
+
+    expect(screen.getByLabelText("Current password")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("New password")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("Confirm new password")).toHaveAttribute("type", "password");
+  });
+
+  it("the accessible label switches from Show to Hide once toggled", () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: "Show current password" }));
+
+    expect(screen.getByRole("button", { name: "Hide current password" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show current password" })).not.toBeInTheDocument();
+  });
+
+  it("each of the three toggle buttons is type=button and never submits the form", () => {
+    renderForm();
+    const currentToggle = screen.getByRole("button", { name: "Show current password" });
+    const newToggle = screen.getByRole("button", { name: "Show new password" });
+    const confirmToggle = screen.getByRole("button", { name: "Show password confirmation" });
+
+    expect(currentToggle).toHaveAttribute("type", "button");
+    expect(newToggle).toHaveAttribute("type", "button");
+    expect(confirmToggle).toHaveAttribute("type", "button");
+
+    fireEvent.click(currentToggle);
+    fireEvent.click(newToggle);
+    fireEvent.click(confirmToggle);
+    expect(updateUserMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChangePasswordForm -- loading / double-submit prevention", () => {
   it("disables the submit button while the request is pending", async () => {
     let resolveUpdate: (value: { data: object; error: null }) => void = () => {};

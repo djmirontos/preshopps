@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { mapAuthError } from "@/lib/auth/errors";
+import { RECOVERY_SIGN_OUT_FAILED_MESSAGE } from "@/lib/auth/recovery-errors";
+import { PasswordVisibilityToggle } from "@/components/ui/PasswordVisibilityToggle";
 
 const INPUT_CLASS =
   "h-12 w-full rounded-[10px] border border-border bg-canvas px-3 text-base text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand";
@@ -17,14 +20,29 @@ type LinkStatus = "checking" | "ready" | "invalid";
  * tokens or a PKCE code, depending on project auth flow settings -- both
  * are handled transparently by the client library) and fires a
  * PASSWORD_RECOVERY auth event once a recovery session is established.
+ *
+ * This is the legacy link-based recovery fallback, kept functional for
+ * emails already in flight while /forgot-password rolls out its new
+ * 6-digit-code flow (ForgotPasswordForm.tsx) -- the link
+ * detection/checking/invalid states above are otherwise untouched. Only
+ * the SUCCESS behavior below was aligned with that new flow's locked
+ * security policy: a successful password update always ends in a
+ * mandatory GLOBAL sign-out and a redirect to /sign-in, never a "stay
+ * signed in" success state.
  */
 export function ResetPasswordForm() {
+  const router = useRouter();
   const [status, setStatus] = useState<LinkStatus>("checking");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  // One visibility flag per field -- toggling "New password" must never
+  // reveal "Confirm new password" and vice versa.
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -69,14 +87,36 @@ export function ResetPasswordForm() {
     setIsSubmitting(true);
     const supabase = createClient();
     const { error: updateError } = await supabase.auth.updateUser({ password });
-    setIsSubmitting(false);
 
     if (updateError) {
+      setIsSubmitting(false);
       setError(mapAuthError(updateError));
       return;
     }
 
-    setIsSuccess(true);
+    // Success: clear both password fields immediately. Visibility
+    // resets to hidden too, even though the fields themselves are
+    // about to unmount either way.
+    setPassword("");
+    setConfirmPassword("");
+    setIsNewPasswordVisible(false);
+    setIsConfirmPasswordVisible(false);
+
+    const { error: signOutError } = await supabase.auth.signOut({ scope: "global" });
+    setIsSubmitting(false);
+
+    if (signOutError) {
+      // The password update itself already succeeded and can't be
+      // undone -- never claim the account was fully signed out
+      // everywhere when we can't confirm that, and never auto-retry.
+      console.error("Global sign-out after link-based account recovery failed:", signOutError.message);
+      setSignOutFailed(true);
+      return;
+    }
+
+    setIsRedirecting(true);
+    router.push("/sign-in");
+    router.refresh();
   }
 
   if (status === "checking") {
@@ -97,18 +137,16 @@ export function ResetPasswordForm() {
     );
   }
 
-  if (isSuccess) {
+  if (signOutFailed) {
     return (
-      <div className="space-y-3">
-        <p className="text-sm text-ink-secondary">Your password has been updated.</p>
-        <Link
-          href="/"
-          className="inline-flex h-11 items-center rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-        >
-          Continue to Preshopps
-        </Link>
-      </div>
+      <p role="alert" className="text-sm text-danger">
+        {RECOVERY_SIGN_OUT_FAILED_MESSAGE}
+      </p>
     );
+  }
+
+  if (isRedirecting) {
+    return <p role="status" className="text-sm text-ink-secondary">Password updated. Signing you out…</p>;
   }
 
   return (
@@ -117,17 +155,25 @@ export function ResetPasswordForm() {
         <label htmlFor="reset-password-new" className="mb-1.5 block text-sm font-medium text-ink">
           New password
         </label>
-        <input
-          id="reset-password-new"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={6}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className={INPUT_CLASS}
-        />
+        <div className="relative">
+          <input
+            id="reset-password-new"
+            name="password"
+            type={isNewPasswordVisible ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={6}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className={`${INPUT_CLASS} pr-10`}
+          />
+          <PasswordVisibilityToggle
+            isVisible={isNewPasswordVisible}
+            onToggle={() => setIsNewPasswordVisible((visible) => !visible)}
+            fieldLabel="new password"
+            disabled={isSubmitting}
+          />
+        </div>
         <p className="mt-1 text-xs text-ink-muted">At least 6 characters.</p>
       </div>
 
@@ -135,17 +181,25 @@ export function ResetPasswordForm() {
         <label htmlFor="reset-password-confirm" className="mb-1.5 block text-sm font-medium text-ink">
           Confirm new password
         </label>
-        <input
-          id="reset-password-confirm"
-          name="confirmPassword"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={6}
-          value={confirmPassword}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-          className={INPUT_CLASS}
-        />
+        <div className="relative">
+          <input
+            id="reset-password-confirm"
+            name="confirmPassword"
+            type={isConfirmPasswordVisible ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={6}
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            className={`${INPUT_CLASS} pr-10`}
+          />
+          <PasswordVisibilityToggle
+            isVisible={isConfirmPasswordVisible}
+            onToggle={() => setIsConfirmPasswordVisible((visible) => !visible)}
+            fieldLabel="password confirmation"
+            disabled={isSubmitting}
+          />
+        </div>
       </div>
 
       {error && (

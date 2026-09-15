@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { mapChangePasswordError, PASSWORD_CHANGED_SIGN_OUT_FAILED_MESSAGE } from "@/lib/auth/security-errors";
+import { PasswordVisibilityToggle } from "@/components/ui/PasswordVisibilityToggle";
 
 const PASSWORD_MIN_LENGTH = 6;
 
@@ -42,6 +43,12 @@ export function ChangePasswordForm({ onUpdatingChange }: Props) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [signOutFailedNotice, setSignOutFailedNotice] = useState(false);
+
+  // One visibility flag per field -- toggling "Current password" must
+  // never reveal "New password"/"Confirm new password" and vice versa.
+  const [isCurrentPasswordVisible, setIsCurrentPasswordVisible] = useState(false);
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -88,10 +95,14 @@ export function ChangePasswordForm({ onUpdatingChange }: Props) {
 
     // Success: clear every password field immediately -- none of this
     // may remain in the DOM/state after completion, per this feature's
-    // own locked requirement.
+    // own locked requirement. Visibility resets to hidden too, even
+    // though the fields themselves are about to unmount either way.
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
+    setIsCurrentPasswordVisible(false);
+    setIsNewPasswordVisible(false);
+    setIsConfirmPasswordVisible(false);
 
     const { error: signOutError } = await supabase.auth.signOut({ scope: "global" });
 
@@ -127,30 +138,46 @@ export function ChangePasswordForm({ onUpdatingChange }: Props) {
         <label htmlFor="security-current-password" className="mb-1.5 block text-sm font-medium text-ink">
           Current password
         </label>
-        <input
-          id="security-current-password"
-          type="password"
-          autoComplete="current-password"
-          value={currentPassword}
-          onChange={(event) => setCurrentPassword(event.target.value)}
-          disabled={isUpdating}
-          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
-        />
+        <div className="relative">
+          <input
+            id="security-current-password"
+            type={isCurrentPasswordVisible ? "text" : "password"}
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            disabled={isUpdating}
+            className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 pr-10 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+          />
+          <PasswordVisibilityToggle
+            isVisible={isCurrentPasswordVisible}
+            onToggle={() => setIsCurrentPasswordVisible((visible) => !visible)}
+            fieldLabel="current password"
+            disabled={isUpdating}
+          />
+        </div>
       </div>
 
       <div>
         <label htmlFor="security-new-password" className="mb-1.5 block text-sm font-medium text-ink">
           New password
         </label>
-        <input
-          id="security-new-password"
-          type="password"
-          autoComplete="new-password"
-          value={newPassword}
-          onChange={(event) => setNewPassword(event.target.value)}
-          disabled={isUpdating}
-          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
-        />
+        <div className="relative">
+          <input
+            id="security-new-password"
+            type={isNewPasswordVisible ? "text" : "password"}
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            disabled={isUpdating}
+            className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 pr-10 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+          />
+          <PasswordVisibilityToggle
+            isVisible={isNewPasswordVisible}
+            onToggle={() => setIsNewPasswordVisible((visible) => !visible)}
+            fieldLabel="new password"
+            disabled={isUpdating}
+          />
+        </div>
         <p className="mt-1 text-xs text-ink-muted">At least 6 characters.</p>
       </div>
 
@@ -158,15 +185,23 @@ export function ChangePasswordForm({ onUpdatingChange }: Props) {
         <label htmlFor="security-confirm-password" className="mb-1.5 block text-sm font-medium text-ink">
           Confirm new password
         </label>
-        <input
-          id="security-confirm-password"
-          type="password"
-          autoComplete="new-password"
-          value={confirmPassword}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-          disabled={isUpdating}
-          className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
-        />
+        <div className="relative">
+          <input
+            id="security-confirm-password"
+            type={isConfirmPasswordVisible ? "text" : "password"}
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            disabled={isUpdating}
+            className="h-11 w-full rounded-[10px] border border-border bg-surface px-3 pr-10 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
+          />
+          <PasswordVisibilityToggle
+            isVisible={isConfirmPasswordVisible}
+            onToggle={() => setIsConfirmPasswordVisible((visible) => !visible)}
+            fieldLabel="password confirmation"
+            disabled={isUpdating}
+          />
+        </div>
       </div>
 
       {(fieldError ?? submitError) && (

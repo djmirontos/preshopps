@@ -190,18 +190,41 @@ describe("Sensitive state is never persisted, logged, or left in the DOM after s
     }
   });
 
-  it("ChangePasswordForm clears all three password fields on successful update", () => {
+  it("ChangePasswordForm clears all three password fields and resets all three visibility flags on successful update", () => {
     const source = readFile("components/account/ChangePasswordForm.tsx");
     const successBlock = source.split("// Success: clear every password field")[1]!;
     expect(successBlock).toMatch(/setCurrentPassword\(""\)/);
     expect(successBlock).toMatch(/setNewPassword\(""\)/);
     expect(successBlock).toMatch(/setConfirmPassword\(""\)/);
+    expect(successBlock).toMatch(/setIsCurrentPasswordVisible\(false\)/);
+    expect(successBlock).toMatch(/setIsNewPasswordVisible\(false\)/);
+    expect(successBlock).toMatch(/setIsConfirmPasswordVisible\(false\)/);
   });
 
   it("SecurityDialog unmounting its children is what actually clears form state on close (no manual clear-on-close needed elsewhere)", () => {
     const source = readFile("components/account/SecuritySection.tsx");
     expect(source).toMatch(/activeDialog === "password" &&/);
     expect(source).toMatch(/setActiveDialog\(null\)/);
+  });
+});
+
+describe("Password visibility toggles (Change Password)", () => {
+  const source = readFile("components/account/ChangePasswordForm.tsx");
+  const stripped = stripComments(source);
+
+  it("imports the shared PasswordVisibilityToggle rather than inventing a one-off toggle", () => {
+    expect(source).toMatch(/from ["']@\/components\/ui\/PasswordVisibilityToggle["']/);
+  });
+
+  it("current/new/confirm each own a separate visibility flag -- never one shared toggle", () => {
+    expect(source).toMatch(/isCurrentPasswordVisible/);
+    expect(source).toMatch(/isNewPasswordVisible/);
+    expect(source).toMatch(/isConfirmPasswordVisible/);
+    expect(stripped).not.toMatch(/isPasswordVisible\b/);
+  });
+
+  it("never persists visibility state to localStorage/sessionStorage", () => {
+    expect(stripped).not.toMatch(/localStorage|sessionStorage/);
   });
 });
 
