@@ -30,7 +30,7 @@ describe("0090 -- migration numbering and scope", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0090_fix_update_listing_listing_id_ambiguity.sql");
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual([]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
   });
 
   it("0086 remains intentionally unused, and 0087/0088/0089 are untouched (still present, unmodified filenames)", () => {

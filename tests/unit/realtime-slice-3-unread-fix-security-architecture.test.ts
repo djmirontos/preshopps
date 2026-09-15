@@ -102,7 +102,7 @@ describe("Realtime Slice 3 -- the only backend change is migration 0088's two ad
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual([]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
     expect(migrationFiles).toContain("0088_exact_unread_badge_counts.sql");
   });
 

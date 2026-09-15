@@ -45,7 +45,7 @@ describe("Buy Now -- migration 0089 exists and touches nothing else", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0089_buy_now_order_submission.sql");
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual([]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });
 
@@ -297,7 +297,7 @@ describe("Buy Now -- post-submit terminal-success fix (P2) stayed frontend-only"
   it("no migration newer than 0092 exists -- this fix touched no backend/RPC/schema (0090/0091/0092 are later, separately-approved migrations)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual([]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
   });
 
   it("OrderReviewSubmit still calls only submit_cart_order/get_my_cart as its own defaults -- this fix changed when the form renders, not what it submits to", () => {
@@ -337,7 +337,7 @@ describe("Buy Now -- post-submit navigation fix (P3): straight to order detail, 
   it("no migration newer than 0092 exists -- this fix is frontend-only (0090/0091/0092 are later, separately-approved migrations)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual([]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
   });
 
   it("OrderReviewSubmit exposes an optional onSuccess callback that defaults to undefined -- /cart's own usage is unaffected unless it opts in", () => {
