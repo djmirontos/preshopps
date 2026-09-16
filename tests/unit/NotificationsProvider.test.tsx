@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import {
@@ -207,14 +208,24 @@ describe("NotificationsProvider -- split unread counts", () => {
   it("a new_message notification schedules a debounced authoritative refresh of unreadMessageCount, never unreadNotificationCount", async () => {
     rpcMock.mockResolvedValue({ data: 1, error: null });
     renderProvider();
+    // Let this Provider's own mount-time revalidation (P1-2 fix) settle
+    // and clear its call history first, so the assertion below is about
+    // the notification event specifically, not the unrelated mount call.
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
+
     await fireIncomingNotification(sampleRow({ id: "notif-msg", type: "new_message" }));
 
     // Not incremented synchronously/blindly -- only after the debounced
     // authoritative RPC refresh resolves.
     expect(rpcMock).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1"));
-    expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count");
+    // Wait for the debounce timer's own RPC call specifically (not just
+    // the resulting text, which the mount-time revalidation above already
+    // set to this same "1" -- waiting on text alone would pass trivially
+    // without the debounce timer having actually fired yet).
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1");
     expect(screen.getByTestId("unread-notification-count")).toHaveTextContent("0");
   });
 
@@ -233,6 +244,12 @@ describe("NotificationsProvider -- split unread counts", () => {
     // server truth, never an event tally.
     rpcMock.mockResolvedValue({ data: 2, error: null });
     renderProvider();
+    // Settle and clear the mount-time revalidation call (P1-2 fix) first
+    // so the count below is about THESE events' own refresh, not that
+    // unrelated baseline one.
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
+
     await fireIncomingNotification(sampleRow({ id: "notif-msg-1", type: "new_message" }));
     await fireIncomingNotification(sampleRow({ id: "notif-order-1", type: "order_accepted" }));
     await fireIncomingNotification(sampleRow({ id: "notif-msg-2", type: "new_message" }));
@@ -240,23 +257,30 @@ describe("NotificationsProvider -- split unread counts", () => {
     // order_accepted is not debounced -- reflected immediately.
     expect(screen.getByTestId("unread-notification-count")).toHaveTextContent("1");
 
-    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("2"));
+    // Wait for the debounce timer's own call, not just the resulting text
+    // (which the mount-time revalidation already set to this same "2").
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
     // Two new_message events coalesce into exactly one authoritative refresh.
-    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("2");
     expect(screen.getByTestId("unread-notification-count")).toHaveTextContent("1");
   });
 
   it("does not cause count drift on a duplicate/replayed event for the same notification id -- only the first schedules a refresh", async () => {
     rpcMock.mockResolvedValue({ data: 1, error: null });
     renderProvider();
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
+
     await fireIncomingNotification(sampleRow({ id: "notif-1", type: "new_message" }));
     await fireIncomingNotification(sampleRow({ id: "notif-1", type: "new_message" }));
     await fireIncomingNotification(sampleRow({ id: "notif-1", type: "new_message" }));
 
-    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1"));
+    // Wait for the debounce timer's own call, not just the resulting text
+    // (which the mount-time revalidation already set to this same "1").
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
     // Duplicates are deduped by id before ever reaching the debounce
     // scheduling code, so only one authoritative refresh is ever fired.
-    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1");
   });
 
   it("markOneRead decrements unreadNotificationCount only, by exactly 1, never below 0", () => {
@@ -388,6 +412,118 @@ describe("NotificationsProvider -- refreshUnreadMessageCount preserves the badge
   });
 });
 
+/**
+ * P1-2 fix: the initial unreadMessageCount is only ever an SSR-rendered
+ * seed (get-my-unread-conversation-count-server.ts, which can fall back
+ * to a bare 0 on its own transient RPC/network failure -- an acceptable
+ * SSR render value, since a server render cannot preserve any previous
+ * browser value). Without an authoritative client-side revalidation, a
+ * user who really has unread conversations could start (and stay) wrong
+ * at badge 0 for their entire session. This Provider now performs one
+ * authoritative refreshUnreadMessageCount() call right after mount,
+ * reusing the exact same already-fixed helper (preserves the seed on
+ * failure; a genuine server-confirmed 0 still clears it).
+ */
+describe("NotificationsProvider -- mount-time authoritative revalidation (P1-2 fix)", () => {
+  it("1/2/3. SSR seed 0 + successful mount revalidation reporting 3 -> badge becomes 3", async () => {
+    rpcMock.mockResolvedValue({ data: 3, error: null });
+    renderProvider({ initialUnreadMessageCount: 0 });
+
+    expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count");
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3"));
+  });
+
+  it("4/5/6. SSR seed 4 + successful mount revalidation reporting a genuine 0 -> badge becomes 0", async () => {
+    rpcMock.mockResolvedValue({ data: 0, error: null });
+    renderProvider({ initialUnreadMessageCount: 4 });
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("0"));
+  });
+
+  it("7/8/9. SSR seed 4 + failed mount revalidation -> badge remains 4, no raw backend error reaches the UI", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "raw backend detail that must never reach the UI" } });
+    renderProvider({ initialUnreadMessageCount: 4 });
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("4");
+    expect(document.body.textContent).not.toMatch(/raw backend detail/);
+  });
+
+  it("10/11/12. SSR seed 0 + failed mount revalidation -> badge remains 0", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    renderProvider({ initialUnreadMessageCount: 0 });
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("0");
+  });
+
+  it("13. React Strict Mode's dev-only double-invoke does not cause a second mount-time revalidation fetch", async () => {
+    rpcMock.mockResolvedValue({ data: 3, error: null });
+    render(
+      <StrictMode>
+        <NotificationsProvider isAuthenticated={true} userId="me" initialUnreadMessageCount={0} initialUnreadNotificationCount={0}>
+          <Probe />
+        </NotificationsProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3"));
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("14. a new_message Realtime-triggered refresh still fires correctly after the mount-time revalidation has already settled", async () => {
+    rpcMock.mockResolvedValue({ data: 1, error: null });
+    renderProvider({ initialUnreadMessageCount: 0 });
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
+
+    rpcMock.mockResolvedValue({ data: 2, error: null });
+    await fireIncomingNotification(sampleRow({ id: "notif-after-mount", type: "new_message" }));
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("2"));
+  });
+
+  it("15. an external mark-read-triggered refreshUnreadMessageCount() call still works correctly after the mount-time revalidation has already settled", async () => {
+    rpcMock.mockResolvedValue({ data: 1, error: null });
+    renderProvider({ initialUnreadMessageCount: 0 });
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
+
+    rpcMock.mockResolvedValue({ data: 5, error: null });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("5"));
+  });
+
+  it("16. an earlier-started but later-resolving refresh cannot overwrite a more recent authoritative result (latest-wins guard)", async () => {
+    let resolveMountRequest: (value: { data: number; error: null }) => void = () => {};
+    rpcMock.mockImplementation(() => new Promise((resolve) => (resolveMountRequest = resolve)));
+    renderProvider({ initialUnreadMessageCount: 0 });
+    // The mount-time revalidation (request #1) is now pending, unresolved.
+
+    // A second, later-issued refresh (e.g. a manual button click standing
+    // in for any other refreshUnreadMessageCount() caller) resolves
+    // FIRST, with the fresher/authoritative value.
+    rpcMock.mockResolvedValueOnce({ data: 7, error: null });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("7"));
+
+    // The stale mount-time request (#1) now finally resolves, with an
+    // OLDER value -- it must not clobber the fresher "7" that already won.
+    resolveMountRequest({ data: 1, error: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("7");
+  });
+
+  it("17. mount-time revalidation never touches unreadNotificationCount -- the Bell stays fully independent", async () => {
+    rpcMock.mockResolvedValue({ data: 3, error: null });
+    renderProvider({ initialUnreadMessageCount: 0, initialUnreadNotificationCount: 9 });
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3"));
+    expect(screen.getByTestId("unread-notification-count")).toHaveTextContent("9");
+  });
+});
+
 describe("NotificationsProvider -- Messages badge semantics (unread CONVERSATIONS, not messages)", () => {
   it("3 new messages in the same still-unread conversation => badge remains 1 after the authoritative refresh, never 3", async () => {
     // Regardless of how many new_message rows arrive, the RPC reports the
@@ -395,13 +531,18 @@ describe("NotificationsProvider -- Messages badge semantics (unread CONVERSATION
     // messages is still exactly 1 unread conversation.
     rpcMock.mockResolvedValue({ data: 1, error: null });
     renderProvider();
+    // Settle and clear the mount-time revalidation call (P1-2 fix) first.
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    rpcMock.mockClear();
 
     await fireIncomingNotification(sampleRow({ id: "notif-a", type: "new_message", conversation_id: "conv-1" }));
     await fireIncomingNotification(sampleRow({ id: "notif-b", type: "new_message", conversation_id: "conv-1" }));
     await fireIncomingNotification(sampleRow({ id: "notif-c", type: "new_message", conversation_id: "conv-1" }));
 
-    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1"));
-    expect(rpcMock).toHaveBeenCalledTimes(1);
+    // Wait for the debounce timer's own call, not just the resulting text
+    // (which the mount-time revalidation already set to this same "1").
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1");
   });
 
   it("messages arriving across 2 unread conversations => badge 2", async () => {

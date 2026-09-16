@@ -171,6 +171,25 @@ export function NotificationsProvider({
   const [lastEvent, setLastEvent] = useState<NewNotificationEvent | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // P1-2 fix: guards refreshUnreadMessageCount's own callers (mount-time
+  // revalidation below, the debounced Realtime new_message refresh, and
+  // every external mark-read-triggered call from ConversationThread)
+  // against a stale-response-wins race -- a request that started earlier
+  // can still resolve LATER than one issued afterward (e.g. this
+  // Provider's own mount-time revalidation firing at the very first
+  // paint, then a genuinely newer message arriving and triggering its own
+  // refresh that happens to resolve first over a slower network round
+  // trip for the mount-time call). Each call captures the sequence number
+  // current at ITS OWN call time; a response is only ever applied if no
+  // newer call has been issued since -- a plain per-provider ref, not
+  // global/module-level state, and no polling.
+  const latestRefreshRequestIdRef = useRef(0);
+  // Strict Mode's dev-only double-invoke would otherwise fire the
+  // mount-time revalidation effect below twice for the same mount --
+  // harmless on its own (refreshUnreadMessageCount is idempotent, and the
+  // latest-wins guard above already protects against any actual
+  // reordering), but this avoids the redundant second network round trip.
+  const hasRevalidatedOnMountRef = useRef(false);
 
   // Stable identities (empty deps -- the setState functions React gives us
   // are themselves stable) so consumers that depend on these functions in
@@ -187,11 +206,38 @@ export function NotificationsProvider({
   // genuine ok=true result (which may itself legitimately carry count: 0)
   // ever calls setUnreadMessageCount. See getMyUnreadConversationCount's
   // own result type for why ok=false is never treated as "reported 0".
+  //
+  // P1-2 fix: also guarded by latestRefreshRequestIdRef (see its own
+  // header comment above) -- a response is only applied if no newer call
+  // to this same function has been issued since this particular call
+  // started, so an earlier-started/later-resolving request can never
+  // clobber a fresher one.
   const refreshUnreadMessageCount = useCallback(() => {
+    const requestId = ++latestRefreshRequestIdRef.current;
     void getMyUnreadConversationCount().then((result) => {
+      if (requestId !== latestRefreshRequestIdRef.current) return;
       if (result.ok) setUnreadMessageCount(result.count);
     });
   }, []);
+
+  // P1-2 fix: the initial unreadMessageCount is only ever an SSR-rendered
+  // seed (get-my-unread-conversation-count-server.ts, which -- correctly,
+  // for a server render that cannot preserve any previous browser value --
+  // falls back to a bare 0 on its own RPC/network failure). Without this,
+  // a transient failure during that one SSR request could leave the
+  // Messages badge wrong at 0 for a real user's entire session, since
+  // nothing else revalidates it until some other messaging event happens
+  // to fire refreshUnreadMessageCount on its own. One authoritative
+  // client-side refresh right after mount closes that gap -- reusing the
+  // exact same already-fixed refreshUnreadMessageCount (never overwrites
+  // on failure, preserving whatever the SSR seed showed; a genuine
+  // server-confirmed 0 still correctly clears the badge).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (hasRevalidatedOnMountRef.current) return;
+    hasRevalidatedOnMountRef.current = true;
+    refreshUnreadMessageCount();
+  }, [isAuthenticated, refreshUnreadMessageCount]);
 
   useEffect(() => {
     if (!isAuthenticated || !userId) return;
