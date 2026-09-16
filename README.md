@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Preshopps
 
-## Getting Started
+A simple, mobile-first, multi-seller marketplace for pre-loved and brand-new items.
 
-First, run the development server:
+Preshopps focuses on trust, messaging, and marketplace discovery. Payments, shipping, and meetup logistics are coordinated directly between buyer and seller — Preshopps does not process payments in the MVP.
+
+For full product behavior and architecture, see the canonical docs below. This README is intentionally short and does not restate product rules.
+
+## Stack
+
+- Next.js (App Router) + TypeScript + React
+- Tailwind CSS
+- Supabase — Auth, PostgreSQL, Row Level Security, Storage, Realtime
+- Deployment: Netlify (frontend)
+- Transactional email: Supabase Cron → Supabase Edge Function → Resend, independent of Netlify
+
+## Development
+
+Prerequisites: Node.js, a Supabase project (or local Supabase stack), and the environment variables described in `.env.example`.
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the app locally:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Validation commands
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run these separately when relevant to a change:
 
-## Learn More
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+Run Playwright end-to-end coverage when the changed flow has e2e tests:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run test:e2e
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Environment variables
 
-## Deploy on Vercel
+See `.env.example` for the exact variable names and where each one is configured (Netlify vs. Supabase Edge Function secrets). Never commit real secret values.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Canonical documentation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Read these before making any meaningful change, in this priority order:
+
+1. [`docs/PRD.md`](docs/PRD.md) — product behavior
+2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical architecture
+3. [`docs/ARCHITECTURE_ESSENTIALS.md`](docs/ARCHITECTURE_ESSENTIALS.md) — compact architecture checklist
+4. [`AGENTS.md`](AGENTS.md) — agent operating rules for this repository
+5. [`CLAUDE.md`](CLAUDE.md) — temporary Claude Code transition supplement
+
+For current, changing implementation state — latest migration, completed modules, backlog, known limitations — see [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md). It is informational only and never overrides the canonical documents above.

@@ -6,6 +6,8 @@ This file defines how Claude Code should work inside the Preshopps repository.
 
 It is repository-specific operating guidance for implementation work.
 
+`AGENTS.md` is this repository's agent-neutral operating guide and is the primary source for execution rules going forward. This file remains only as Claude-Code-specific supplementary guidance during the transition and is expected to be reduced/retired once `AGENTS.md` and the docs below fully cover its content.
+
 Claude Code must follow the canonical product and architecture documents and must not invent new product behavior.
 
 ---
@@ -14,18 +16,18 @@ Claude Code must follow the canonical product and architecture documents and mus
 
 At the start of every meaningful task, read:
 
-1. `PRD.md`
-2. `ARCHITECTURE.md`
-3. `ARCHITECTURE_ESSENTIALS.md`
+1. `docs/PRD.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/ARCHITECTURE_ESSENTIALS.md`
 4. `AGENTS.md`
 5. `CLAUDE.md`
 
 Priority order:
 
 ```text
-PRD.md
-  > ARCHITECTURE.md
-    > ARCHITECTURE_ESSENTIALS.md
+docs/PRD.md
+  > docs/ARCHITECTURE.md
+    > docs/ARCHITECTURE_ESSENTIALS.md
       > AGENTS.md
         > CLAUDE.md
           > local implementation assumptions
@@ -34,6 +36,8 @@ PRD.md
 If a lower-priority document conflicts with a higher-priority one, follow the higher-priority source.
 
 Do not silently reinterpret product decisions.
+
+For current, changing implementation state (latest migration, completed modules, backlog, accepted limitations), see `docs/PROJECT_STATUS.md`.
 
 ---
 

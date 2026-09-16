@@ -14,30 +14,34 @@ Every agent must follow the canonical product and architecture documents before 
 
 Read these files before implementing meaningful work:
 
-1. `PRD.md`
-2. `ARCHITECTURE.md`
-3. `ARCHITECTURE_ESSENTIALS.md`
+1. `docs/PRD.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/ARCHITECTURE_ESSENTIALS.md`
 4. `AGENTS.md`
-5. `CLAUDE.md` when present
+5. `CLAUDE.md` while it still exists
 
 Priority order:
 
 ```text
-PRD.md
-  > ARCHITECTURE.md
-    > ARCHITECTURE_ESSENTIALS.md
+docs/PRD.md
+  > docs/ARCHITECTURE.md
+    > docs/ARCHITECTURE_ESSENTIALS.md
       > AGENTS.md
-        > CLAUDE.md
+        > CLAUDE.md (while it still exists)
           > implementation assumptions
 ```
 
+If lower-priority documentation conflicts with higher-priority documentation, the higher-priority source wins.
+
 If documents conflict:
 
-- Product behavior follows `PRD.md`.
-- Technical direction follows `ARCHITECTURE.md`.
-- `ARCHITECTURE_ESSENTIALS.md` is a compact implementation checklist only.
+- Product behavior follows `docs/PRD.md`.
+- Technical direction follows `docs/ARCHITECTURE.md`.
+- `docs/ARCHITECTURE_ESSENTIALS.md` is a compact implementation checklist only.
 - Do not silently resolve material conflicts by inventing new behavior.
 - Escalate material scope, security, privacy, cost, or architecture conflicts before implementation.
+
+For current, changing implementation state (latest migration number, completed modules, active backlog, accepted limitations), read `docs/PROJECT_STATUS.md`. It is a living handoff snapshot, not a canonical product/architecture source, and never overrides the documents above.
 
 ---
 
@@ -80,6 +84,19 @@ Do not rewrite large areas of the codebase simply because another style is prefe
 
 ---
 
+## One Bounded Task at a Time
+
+Work is authorized one bounded task at a time.
+
+- Complete only the approved bounded task.
+- Do not automatically begin the next milestone, module, or follow-up improvement, even if it seems obviously useful or clearly next.
+- Stop and report when the authorized task is complete.
+- If finishing the task reveals a clearly desirable next step, name it in the report instead of starting it.
+
+This applies especially to database, auth, deployment, and infrastructure work.
+
+---
+
 ## Before Starting Any Task
 
 Before changing code:
@@ -100,6 +117,10 @@ Before changing code:
    - SEO
    - uploads
 7. Keep implementation scope limited to the task.
+
+The working tree should begin clean unless the task explicitly says otherwise. If it is not clean, inspect what is there and report it before proceeding — do not discard it.
+
+Do not alter production data or schema merely to investigate a question. Read-only inspection only, unless the task explicitly authorizes a change.
 
 Do not ask the user to repeat information already present in repository docs.
 
@@ -832,16 +853,16 @@ Do not claim a task is complete when relevant tests fail.
 
 ## Build Quality Checks
 
-Before reporting completion, run relevant checks such as:
+Before reporting completion, run the relevant checks, each as its own separate command:
 
 ```text
-typecheck
-lint
-tests
-build
+npm run lint
+npm run typecheck
+npm run test
+npm run build
 ```
 
-Use project-specific commands once the package scripts exist.
+Run `npm run test:e2e` too when the changed flow has Playwright/e2e coverage.
 
 At minimum:
 
@@ -851,6 +872,8 @@ At minimum:
 - production build succeeds when appropriate
 
 If a check cannot be run, say so explicitly.
+
+Do not claim a check passed without actually running it.
 
 ---
 
@@ -894,6 +917,10 @@ unless explicitly instructed.
 
 ## Commit Expectations
 
+Do not commit or push unless specifically authorized for that commit/push.
+
+Approval to implement a task does not automatically mean approval to commit or push it. Finishing the work and stopping for review is a valid, often expected, outcome.
+
 When asked to commit:
 
 - use a focused commit
@@ -902,6 +929,8 @@ When asked to commit:
 - do not include unrelated local changes
 
 Before committing, report any unrelated modified/untracked files instead of silently including them.
+
+When asked to push, push only what was just authorized to commit — do not push other local commits along with it.
 
 ---
 
@@ -933,6 +962,30 @@ For high-risk database changes:
 - require explicit approval before production application
 
 Data deletion requires explicit confirmation unless it is isolated test data in an approved local/test environment.
+
+---
+
+## Migration Numbering
+
+Migration filenames use the existing numbered convention already present in `supabase/migrations/` (a zero-padded sequence number followed by a short description).
+
+Migration `0086` is intentionally and permanently skipped. Never create or backfill a migration numbered `0086` for any reason, even if the sequence appears to have a gap.
+
+The current latest migration number, and therefore the next available number, changes over time — do not hardcode a specific number in this file. Read `docs/PROJECT_STATUS.md` for the current latest migration before creating a new one, and update it there once a new migration lands.
+
+---
+
+## Database & Security Implementation Conventions
+
+Keep this concise — do not duplicate the full architecture doc here.
+
+- Derive authenticated identity from `auth.uid()` server-side rather than trusting any client-supplied identity (user id, role, ownership claim).
+- Row Level Security remains mandatory for protected user- and seller-owned tables.
+- `SECURITY DEFINER` functions must use the project's already-established secure `search_path` convention — inspect an existing migration's function before writing a new one, and match its pattern rather than inventing a different one.
+- Authorization belongs server-side and/or database-side. A frontend check alone is never sufficient.
+- Service-role secrets stay server-side only, never in client-reachable code.
+- Never surface a raw SQL/Supabase/internal error message to the UI — map it to safe, user-facing copy.
+- When in doubt about the current security pattern, inspect existing migrations/functions before introducing a different one.
 
 ---
 
