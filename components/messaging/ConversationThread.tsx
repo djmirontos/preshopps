@@ -388,7 +388,21 @@ export function ConversationThread({
             }
           },
         )
-        .subscribe();
+        // Status visibility only -- matches NotificationsProvider's own
+        // equivalent .subscribe() callback exactly (same two statuses, same
+        // generic err?.message ?? status logging, no conversation id/
+        // message content). This does not resubscribe or refetch anything:
+        // realtime-js already manages its own rejoin attempts internally,
+        // this purely makes a failed/timed-out join visible in the console
+        // during development/operations. SUBSCRIBED and CLOSED are
+        // intentionally not logged here, exactly like NotificationsProvider
+        // -- CLOSED fires on every normal unmount/conversationId-change
+        // cleanup, not just a real failure.
+        .subscribe((status, err) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error("Realtime message subscription failed:", err?.message ?? status);
+          }
+        });
 
       return () => {
         supabase.removeChannel(channel);

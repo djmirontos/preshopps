@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, act } from "@testing-library/react";
 import { readdirSync } from "node:fs";
 import path from "node:path";
@@ -38,7 +38,13 @@ const { channelOnCalls, channelNameCalls, createdChannels, getSessionMock, rpcMo
     return {
       channelOnCalls: [] as Array<{ topic: string; config: { table: string; filter: string }; callback: (payload: { new: unknown }) => void }>,
       channelNameCalls: [] as string[],
-      createdChannels: [] as Array<{ topic: string; subscribed: boolean; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn> }>,
+      createdChannels: [] as Array<{
+        topic: string;
+        subscribed: boolean;
+        statusCallback: ((status: string, err?: { message: string }) => void) | null;
+        on: ReturnType<typeof vi.fn>;
+        subscribe: ReturnType<typeof vi.fn>;
+      }>,
       getSessionMock: vi.fn(),
       rpcMock: vi.fn(),
       sendMessageMock: vi.fn(),
@@ -54,10 +60,13 @@ const { channelOnCalls, channelNameCalls, createdChannels, getSessionMock, rpcMo
 const registry = new Map<string, ReturnType<typeof makeFakeChannel>>();
 const pendingRemovals: Array<() => void> = [];
 
+type FakeChannelStatusCallback = (status: string, err?: { message: string }) => void;
+
 function makeFakeChannel(topic: string) {
   const fakeChannel = {
     topic,
     subscribed: false,
+    statusCallback: null as FakeChannelStatusCallback | null,
     on: vi.fn((_event: string, config: { table: string; filter: string }, callback: (payload: { new: unknown }) => void) => {
       // Mirrors realtime-js's own real guard in RealtimeChannel.on():
       // `if (this.channelAdapter.isJoined() || this.channelAdapter.isJoining()) throw ...`
@@ -67,8 +76,15 @@ function makeFakeChannel(topic: string) {
       channelOnCalls.push({ topic, config, callback });
       return fakeChannel;
     }),
-    subscribe: vi.fn(() => {
+    // Mirrors realtime-js's real .subscribe(statusCallback) signature --
+    // captures whatever callback ConversationThread passes so tests can
+    // simulate a later CHANNEL_ERROR/TIMED_OUT the same way the real
+    // client would invoke it, without this fake auto-firing anything
+    // beyond the initial SUBSCRIBED join.
+    subscribe: vi.fn((statusCallback?: FakeChannelStatusCallback) => {
       fakeChannel.subscribed = true;
+      fakeChannel.statusCallback = statusCallback ?? null;
+      statusCallback?.("SUBSCRIBED");
       return fakeChannel;
     }),
   };
@@ -322,5 +338,80 @@ describe("Realtime bug fix: no migration/RLS/publication change", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0093_seller_order_messaging.sql");
     expect(newer).toEqual([]);
+  });
+});
+
+/**
+ * Status visibility (small diagnostic/reliability slice, no behavior
+ * change): ConversationThread's own .subscribe() now passes a status
+ * callback, mirroring NotificationsProvider's exact existing pattern
+ * (same two statuses logged, same generic err?.message ?? status
+ * shape). This is observability only -- no resubscribe, no timer, no
+ * refetch is introduced; realtime-js's own internal rejoin handling is
+ * untouched.
+ */
+describe("ConversationThread Realtime -- subscribe status visibility", () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("1. passes a status callback function to subscribe()", () => {
+    renderConversation();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    expect(channel.subscribe).toHaveBeenCalledTimes(1);
+    expect(typeof channel.subscribe.mock.calls[0][0]).toBe("function");
+  });
+
+  it("2. SUBSCRIBED does not emit an error", () => {
+    renderConversation();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith("Realtime message subscription failed:", expect.anything());
+  });
+
+  it("3. CHANNEL_ERROR emits a safe console error, with no message body/user id/conversation id in the logged text", () => {
+    renderConversation({ context: sampleContext({ conversationId: "conv-1" }), otherPartyId: "other-user-1" });
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Realtime message subscription failed:", "boom");
+    const loggedText = consoleErrorSpy.mock.calls.map((call: unknown[]) => call.join(" ")).join(" ");
+    expect(loggedText).not.toMatch(/conv-1|other-user-1|Hi there|First message/);
+  });
+
+  it("4. TIMED_OUT emits a safe console error", () => {
+    renderConversation();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("TIMED_OUT");
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Realtime message subscription failed:", "TIMED_OUT");
+  });
+
+  it("CLOSED does not emit an error -- a normal unmount/conversationId-change cleanup is not an application failure", () => {
+    renderConversation();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CLOSED");
+
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith("Realtime message subscription failed:", expect.anything());
+  });
+
+  it("9. no reconnect/resubscribe/refetch is triggered by a status callback -- CHANNEL_ERROR only logs, it never calls .channel()/.subscribe() again or loadEarlier", () => {
+    renderConversation();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    const channelCallsBefore = channelNameCalls.length;
+    const subscribeCallsBefore = channel.subscribe.mock.calls.length;
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+
+    expect(channelNameCalls).toHaveLength(channelCallsBefore);
+    expect(channel.subscribe.mock.calls).toHaveLength(subscribeCallsBefore);
+    expect(loadEarlierMock).not.toHaveBeenCalled();
   });
 });
