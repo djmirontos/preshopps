@@ -161,6 +161,20 @@ export function ConversationThread({
   const [blockError, setBlockError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState(initialMessages);
+  // Every message id currently known to this thread (initial page, "Load
+  // earlier" pages, the viewer's own sent messages, and every Realtime
+  // INSERT already accepted) -- kept synchronized with `messages` by
+  // adding to it at each of those exact same call sites, synchronously,
+  // the moment an id is known there. This is what the Realtime handler
+  // below now consults (and updates) to decide whether an incoming id is
+  // genuinely new, BEFORE ever calling setMessages -- see that handler's
+  // own comment for why deciding this from inside the setMessages updater
+  // itself (the previous `let wasNew = false; setMessages(prev => {...
+  // wasNew = ...}); if (wasNew)` pattern) was not safe. appendMessageIfNew/
+  // messageId remains the sole, authoritative render-level dedupe --
+  // this ref only ever decides which side effects to schedule, never
+  // whether a message renders.
+  const seenMessageIdsRef = useRef<Set<string>>(new Set(initialMessages.map((message) => message.messageId)));
   const [earlierCursor, setEarlierCursor] = useState(initialCursor);
   const [loadEarlierFailed, setLoadEarlierFailed] = useState(false);
   const [isLoadingEarlier, startLoadEarlier] = useTransition();
@@ -355,14 +369,38 @@ export function ConversationThread({
             // viewer back down who deliberately scrolled up to read
             // older messages).
             const wasNearBottom = isNearBottomRef.current;
-            let wasNew = false;
-            setMessages((prev) => {
-              const next = appendMessageIfNew(prev, { messageId: row.id, isMine, body: row.body, createdAt: row.created_at });
-              wasNew = next !== prev;
-              return next;
-            });
 
-            if (wasNew && (wasNearBottom || isMine)) {
+            // Decided synchronously, BEFORE setMessages is ever called --
+            // NOT by mutating a variable inside the setMessages updater
+            // and reading it back on the next line (the previous `let
+            // wasNew = false; setMessages(prev => {...; wasNew = next !==
+            // prev; ...}); if (wasNew)` pattern). That pattern assumed the
+            // updater always runs synchronously and finishes before this
+            // line executes -- true only for the FIRST update React has
+            // pending for this hook since its last render; a second
+            // Realtime INSERT callback firing before any render flushes
+            // (proven reproducible: see this file's own
+            // ConversationThread-realtime.test.tsx) finds this hook
+            // already has a pending update, so its updater is queued for
+            // the real render instead of run eagerly -- leaving that
+            // second call's own `wasNew` still false at the moment this
+            // exact check ran, even though the message is correctly
+            // appended once React actually renders. Checking (and
+            // immediately marking) seenMessageIdsRef here instead has no
+            // such dependency: two callback invocations firing back-to-
+            // back in the same tick still execute this line in order, as
+            // plain synchronous JS, each one seeing exactly what the
+            // previous one just recorded.
+            const isNewMessage = !seenMessageIdsRef.current.has(row.id);
+            seenMessageIdsRef.current.add(row.id);
+
+            // appendMessageIfNew/messageId remains the sole, authoritative
+            // render-level dedupe -- unchanged, and never weakened by the
+            // ref above, which only ever decides which side effects (below)
+            // to schedule.
+            setMessages((prev) => appendMessageIfNew(prev, { messageId: row.id, isMine, body: row.body, createdAt: row.created_at }));
+
+            if (isNewMessage && (wasNearBottom || isMine)) {
               // isMine covers the (harmless, already-deduped) case where
               // this Realtime echo of the viewer's own just-sent message
               // arrives before handleSend's own local append -- either
@@ -371,7 +409,7 @@ export function ConversationThread({
               pendingScrollRef.current = true;
             }
 
-            if (wasNew && !isMine) {
+            if (isNewMessage && !isMine) {
               latestRef.current.onIncomingMessage?.();
 
               // The thread is open/live -- this is purely local
@@ -424,6 +462,7 @@ export function ConversationThread({
         setLoadEarlierFailed(true);
         return;
       }
+      for (const message of result.messages) seenMessageIdsRef.current.add(message.messageId);
       setMessages((prev) => [...result.messages, ...prev]);
       setEarlierCursor(result.nextCursor);
     });
@@ -444,6 +483,11 @@ export function ConversationThread({
       return;
     }
 
+    // Marked as seen synchronously, right here, so a Realtime echo of this
+    // exact send (in either arrival order relative to this RPC response)
+    // is correctly recognized as already-known -- see seenMessageIdsRef's
+    // own header comment above.
+    seenMessageIdsRef.current.add(result.messageId);
     setMessages((prev) => appendMessageIfNew(prev, { messageId: result.messageId, isMine: true, body: trimmed, createdAt: result.createdAt }));
     setDraft("");
     // Requirement B: always follow the viewer's own just-sent message to

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen, fireEvent, waitFor } from "@testing-library/react";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import type { ComponentProps } from "react";
@@ -33,8 +33,18 @@ import type { ConversationMessage } from "@/lib/messaging/get-conversation-messa
  * reappearing, not just an assertion about call ordering on one channel.
  */
 
-const { channelOnCalls, channelNameCalls, createdChannels, getSessionMock, rpcMock, sendMessageMock, markConversationReadMock, markConversationReadIfUnreadMock } =
-  vi.hoisted(() => {
+const {
+  channelOnCalls,
+  channelNameCalls,
+  createdChannels,
+  getSessionMock,
+  rpcMock,
+  sendMessageMock,
+  markConversationReadMock,
+  markConversationReadIfUnreadMock,
+  onIncomingMessageMock,
+  refreshUnreadMessageCountMock,
+} = vi.hoisted(() => {
     return {
       channelOnCalls: [] as Array<{ topic: string; config: { table: string; filter: string }; callback: (payload: { new: unknown }) => void }>,
       channelNameCalls: [] as string[],
@@ -50,6 +60,8 @@ const { channelOnCalls, channelNameCalls, createdChannels, getSessionMock, rpcMo
       sendMessageMock: vi.fn(),
       markConversationReadMock: vi.fn(),
       markConversationReadIfUnreadMock: vi.fn(),
+      onIncomingMessageMock: vi.fn(),
+      refreshUnreadMessageCountMock: vi.fn(),
     };
   });
 
@@ -152,7 +164,20 @@ vi.mock("@/lib/messaging/block-actions", async () => {
   return { ...actual, blockUser: vi.fn(), unblockUser: vi.fn() };
 });
 
+// Only overrides the one hook ConversationThread reads -- everything else
+// (the Provider component itself, its other hooks) is untouched. This lets
+// the back-to-back-events tests below observe refreshUnreadMessageCount's
+// own call count directly, without needing a real NotificationsProvider
+// ancestor or a live get_my_unread_conversation_count RPC round trip.
+vi.mock("@/components/notifications/NotificationsProvider", async () => {
+  const actual = await vi.importActual<typeof import("@/components/notifications/NotificationsProvider")>(
+    "@/components/notifications/NotificationsProvider",
+  );
+  return { ...actual, useRefreshUnreadMessageCount: () => refreshUnreadMessageCountMock };
+});
+
 import { ConversationDetailClient } from "@/components/messaging/ConversationDetailClient";
+import { ConversationThread } from "@/components/messaging/ConversationThread";
 
 function sampleContext(overrides: Partial<ConversationContext> = {}): ConversationContext {
   return {
@@ -192,6 +217,26 @@ function renderConversation(overrides: Partial<ComponentProps<typeof Conversatio
       loadEarlier={loadEarlierMock}
       otherPartyId="other-user-1"
       initialIsBlocked={false}
+      {...overrides}
+    />,
+  );
+}
+
+/** Renders ConversationThread directly (not through ConversationDetailClient,
+ * which never forwards onIncomingMessage to any of its callers today) so
+ * the back-to-back-events tests below can observe onIncomingMessage's own
+ * call count -- the exact "wasNew-dependent side effect" the timing
+ * concern is about, alongside markConversationRead/refreshUnreadMessageCount. */
+function renderThread(overrides: Partial<ComponentProps<typeof ConversationThread>> = {}) {
+  return render(
+    <ConversationThread
+      context={sampleContext()}
+      initialMessages={[sampleMessage({ messageId: "m1", body: "First message" })]}
+      initialCursor={null}
+      loadEarlier={loadEarlierMock}
+      otherPartyId="other-user-1"
+      initialIsBlocked={false}
+      onIncomingMessage={onIncomingMessageMock}
       {...overrides}
     />,
   );
@@ -413,5 +458,160 @@ describe("ConversationThread Realtime -- subscribe status visibility", () => {
     expect(channelNameCalls).toHaveLength(channelCallsBefore);
     expect(channel.subscribe.mock.calls).toHaveLength(subscribeCallsBefore);
     expect(loadEarlierMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Fix-proving tests for the `wasNew` timing bug the P1 messaging Realtime
+ * reliability audit identified and a prior reproduction test confirmed:
+ *
+ *   let wasNew = false;
+ *   setMessages((prev) => { ...; wasNew = next !== prev; return next; });
+ *   if (wasNew) { ... }
+ *
+ * That pattern assumed the setMessages updater always runs synchronously
+ * before the very next line -- true only for the FIRST update pending for
+ * a hook since its last render. A second incoming postgres_changes INSERT
+ * event processed before any render flushes (proven reproducible: fired
+ * synchronously back-to-back inside one act(), exactly as below) found
+ * this hook already had a pending update, so its own updater ran only
+ * later, during the real render -- leaving that second event's own
+ * `wasNew` still false at the moment its `if (wasNew && ...)` check ran,
+ * even though the message was correctly appended once React actually
+ * rendered. The fix (ConversationThread.tsx's own seenMessageIdsRef)
+ * decides "is this a new message id" synchronously, before setMessages is
+ * ever called, and keeps that decision (and the ref itself) fully
+ * independent of when any updater actually executes.
+ *
+ * Both events in each test below are still fired as two synchronous
+ * statements inside a single act() call, with no `await` and no separate
+ * act() boundary between them -- this must keep proving the fix under the
+ * exact same no-render-flush-between-them condition that reproduced the
+ * original bug, not a weakened, sequential version of it.
+ */
+describe("ConversationThread Realtime -- back-to-back incoming events (wasNew timing bug, fixed)", () => {
+  it("1/2/3/4. two distinct incoming messages fired synchronously within the same act(): both render once, and BOTH now trigger onIncomingMessage/markConversationRead/refreshUnreadMessageCount", async () => {
+    renderThread();
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+
+    // This component's own separate mount-time mark-read-on-open effect
+    // already calls markConversationReadIfUnread(...).then(() =>
+    // refreshUnreadMessageCount()) once, independently of any incoming
+    // message -- let that unrelated promise chain fully settle first, so
+    // the baseline captured below (and the delta asserted afterward) only
+    // reflects what the two incoming events themselves caused.
+    await act(() => Promise.resolve());
+    const refreshCountBefore = refreshUnreadMessageCountMock.mock.calls.length;
+
+    act(() => {
+      registration.callback({
+        new: { id: "msg-a", conversation_id: "conv-1", sender_id: "other-user-1", body: "First incoming", created_at: "2026-02-01T12:00:00.000Z" },
+      });
+      registration.callback({
+        new: { id: "msg-b", conversation_id: "conv-1", sender_id: "other-user-1", body: "Second incoming", created_at: "2026-02-01T12:00:01.000Z" },
+      });
+    });
+
+    // 1. Both messages must render exactly once each.
+    expect(screen.getAllByText("First incoming")).toHaveLength(1);
+    expect(screen.getAllByText("Second incoming")).toHaveLength(1);
+
+    // 2/3. Fixed behavior: BOTH distinct events now trigger their own
+    // side effects -- this is the exact regression the previous
+    // reproduction test proved was broken (it observed 1, not 2, before
+    // this fix).
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(2);
+    expect(markConversationReadMock).toHaveBeenCalledTimes(2);
+    expect(markConversationReadMock).toHaveBeenNthCalledWith(1, "conv-1");
+    expect(markConversationReadMock).toHaveBeenNthCalledWith(2, "conv-1");
+
+    // 4. refreshUnreadMessageCount is chained via .then() off each
+    // markConversationRead call's own promise -- flush that microtask
+    // queue before reading its call count.
+    await act(() => Promise.resolve());
+    expect(refreshUnreadMessageCountMock.mock.calls.length - refreshCountBefore).toBe(2);
+  });
+
+  it("5/6. duplicate event: the SAME message id fired twice back-to-back within the same act() still dedupes correctly -- one rendered message, side effects run exactly once", () => {
+    renderThread();
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+    const row = { id: "msg-dup", conversation_id: "conv-1", sender_id: "other-user-1", body: "Duplicate incoming", created_at: "2026-02-01T12:00:00.000Z" };
+
+    act(() => {
+      registration.callback({ new: row });
+      registration.callback({ new: row });
+    });
+
+    expect(screen.getAllByText("Duplicate incoming")).toHaveLength(1);
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("7. a message id already present in the thread's initial messages produces no duplicate render and no side effects when Realtime later replays it", () => {
+    // seenMessageIdsRef is seeded from initialMessages at mount -- this
+    // proves that seed actually works, not just the ref's own in-callback
+    // add() calls.
+    renderThread({ initialMessages: [sampleMessage({ messageId: "msg-already-loaded", body: "Already loaded", isMine: false })] });
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+
+    act(() => {
+      registration.callback({
+        new: { id: "msg-already-loaded", conversation_id: "conv-1", sender_id: "other-user-1", body: "Already loaded", created_at: "2026-02-01T09:00:00.000Z" },
+      });
+    });
+
+    expect(screen.getAllByText("Already loaded")).toHaveLength(1);
+    expect(onIncomingMessageMock).not.toHaveBeenCalled();
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+  });
+
+  it("9a. own-message race: a Realtime echo arriving BEFORE the send RPC resolves still renders exactly once, and the RPC's own later append is a no-op via appendMessageIfNew", async () => {
+    let resolveSend: (value: { ok: true; messageId: string; createdAt: string }) => void = () => {};
+    sendMessageMock.mockReturnValue(new Promise((resolve) => (resolveSend = resolve)));
+    renderThread();
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "My own message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+
+    // The Realtime echo of this same send lands before the RPC's own HTTP
+    // response does. isMine is derived from sender_id !== otherPartyId, so
+    // this is indistinguishable from a genuine echo of the viewer's own
+    // just-sent message.
+    act(() => {
+      registration.callback({
+        new: { id: "msg-own-race-a", conversation_id: "conv-1", sender_id: "viewer-own-id", body: "My own message", created_at: "2026-02-01T12:00:00.000Z" },
+      });
+    });
+    expect(screen.getAllByText("My own message", { selector: "p" })).toHaveLength(1);
+    // isMine messages never drive onIncomingMessage/markConversationRead,
+    // echo or not.
+    expect(onIncomingMessageMock).not.toHaveBeenCalled();
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+
+    resolveSend({ ok: true, messageId: "msg-own-race-a", createdAt: "2026-02-01T12:00:00.000Z" });
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
+    expect(screen.getAllByText("My own message", { selector: "p" })).toHaveLength(1);
+  });
+
+  it("9b. own-message race: the send RPC resolving BEFORE the Realtime echo arrives still renders exactly once", async () => {
+    sendMessageMock.mockResolvedValue({ ok: true, messageId: "msg-own-race-b", createdAt: "2026-02-01T12:00:00.000Z" });
+    renderThread();
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "My other own message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getAllByText("My other own message", { selector: "p" })).toHaveLength(1));
+
+    act(() => {
+      registration.callback({
+        new: { id: "msg-own-race-b", conversation_id: "conv-1", sender_id: "viewer-own-id", body: "My other own message", created_at: "2026-02-01T12:00:00.000Z" },
+      });
+    });
+
+    expect(screen.getAllByText("My other own message", { selector: "p" })).toHaveLength(1);
+    expect(onIncomingMessageMock).not.toHaveBeenCalled();
+    expect(markConversationReadMock).not.toHaveBeenCalled();
   });
 });
