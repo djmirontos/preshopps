@@ -371,14 +371,21 @@ export function ConversationThread({
     // reconnects requested one while the first was in flight (coalesced
     // into a single follow-up, not one per request).
     let reconciliationPending = false;
-    // Distinguishes the very first successful SUBSCRIBED (no reconciliation
-    // -- there is nothing to catch up on for a fresh mount) from a LATER
+    // Distinguishes the very first successful SUBSCRIBED from a LATER
     // SUBSCRIBED that follows a genuine interruption (CHANNEL_ERROR/
     // TIMED_OUT after having already subscribed once) -- confirmed by
     // reading realtime-js/@supabase/phoenix's own source that an automatic
     // rejoin reuses the exact same channel/joinPush and re-invokes this
     // exact same status callback with SUBSCRIBED again, so no second
     // .subscribe() call or new channel is ever needed to observe this.
+    // Both cases now reconcile (see the .subscribe() callback below):
+    // the FIRST SUBSCRIBED also has something worth catching up on --
+    // the server's initial message fetch (SSR/panel load) and this
+    // effect's own subscribe are not atomic with each other, so a message
+    // inserted by the other party in that exact gap would otherwise never
+    // arrive live (the channel wasn't joined yet) and never get
+    // reconciled (a plain first-subscribe was previously never treated as
+    // a reconnect) -- permanently missing from this mount until a reload.
     let hasSubscribedOnce = false;
     let experiencedDisconnectAfterSubscribe = false;
 
@@ -602,7 +609,12 @@ export function ConversationThread({
             return;
           }
           if (status === "SUBSCRIBED") {
-            if (hasSubscribedOnce && experiencedDisconnectAfterSubscribe) {
+            // Reconcile on the very first SUBSCRIBED too (closes the
+            // initial-load -> first-subscribe gap -- see this effect's own
+            // header comment above), not only on a later genuine reconnect.
+            // Exactly one reconciliation call per SUBSCRIBED that matters
+            // either way -- never two for the same event.
+            if (!hasSubscribedOnce || experiencedDisconnectAfterSubscribe) {
               experiencedDisconnectAfterSubscribe = false;
               void reconcileMissedMessages();
             }
