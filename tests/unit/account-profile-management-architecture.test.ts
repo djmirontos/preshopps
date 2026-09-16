@@ -43,7 +43,7 @@ describe("0092 -- migration numbering", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0092_account_profile_management.sql");
     const newer = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newer).toEqual(["0093_seller_order_messaging.sql"]);
+    expect(newer).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
   });
 
   it("0086 remains absent", () => {

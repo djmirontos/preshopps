@@ -454,7 +454,28 @@ Public discovery behavior:
 
 Draft listings may be incomplete, except title: a non-blank title is always required to create/save a Draft. Draft creation/save must not require any other publish-ready field (description, category, type, condition, price, stock, location, fulfillment method, images, vehicle/rental detail) to already be present -- only that any value actually supplied is structurally/type valid and does not violate security/ownership rules. Description becomes required at publish.
 
-Full completeness validation (all required fields, valid category/type/condition, valid price/stock, valid location, at least one fulfillment method where applicable, 1-8 successfully uploaded images meeting the actual-item/reference rules, known-flaws for Fair, seller eligibility, required policy acceptance) is enforced only at the `draft` -> `available` transition (publish), never at draft creation or draft edit.
+Full completeness validation (all required fields, valid category/type/condition, valid price/stock, valid location, at least one fulfillment method where applicable, 1-8 successfully uploaded images meeting the actual-item/reference rules, known-flaws for Fair, seller eligibility, required policy acceptance) is enforced at the `draft` -> `available` transition (publish), never at draft creation or draft edit. Published edits validate the complete resulting state through the same trusted completeness validator.
+
+### Published editing
+
+- Only Available and Paused are editable initially; status transitions remain separate.
+- Seller published-edit RPCs cannot change category, listing type, or condition
+  after first publication; trusted administrative correction remains possible.
+- One authenticated, owner-authorized database operation saves fields, fulfillment,
+  optional vehicle/rental details, gallery order/cover, and revision atomically.
+- `listings.revision` is a bigint, returned to JavaScript as decimal text. Save
+  requires the loaded revision. Material published changes, including inventory
+  and status changes, increment it; a true no-op or timestamp-only change does not.
+  Draft editing before first publication does not churn revision.
+- The seller supplies available quantity; the database derives total stock under
+  the listing lock. Quantity changes require both zero reserved quantity and no
+  active reservation ledger entry. Available requires at least one available unit;
+  Paused permits zero, and resume revalidates completeness and positive availability.
+- Listing edits never acquire reservation-row locks after the listing lock.
+- Shared order submission locks selected listings in UUID order before reading
+  listing, fulfillment, and cover terms, retaining locks through snapshot creation.
+- Ordinary reports do not freeze editing. Reports, moderation history, and active
+  seller/account restrictions remain authoritative.
 
 ### Listing type
 
@@ -515,7 +536,7 @@ Free listings still use normal order/request flow when category allows ordering.
 
 ### Actual-item rule
 
-Every **published** listing must contain at least one actual-item photo. Enforced at publish time, not at Draft creation.
+Every **published** listing must contain at least one actual-item photo. Enforced at publish time and published save, not at Draft creation.
 
 Pre-loved:
 
@@ -532,7 +553,7 @@ Brand New:
 Recommended path pattern:
 
 ```text
-listing-images/{shop_id}/{listing_id}/{image_id}.webp
+listing-images/{owner_user_id}/{listing_id}/{random_uuid}.jpg
 review-images/{review_id}/{image_id}.webp
 dispute-images/{dispute_id}/{image_id}.webp
 shop-images/{shop_id}/profile.webp
@@ -542,6 +563,13 @@ profile-images/{user_id}/profile.webp
 Use private buckets where content should not be universally public, and public or signed URL access only where required.
 
 Public listing images can be optimized for CDN delivery.
+
+Listing uploads currently use `listing-images/{owner_user_id}/{listing_id}/{random_uuid}.jpg`
+with `upsert: false`. Authenticated clients have owner-scoped INSERT and existing
+read access, but no UPDATE or DELETE permission for listing image objects.
+Removing a gallery reference retains the immutable Storage object, including any
+path used by a historical order snapshot. Temporary unreferenced uploads are
+accepted until later trusted media cleanup; no cleanup service is part of this phase.
 
 ---
 
@@ -758,6 +786,10 @@ Each `order_item` must preserve a snapshot of relevant listing information at or
 - Seller/shop context
 
 This prevents later listing edits from changing order history.
+
+New order items capture `listing_type_snapshot` and `listing_condition_snapshot`
+using the listing enums. Historical rows predating these columns remain NULL
+(unknown); never infer those values from the listing's current mutable state.
 
 ---
 

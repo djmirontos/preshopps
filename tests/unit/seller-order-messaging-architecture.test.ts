@@ -23,13 +23,13 @@ function getFunctionSignature(source: string, anchor: string): string {
 const LOOKUP_ANCHOR = "create or replace function public.get_conversation_for_shop_order(";
 const FIRST_MESSAGE_ANCHOR = "create or replace function public.start_conversation_from_order(";
 
-describe("0093 is the newest migration and 0086 remains absent", () => {
-  it("0093_seller_order_messaging.sql exists and is the highest-numbered migration file", () => {
+describe("0093 exists alongside approved 0094 and 0086 remains absent", () => {
+  it("0093_seller_order_messaging.sql exists; approved 0094 is the latest migration", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0093_seller_order_messaging.sql");
     const numbered = migrationFiles.filter((f) => /^\d{4}_/.test(f));
     const highest = numbered.sort().at(-1);
-    expect(highest).toBe("0093_seller_order_messaging.sql");
+    expect(highest).toBe("0094_published_listing_editing.sql");
   });
 
   it("no 0086-numbered migration file exists", () => {

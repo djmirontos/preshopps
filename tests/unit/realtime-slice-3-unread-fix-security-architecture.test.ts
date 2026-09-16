@@ -98,11 +98,11 @@ describe("Realtime Slice 3 -- guests never create a notifications subscription",
 });
 
 describe("Realtime Slice 3 -- the only backend change is migration 0088's two additive, read-only scalar RPCs", () => {
-  it("no migration newer than 0092 exists (0089/0090/0091/0092 are later, separately-approved migrations), and 0086 was never backfilled", () => {
+  it("only approved 0093/0094 follow 0092 (0089/0090/0091/0092 are later, separately-approved migrations), and 0086 was never backfilled", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
     expect(migrationFiles).toContain("0088_exact_unread_badge_counts.sql");
   });
 

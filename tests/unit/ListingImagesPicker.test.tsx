@@ -237,6 +237,24 @@ describe("ListingImagesPicker -- remove", () => {
     await waitFor(() => expect(replaceListingImagesMock).toHaveBeenCalled());
     await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("listing-images/owner-1/listing-1/a.jpg"));
   });
+
+  it("keeps a successful draft gallery save successful when Storage cleanup is denied", async () => {
+    deleteUploadedImageMock.mockResolvedValue(false);
+    renderPicker({
+      initialImages: [
+        image({ id: "img-1", storagePath: "listing-images/owner-1/listing-1/a.jpg", position: 0 }),
+        image({ id: "img-2", storagePath: "listing-images/owner-1/listing-1/b.jpg", position: 1 }),
+      ],
+    });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("listing-images/owner-1/listing-1/a.jpg"));
+    expect(replaceListingImagesMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1 of 8 photos")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove image 1")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn.t save|failed to save/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("ListingImagesPicker -- reorder", () => {

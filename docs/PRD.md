@@ -1584,6 +1584,21 @@ Seller may edit a listing after an order request exists, but active accepted ord
 
 Critical order details such as price/identity must not silently mutate the buyer's agreed order.
 
+Initial published editing is limited to Available and Paused listings. Reserved,
+Sold, and Archived are read-only. Sellers cannot change category, listing type,
+or condition through normal editing after first publication. Saving edits never
+changes listing status. Draft editing keeps its existing incomplete-draft rules.
+
+Sellers edit available quantity, not reserved quantity. Quantity changes are
+blocked while any active reservation exists. Available requires at least one
+available unit; Paused may have zero, and resuming requires at least one.
+
+Fields, fulfillment, optional category details, and the gallery save together;
+stale edits are rejected. Ordinary reports do not freeze editing; seller/account
+restrictions still apply and report history is preserved.
+Edits affect future requests only. Historical order image objects are retained
+when removed from the current gallery.
+
 ### 29.2 Inventory behavior
 
 For quantity 1:
@@ -2282,4 +2297,3 @@ When implementation details are ambiguous:
 8. Preserve no-payment-processing MVP scope.
 9. Preserve light-mode Apple-inspired design direction.
 10. Escalate material product, security, architecture, cost, or UX tradeoffs for review before implementation.
-

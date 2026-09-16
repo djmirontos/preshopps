@@ -39,9 +39,10 @@ These hashes identify historical milestones, not the repository's current HEAD.
 
 ## Database state
 
-- **Latest migration:** `0093_seller_order_messaging.sql`
+- **Latest repository migration:** `0094_published_listing_editing.sql` — Phase A foundation; not applied to live Supabase.
+- **Latest verified live migration:** `0093_seller_order_messaging.sql`.
 - **`0086`:** intentionally and permanently skipped — no migration with this number exists or should ever be created. This is enforced by an existing automated test; do not backfill it under any circumstances.
-- **Next migration number:** `0094`
+- **Next unused migration number:** `0095` (`0094` is reserved by the repository-local migration above).
 
 Keep this section current — it is the reason a new agent doesn't need to run `ls supabase/migrations` and guess.
 
@@ -74,9 +75,17 @@ The following are implemented and merged as of the product implementation milest
 
 **Post-publish Listing Editing.**
 
-The current listing edit route (`app/sell/[listingId]/edit`) is explicitly draft-only by design — a listing that is no longer in `draft` status cannot currently be edited through it. Editing a listing after it has been published (while respecting order-snapshot integrity, per the PRD) has not yet been implemented.
+The current listing edit route (`app/sell/[listingId]/edit`) remains draft-only.
+Phase A adds the database foundation in repository-local migration 0094: atomic
+published save/read RPCs, revisions, historical order snapshots, immutable listing
+media policies, and coherent order snapshot locking. It has not been applied to
+live Supabase. Phase B frontend work has not started.
 
-This file does not design that feature. See `docs/PRD.md`/`docs/ARCHITECTURE.md` for the existing product rules that already anticipate it (e.g. post-publish photo reordering/cover-change/removal, editing after an order request exists while preserving accepted-order snapshots).
+Listing Storage UPDATE/DELETE removal intentionally leaves temporary unreferenced
+objects, including failed best-effort draft cleanup. Draft gallery edits remain
+usable. Trusted orphan cleanup is deferred to later media/storage hardening.
+
+The product and technical rules are in `docs/PRD.md` and `docs/ARCHITECTURE.md`; the Phase B RPC contract is documented in `tests/database/README.md`.
 
 ---
 

@@ -32,11 +32,11 @@ const FLOATING_MESSENGER_FILES = [
 ];
 
 describe("Floating Messenger slice -- no backend/migration/RLS change was made", () => {
-  it("no migration newer than 0092 exists -- this slice itself is frontend-only (0089/0090/0091/0092 are later, separately-approved migrations unrelated to this slice's own scope)", () => {
+  it("only approved 0093/0094 follow 0092 -- this slice itself is frontend-only (0089/0090/0091/0092 are later, separately-approved migrations unrelated to this slice's own scope)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql"]);
+    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
   });
 
   it("no slice file contains RLS/policy/grant DDL", () => {

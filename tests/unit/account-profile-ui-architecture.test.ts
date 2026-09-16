@@ -28,10 +28,10 @@ function stripComments(source: string): string {
  * identity projections (display_name/avatar only).
  */
 describe("Account/Profile UI slice adds no backend/migration change", () => {
-  it("no migration newer than 0092 exists -- this task is frontend-only (0093 is a later, separately-approved migration)", () => {
+  it("only approved 0093/0094 follow 0092 -- this task is frontend-only (0093 is a later, separately-approved migration)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newer).toEqual(["0093_seller_order_messaging.sql"]);
+    expect(newer).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });
 });
