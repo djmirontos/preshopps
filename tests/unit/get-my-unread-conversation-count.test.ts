@@ -12,6 +12,15 @@ beforeEach(() => {
   rpcMock.mockReset();
 });
 
+/**
+ * P1 fix: this helper returns a discriminated result rather than
+ * collapsing every failure to a bare 0 -- a fabricated 0 is
+ * indistinguishable from a genuine "no unread conversations" count to a
+ * caller, which is exactly what let NotificationsProvider's
+ * refreshUnreadMessageCount clear a real non-zero Messages badge on a
+ * transient RPC/network failure. See NotificationsProvider.test.tsx for
+ * the caller-side half of this fix.
+ */
 describe("getMyUnreadConversationCount", () => {
   it("calls the exact scalar RPC (0088) with no arguments", async () => {
     rpcMock.mockResolvedValue({ data: 0, error: null });
@@ -20,34 +29,34 @@ describe("getMyUnreadConversationCount", () => {
     expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count");
   });
 
-  it("returns the exact integer the RPC reports", async () => {
+  it("1. returns { ok: true, count: 3 } for a successful RPC reporting 3", async () => {
     rpcMock.mockResolvedValue({ data: 3, error: null });
-    const count = await getMyUnreadConversationCount();
-    expect(count).toBe(3);
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: true, count: 3 });
   });
 
-  it("returns 0 when the RPC reports 0", async () => {
+  it("2. returns { ok: true, count: 0 } for a successful RPC reporting a genuine 0 -- not treated as a failure", async () => {
     rpcMock.mockResolvedValue({ data: 0, error: null });
-    const count = await getMyUnreadConversationCount();
-    expect(count).toBe(0);
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: true, count: 0 });
   });
 
-  it("returns 0 (never throws) when the RPC returns an error", async () => {
+  it("3. returns { ok: false } (never a fabricated count) when the RPC returns an error", async () => {
     rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
-    const count = await getMyUnreadConversationCount();
-    expect(count).toBe(0);
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: false });
   });
 
-  it("returns 0 (never throws) when the RPC call itself throws", async () => {
+  it("4. returns { ok: false } (never a fabricated count) when the RPC call itself throws", async () => {
     rpcMock.mockRejectedValue(new Error("network error"));
-    const count = await getMyUnreadConversationCount();
-    expect(count).toBe(0);
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: false });
   });
 
-  it("returns 0 for a non-numeric response instead of trusting an unexpected shape", async () => {
+  it("returns { ok: false } for a non-numeric response instead of trusting an unexpected shape", async () => {
     rpcMock.mockResolvedValue({ data: [{ is_unread: true }], error: null });
-    const count = await getMyUnreadConversationCount();
-    expect(count).toBe(0);
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: false });
   });
 
   it("never sends a client-supplied user/recipient id -- caller is derived from auth.uid() server-side", async () => {
@@ -56,5 +65,12 @@ describe("getMyUnreadConversationCount", () => {
 
     const call = rpcMock.mock.calls[0];
     expect(call).toHaveLength(1);
+  });
+
+  it("11. never exposes the raw Supabase error message in the returned result -- only { ok: false }", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "raw backend detail that must never reach the UI" } });
+    const result = await getMyUnreadConversationCount();
+    expect(result).toEqual({ ok: false });
+    expect(JSON.stringify(result)).not.toMatch(/raw backend detail/);
   });
 });

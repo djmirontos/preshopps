@@ -299,6 +299,95 @@ describe("NotificationsProvider -- split unread counts", () => {
   });
 });
 
+/**
+ * P1 fix: refreshUnreadMessageCount must never overwrite the last-known
+ * Messages badge with a fabricated 0 when the underlying RPC fails --
+ * only a genuine ok=true result (itself possibly count: 0) is ever
+ * applied. See getMyUnreadConversationCount.test.ts for the helper-level
+ * half of this fix.
+ */
+describe("NotificationsProvider -- refreshUnreadMessageCount preserves the badge on a failed refresh", () => {
+  it("5. existing badge=3 + failed refresh (RPC error) stays 3, not 0", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3");
+  });
+
+  it("5b. existing badge=3 + failed refresh (thrown/network error) stays 3, not 0", async () => {
+    rpcMock.mockRejectedValue(new Error("network error"));
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3");
+  });
+
+  it("6. existing badge=3 + successful refresh reporting a genuine 0 becomes 0", async () => {
+    rpcMock.mockResolvedValue({ data: 0, error: null });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("0"));
+  });
+
+  it("7. existing badge=3 + successful refresh reporting 1 becomes 1", async () => {
+    rpcMock.mockResolvedValue({ data: 1, error: null });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(screen.getByTestId("unread-message-count")).toHaveTextContent("1"));
+  });
+
+  it("8. existing badge=0 + failed refresh remains 0", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("0");
+  });
+
+  it("9. a failed message-count refresh never touches unreadNotificationCount (Bell stays independent)", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3, initialUnreadNotificationCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3");
+    expect(screen.getByTestId("unread-notification-count")).toHaveTextContent("5");
+  });
+
+  it("10. the debounced Realtime-triggered refresh (a new_message event) preserves the badge on failure the exact same way as the manual refresh button", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    renderProvider({ initialUnreadMessageCount: 3 });
+
+    await fireIncomingNotification(sampleRow({ id: "notif-msg-fail", type: "new_message" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3");
+  });
+
+  it("11. no raw backend error text ever reaches the rendered badge", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "raw backend detail that must never reach the UI" } });
+    renderProvider({ isAuthenticated: false, userId: null, initialUnreadMessageCount: 3 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh message count" }));
+
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledWith("get_my_unread_conversation_count"));
+    expect(screen.getByTestId("unread-message-count")).toHaveTextContent("3");
+    expect(document.body.textContent).not.toMatch(/raw backend detail/);
+  });
+});
+
 describe("NotificationsProvider -- Messages badge semantics (unread CONVERSATIONS, not messages)", () => {
   it("3 new messages in the same still-unread conversation => badge remains 1 after the authoritative refresh, never 3", async () => {
     // Regardless of how many new_message rows arrive, the RPC reports the

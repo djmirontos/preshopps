@@ -182,8 +182,15 @@ export function NotificationsProvider({
   const decrementGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => Math.max(0, prev - 1)), []);
   const restoreGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => prev + 1), []);
   const clearGeneralUnreadCount = useCallback(() => setUnreadNotificationCount(0), []);
+  // P1 fix: a failed refresh (RPC error/thrown/unexpected shape) must
+  // never overwrite the last-known badge with a fabricated 0 -- only a
+  // genuine ok=true result (which may itself legitimately carry count: 0)
+  // ever calls setUnreadMessageCount. See getMyUnreadConversationCount's
+  // own result type for why ok=false is never treated as "reported 0".
   const refreshUnreadMessageCount = useCallback(() => {
-    void getMyUnreadConversationCount().then((count) => setUnreadMessageCount(count));
+    void getMyUnreadConversationCount().then((result) => {
+      if (result.ok) setUnreadMessageCount(result.count);
+    });
   }, []);
 
   useEffect(() => {
