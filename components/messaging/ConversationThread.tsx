@@ -9,7 +9,8 @@ import { cn } from "@/lib/cn";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { containsExternalLink } from "@/lib/messaging/detect-link";
 import { sendMessage, SEND_MESSAGE_ERROR_MESSAGES } from "@/lib/messaging/send-message";
-import { appendMessageIfNew } from "@/lib/messaging/message-list";
+import { appendMessageIfNew, insertMessageInOrder } from "@/lib/messaging/message-list";
+import { getLatestConversationMessages } from "@/lib/messaging/get-latest-conversation-messages";
 import { handleComposerKeyDown } from "@/lib/messaging/composer-keydown";
 import {
   markConversationRead,
@@ -342,6 +343,44 @@ export function ConversationThread({
 
   useEffect(() => {
     const conversationId = context.conversationId;
+    // Guards the async reconciliation fetch below against this exact
+    // effect invocation having already been cleaned up (unmount, or a
+    // conversationId change) by the time it resolves -- a plain closure
+    // flag, not a ref, so it is automatically scoped to (and reset fresh
+    // for) each effect invocation/channel, with no risk of a stale fetch
+    // from an OLD conversationId writing into a NEW one's state.
+    let cancelled = false;
+    // In-flight guard for reconcileMissedMessages below (task's own
+    // "reconciliationInFlightRef or equivalent" -- a closure variable is
+    // the equivalent here, for the same per-invocation-scoping reason as
+    // `cancelled`). Not required for correctness on its own --
+    // seenMessageIdsRef already makes a redundant/overlapping fetch's
+    // result a harmless no-op -- purely to avoid launching a second
+    // wasted network round trip while one is already pending.
+    let reconciliationInFlight = false;
+    // Coalescing flag for the race a plain in-flight guard alone leaves
+    // open: reconnect #1 starts fetch A; the channel drops and rejoins
+    // AGAIN while A is still running; without this flag that second
+    // request would simply be dropped by the in-flight guard above, and
+    // any message that arrived only during the second outage (i.e. after
+    // A had already read the DB) could stay missing until some later
+    // reconnect or a full reload. Set whenever a reconnect wants to
+    // reconcile but a fetch is already running; consulted once that
+    // fetch's own finally block clears reconciliationInFlight, so at most
+    // one additional fetch ever runs afterward regardless of how many
+    // reconnects requested one while the first was in flight (coalesced
+    // into a single follow-up, not one per request).
+    let reconciliationPending = false;
+    // Distinguishes the very first successful SUBSCRIBED (no reconciliation
+    // -- there is nothing to catch up on for a fresh mount) from a LATER
+    // SUBSCRIBED that follows a genuine interruption (CHANNEL_ERROR/
+    // TIMED_OUT after having already subscribed once) -- confirmed by
+    // reading realtime-js/@supabase/phoenix's own source that an automatic
+    // rejoin reuses the exact same channel/joinPush and re-invokes this
+    // exact same status callback with SUBSCRIBED again, so no second
+    // .subscribe() call or new channel is ever needed to observe this.
+    let hasSubscribedOnce = false;
+    let experiencedDisconnectAfterSubscribe = false;
 
     // Matches every other Supabase-touching call in this codebase
     // (send-message.ts, conversation-state.ts, etc.): never let a client
@@ -350,6 +389,123 @@ export function ConversationThread({
     // updates for this mount, same as before Realtime existed.
     try {
       const supabase = createClient();
+
+      // Reconnect reconciliation (additive to, never a replacement for,
+      // the live postgres_changes handler below): realtime-js's own
+      // rejoin mechanism does not replay postgres_changes events missed
+      // while a channel was disconnected, so a genuine reconnect (see
+      // the .subscribe() status callback below for exactly what counts
+      // as one, as opposed to the very first SUBSCRIBED) triggers a
+      // single fetch of the current newest page and merges anything
+      // this thread doesn't already know about. Client-only per the
+      // locked P1 decision -- get_conversation_messages has no forward/
+      // "since" cursor, so this is bounded to the newest 30 messages, a
+      // documented, accepted MVP limitation (an outage longer than that
+      // self-heals on the next full reload/reopen).
+      async function reconcileMissedMessages() {
+        if (reconciliationInFlight) {
+          // Don't drop this request -- remember it instead, so the
+          // messages it would have caught up on aren't silently missed
+          // (see reconciliationPending's own header comment above).
+          reconciliationPending = true;
+          return;
+        }
+        reconciliationInFlight = true;
+
+        try {
+          const result = await getLatestConversationMessages(conversationId);
+          if (cancelled) return;
+
+          if (!result.ok) {
+            // Silent stale preservation + internal log only, matching
+            // every other background read failure in this codebase
+            // (handleLoadEarlier, etc.) -- messages/earlierCursor/
+            // seenMessageIdsRef are all left completely untouched, no
+            // raw backend error surfaced, and the channel itself is
+            // never torn down or resubscribed over this. The viewer
+            // never asked for this catch-up, so there is no inline
+            // error either -- the next successful reconnect (or a
+            // manual reload, which always does a fully correct SSR
+            // fetch) naturally retries it.
+            console.error("Realtime reconciliation fetch failed -- preserving current messages.");
+            return;
+          }
+
+          // seenMessageIdsRef decides which fetched messages are
+          // genuinely missing locally -- the render-level dedupe below is
+          // now insertMessageInOrder, not appendMessageIfNew, for exactly
+          // one reason: a message missed during the outage can be
+          // *older* than a live message that already arrived and
+          // rendered while this fetch was still pending (Realtime keeps
+          // delivering on this same channel/binding throughout). Blindly
+          // appending it after that newer live message would render the
+          // conversation out of chronological order -- confirmed
+          // reproducible with the exact M0/A/B scenario in this file's
+          // own tests. insertMessageInOrder still dedupes by messageId
+          // (a no-op for anything already present) -- this ref only ever
+          // decides which messages/side effects this batch actually needs
+          // to act on; appendMessageIfNew remains untouched and correct
+          // for the live handler and handleSend below, where the newly
+          // arrived/sent message is always, by construction, the newest
+          // thing that has ever existed.
+          const newMessages = result.messages.filter((message) => !seenMessageIdsRef.current.has(message.messageId));
+          if (newMessages.length === 0) return;
+
+          // Captured before merging -- same "was the viewer already near
+          // the bottom" signal the live handler captures before its own
+          // append, evaluated once for the whole batch rather than once
+          // per reconciled message.
+          const wasNearBottom = isNearBottomRef.current;
+
+          for (const message of newMessages) seenMessageIdsRef.current.add(message.messageId);
+          setMessages((prev) => {
+            let next = prev;
+            for (const message of newMessages) next = insertMessageInOrder(next, message);
+            return next;
+          });
+
+          // Batch version of the live handler's own `wasNearBottom ||
+          // isMine` scroll check -- reconciliation is semantically a
+          // batch of live incoming messages arriving at once, so the
+          // same per-message gating logic applies, just evaluated once
+          // for the batch instead of once per message.
+          if (wasNearBottom || newMessages.some((message) => message.isMine)) {
+            pendingScrollRef.current = true;
+          }
+
+          const hasIncomingNotMine = newMessages.some((message) => !message.isMine);
+          if (hasIncomingNotMine) {
+            latestRef.current.onIncomingMessage?.();
+
+            // Same isMinimized gate as the live handler: a minimized
+            // panel must not silently mark messages the viewer hasn't
+            // actually seen as read, even though its unread indicator
+            // (onIncomingMessage, above) still lights.
+            if (!latestRef.current.isMinimized) {
+              void markConversationRead(conversationId).then(() => refreshUnreadMessageCount());
+            }
+          }
+        } catch (err) {
+          if (!cancelled) console.error("Realtime reconciliation fetch threw:", err instanceof Error ? err.message : err);
+        } finally {
+          reconciliationInFlight = false;
+          // Run exactly one additional reconciliation if one was
+          // requested while this fetch was running -- on success OR
+          // failure (a failed fetch A must not swallow a reconnect that
+          // arrived during it; the messages B would catch up on are
+          // still missing). Cleared before the recursive call so a
+          // request arriving during THAT run queues its own single
+          // follow-up rather than being silently coalesced away.
+          // `cancelled` (unmount/conversationId change) takes precedence
+          // over any queued request -- never start new work for a torn-
+          // down effect invocation.
+          if (reconciliationPending && !cancelled) {
+            reconciliationPending = false;
+            void reconcileMissedMessages();
+          }
+        }
+      }
+
       // See this effect's own header comment above for why this must be
       // globally unique per invocation, not just per conversationId.
       const channel = supabase
@@ -426,23 +582,38 @@ export function ConversationThread({
             }
           },
         )
-        // Status visibility only -- matches NotificationsProvider's own
-        // equivalent .subscribe() callback exactly (same two statuses, same
-        // generic err?.message ?? status logging, no conversation id/
-        // message content). This does not resubscribe or refetch anything:
-        // realtime-js already manages its own rejoin attempts internally,
-        // this purely makes a failed/timed-out join visible in the console
-        // during development/operations. SUBSCRIBED and CLOSED are
-        // intentionally not logged here, exactly like NotificationsProvider
-        // -- CLOSED fires on every normal unmount/conversationId-change
-        // cleanup, not just a real failure.
+        // Status visibility (unchanged) plus reconnect-triggered
+        // reconciliation (additive). Logging still matches
+        // NotificationsProvider's own equivalent .subscribe() callback
+        // exactly (same two statuses, same generic err?.message ?? status
+        // logging, no conversation id/message content) -- this still does
+        // not resubscribe or refetch anything itself: realtime-js already
+        // manages its own rejoin attempts internally (confirmed via its
+        // own source -- the same channel/joinPush is reused, so this exact
+        // callback fires again on its own after a rejoin), this purely
+        // reacts to that. SUBSCRIBED and CLOSED are still never logged,
+        // exactly like NotificationsProvider -- CLOSED fires on every
+        // normal unmount/conversationId-change cleanup, not just a real
+        // failure, so it must never trigger reconciliation either.
         .subscribe((status, err) => {
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
             console.error("Realtime message subscription failed:", err?.message ?? status);
+            if (hasSubscribedOnce) experiencedDisconnectAfterSubscribe = true;
+            return;
           }
+          if (status === "SUBSCRIBED") {
+            if (hasSubscribedOnce && experiencedDisconnectAfterSubscribe) {
+              experiencedDisconnectAfterSubscribe = false;
+              void reconcileMissedMessages();
+            }
+            hasSubscribedOnce = true;
+          }
+          // CLOSED: no log (see comment above), no reconciliation trigger
+          // -- intentionally falls through and does nothing.
         });
 
       return () => {
+        cancelled = true;
         supabase.removeChannel(channel);
       };
     } catch (err) {

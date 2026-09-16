@@ -615,3 +615,810 @@ describe("ConversationThread Realtime -- back-to-back incoming events (wasNew ti
     expect(markConversationReadMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Reconnect reconciliation (P1, client-only per the locked MVP decision):
+ * realtime-js's own automatic rejoin does not replay postgres_changes
+ * events missed while a channel was disconnected, so a genuine reconnect
+ * (SUBSCRIBED -> CHANNEL_ERROR/TIMED_OUT -> SUBSCRIBED, confirmed via
+ * @supabase/phoenix's own source to reuse the same channel/joinPush and
+ * re-invoke this exact status callback) triggers a single fetch of the
+ * current newest page (getLatestConversationMessages, this task's own new
+ * client-side wrapper) and merges anything missing via the same
+ * seenMessageIdsRef + appendMessageIfNew mechanism already proven for the
+ * live path. rpcMock (this file's existing fake Supabase client mock) is
+ * what backs getLatestConversationMessages's own supabase.rpc() call --
+ * no separate module mock needed.
+ */
+describe("ConversationThread Realtime -- reconnect reconciliation", () => {
+  const RECONCILE_RPC = "get_conversation_messages";
+
+  function rpcRow(overrides: Partial<{ message_id: string; is_mine: boolean; body: string; created_at: string }> = {}) {
+    return { message_id: "m", is_mine: false, body: "body", created_at: "2026-02-01T12:00:00.000Z", ...overrides };
+  }
+
+  it("1. the very first SUBSCRIBED (fresh mount) triggers no reconciliation fetch", () => {
+    renderThread();
+    expect(rpcMock).not.toHaveBeenCalledWith(RECONCILE_RPC, expect.anything());
+  });
+
+  it("2. SUBSCRIBED -> CHANNEL_ERROR -> SUBSCRIBED triggers exactly one reconciliation fetch", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    channel.statusCallback?.("SUBSCRIBED");
+    await act(() => Promise.resolve());
+
+    expect(rpcMock).toHaveBeenCalledWith(RECONCILE_RPC, expect.objectContaining({ p_conversation_id: "conv-1" }));
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(1);
+  });
+
+  it("3. SUBSCRIBED -> TIMED_OUT -> SUBSCRIBED also triggers reconciliation", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("TIMED_OUT");
+    channel.statusCallback?.("SUBSCRIBED");
+    await act(() => Promise.resolve());
+
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(1);
+  });
+
+  it("CLOSED during normal cleanup never triggers reconciliation", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CLOSED");
+    channel.statusCallback?.("SUBSCRIBED");
+    await act(() => Promise.resolve());
+
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(0);
+  });
+
+  it("4. one missed message appears after reconnect", async () => {
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [rpcRow({ message_id: "missed-1", body: "Missed while offline", created_at: "2026-02-01T13:00:00.000Z" })],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Missed while offline")).toHaveLength(1);
+  });
+
+  it("5. multiple missed messages render in chronological order", async () => {
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [
+        rpcRow({ message_id: "missed-b", body: "Second missed", created_at: "2026-02-01T13:01:00.000Z" }),
+        rpcRow({ message_id: "missed-a", body: "First missed", created_at: "2026-02-01T13:00:00.000Z" }),
+      ],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    const items = screen.getAllByRole("listitem").map((li) => li.textContent);
+    const firstIndex = items.findIndex((text) => text?.includes("First missed"));
+    const secondIndex = items.findIndex((text) => text?.includes("Second missed"));
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+  });
+
+  it("6. a message id already known locally is not duplicated when reconciliation also returns it", async () => {
+    renderThread({ initialMessages: [sampleMessage({ messageId: "already-known", body: "Already known" })] });
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [
+        rpcRow({ message_id: "already-known", body: "Already known", created_at: "2026-02-01T10:00:00.000Z" }),
+        rpcRow({ message_id: "genuinely-new", body: "Genuinely new", created_at: "2026-02-01T13:00:00.000Z" }),
+      ],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Already known")).toHaveLength(1);
+    expect(screen.getAllByText("Genuinely new")).toHaveLength(1);
+  });
+
+  it("7/8. previously loaded older messages and earlierCursor both remain intact after reconciliation", async () => {
+    loadEarlierMock.mockResolvedValue({
+      messages: [sampleMessage({ messageId: "older-1", body: "An older message" })],
+      hadError: false,
+      nextCursor: null,
+    });
+    renderThread({ initialCursor: { createdAt: "2026-02-01T09:00:00.000Z", id: "cursor-1" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    await waitFor(() => expect(screen.getAllByText("An older message")).toHaveLength(1));
+    expect(loadEarlierMock).toHaveBeenCalledWith("conv-1", { createdAt: "2026-02-01T09:00:00.000Z", id: "cursor-1" });
+
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [rpcRow({ message_id: "missed-1", body: "Missed while offline", created_at: "2026-02-01T13:00:00.000Z" })],
+      error: null,
+    });
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    // Older loaded message survives, the new message appended, and
+    // "Load earlier" (now cursor-exhausted from the mocked response
+    // above) is gone for the correct reason -- nextCursor: null -- not
+    // because reconciliation reset or corrupted it.
+    expect(screen.getAllByText("An older message")).toHaveLength(1);
+    expect(screen.getAllByText("Missed while offline")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
+  });
+
+  it("9. a live Realtime INSERT for a message that reconciliation's own (slower) fetch later also returns is not duplicated", async () => {
+    let resolveRpc: (value: { data: unknown; error: null }) => void = () => {};
+    rpcMock.mockImplementation((name: string) => {
+      if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+      return new Promise((resolve) => {
+        resolveRpc = resolve;
+      });
+    });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    channel.statusCallback?.("SUBSCRIBED"); // reconciliation fetch now in flight, unresolved
+
+    // The live channel keeps receiving events during the outage window too
+    // (this is the SAME channel/binding, never torn down) -- a live INSERT
+    // for the message the slow fetch will also eventually return.
+    act(() => {
+      registration.callback({
+        new: { id: "race-msg", conversation_id: "conv-1", sender_id: "other-user-1", body: "Race message", created_at: "2026-02-01T13:00:00.000Z" },
+      });
+    });
+    expect(screen.getAllByText("Race message")).toHaveLength(1);
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRpc({ data: [rpcRow({ message_id: "race-msg", body: "Race message", created_at: "2026-02-01T13:00:00.000Z" })], error: null });
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Race message")).toHaveLength(1);
+    // No second onIncomingMessage/markConversationRead for the same id via
+    // the reconciliation batch -- seenMessageIdsRef already had it.
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("10. a delayed live Realtime replay AFTER reconciliation already merged the same message is deduped", async () => {
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    const registration = channelOnCalls[channelOnCalls.length - 1];
+    rpcMock.mockResolvedValue({
+      data: [rpcRow({ message_id: "reconciled-msg", body: "Reconciled message", created_at: "2026-02-01T13:00:00.000Z" })],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText("Reconciled message")).toHaveLength(1);
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+
+    // The same message replayed live afterward (e.g. a stray re-delivery).
+    act(() => {
+      registration.callback({
+        new: { id: "reconciled-msg", conversation_id: "conv-1", sender_id: "other-user-1", body: "Reconciled message", created_at: "2026-02-01T13:00:00.000Z" },
+      });
+    });
+
+    expect(screen.getAllByText("Reconciled message")).toHaveLength(1);
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("11. a visible thread reconciling multiple missed incoming messages fires onIncomingMessage/markConversationRead/refreshUnreadMessageCount exactly once each, not once per message", async () => {
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    await act(() => Promise.resolve());
+    const refreshCountBefore = refreshUnreadMessageCountMock.mock.calls.length;
+
+    rpcMock.mockResolvedValue({
+      data: [
+        rpcRow({ message_id: "batch-1", body: "Batch message 1", created_at: "2026-02-01T13:00:00.000Z" }),
+        rpcRow({ message_id: "batch-2", body: "Batch message 2", created_at: "2026-02-01T13:01:00.000Z" }),
+        rpcRow({ message_id: "batch-3", body: "Batch message 3", created_at: "2026-02-01T13:02:00.000Z" }),
+      ],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).toHaveBeenCalledWith("conv-1");
+    await act(() => Promise.resolve());
+    expect(refreshUnreadMessageCountMock.mock.calls.length - refreshCountBefore).toBe(1);
+  });
+
+  it("12. a minimized thread reconciling missed messages fires onIncomingMessage once but never markConversationRead", async () => {
+    renderThread({ isMinimized: true });
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [
+        rpcRow({ message_id: "min-1", body: "Minimized batch 1", created_at: "2026-02-01T13:00:00.000Z" }),
+        rpcRow({ message_id: "min-2", body: "Minimized batch 2", created_at: "2026-02-01T13:01:00.000Z" }),
+      ],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+  });
+
+  it("13. a reconciliation batch containing only the viewer's own messages triggers no onIncomingMessage/markConversationRead", async () => {
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({
+      data: [rpcRow({ message_id: "own-1", is_mine: true, body: "My own missed message", created_at: "2026-02-01T13:00:00.000Z" })],
+      error: null,
+    });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("My own missed message")).toHaveLength(1);
+    expect(onIncomingMessageMock).not.toHaveBeenCalled();
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+  });
+
+  describe("scroll behavior after reconciliation", () => {
+    /** Same stubbing convention as ConversationThread-scroll.test.tsx --
+     * jsdom never computes real layout, so scrollHeight/clientHeight are
+     * fixed here to give every test a known "content taller than the
+     * visible area" shape, making scrollTop assertions meaningful. */
+    const STUBBED_SCROLL_HEIGHT = 1000;
+    const STUBBED_CLIENT_HEIGHT = 400;
+    const NEAR_BOTTOM_SCROLL_TOP = 550; // 1000-550-400=50, near bottom
+    const SCROLLED_UP_SCROLL_TOP = 50; // 1000-50-400=550, not near bottom
+
+    beforeEach(() => {
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, value: STUBBED_SCROLL_HEIGHT });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: STUBBED_CLIENT_HEIGHT });
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    });
+
+    it("14. a near-bottom thread follows to the latest reconciled message", async () => {
+      renderThread();
+      const container = screen.getByTestId("messages-scroll-container");
+      container.scrollTop = NEAR_BOTTOM_SCROLL_TOP;
+      fireEvent.scroll(container);
+
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      rpcMock.mockResolvedValue({
+        data: [rpcRow({ message_id: "scroll-missed", body: "Scroll missed", created_at: "2026-02-01T13:00:00.000Z" })],
+        error: null,
+      });
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await Promise.resolve();
+      });
+
+      expect(container.scrollTop).toBe(STUBBED_SCROLL_HEIGHT);
+    });
+
+    it("15. a scrolled-up thread is not forced back to the bottom by reconciliation", async () => {
+      renderThread();
+      const container = screen.getByTestId("messages-scroll-container");
+      container.scrollTop = SCROLLED_UP_SCROLL_TOP;
+      fireEvent.scroll(container);
+
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      rpcMock.mockResolvedValue({
+        data: [rpcRow({ message_id: "scroll-missed-2", body: "Scroll missed 2", created_at: "2026-02-01T13:00:00.000Z" })],
+        error: null,
+      });
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await Promise.resolve();
+      });
+
+      expect(container.scrollTop).toBe(SCROLLED_UP_SCROLL_TOP);
+    });
+  });
+
+  it("16. a reconciliation fetch failure preserves existing messages, logs safely, and shows no user-facing backend error", async () => {
+    renderThread({ initialMessages: [sampleMessage({ messageId: "m1", body: "First message" })] });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+    rpcMock.mockResolvedValue({ data: null, error: { message: "raw backend detail that must never reach the UI" } });
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("First message")).toHaveLength(1);
+    expect(document.body.textContent).not.toMatch(/raw backend detail/);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("17. an overlapping reconnect while a reconciliation fetch is still in flight does not launch a second fetch", async () => {
+    let resolveRpc: (value: { data: unknown; error: null }) => void = () => {};
+    rpcMock.mockImplementation((name: string) => {
+      if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+      return new Promise((resolve) => {
+        resolveRpc = resolve;
+      });
+    });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    channel.statusCallback?.("SUBSCRIBED"); // fetch #1 now in flight, unresolved
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+    channel.statusCallback?.("SUBSCRIBED"); // must not launch a second overlapping fetch
+
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(1);
+
+    await act(async () => {
+      resolveRpc({ data: [], error: null });
+      await Promise.resolve();
+    });
+  });
+
+  it("18. a later reconnect after the previous reconciliation has fully completed runs again", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    renderThread();
+    const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(1);
+
+    channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+    await act(async () => {
+      channel.statusCallback?.("SUBSCRIBED");
+      await Promise.resolve();
+    });
+    expect(rpcMock.mock.calls.filter((call) => call[0] === RECONCILE_RPC)).toHaveLength(2);
+  });
+
+  it("20. no migration file was added or changed by this feature -- 0093 remains the newest", () => {
+    const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
+    const newer = migrationFiles.filter((f) => f > "0093_seller_order_messaging.sql");
+    expect(newer).toEqual([]);
+  });
+
+  /**
+   * Coalescing fix for the race a plain in-flight guard alone leaves open:
+   * reconnect #1 starts fetch A; the channel drops and rejoins AGAIN while
+   * A is still running; without remembering that second request, any
+   * message that arrived only during the second outage (i.e. after A had
+   * already read the DB) could stay missing until some later reconnect or
+   * a full reload. ConversationThread's own reconciliationPending closure
+   * flag (set whenever a reconnect wants to reconcile while a fetch is
+   * already in flight, consulted once in that fetch's own `finally` block)
+   * fixes this by running exactly one additional fetch afterward.
+   */
+  describe("reconnect reconciliation -- queued/coalesced follow-up fetch", () => {
+    async function flushAsync() {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it("1/2/3/4/5. a second reconnect while fetch A is pending starts no concurrent fetch, is retained, and runs as fetch B once A settles -- a message that exists only in fetch B renders", async () => {
+      let resolveFetchA: (value: { data: unknown; error: null }) => void = () => {};
+      let reconcileCallCount = 0;
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        reconcileCallCount += 1;
+        if (reconcileCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveFetchA = resolve;
+          });
+        }
+        return Promise.resolve({
+          data: [rpcRow({ message_id: "only-in-fetch-b", body: "Only in fetch B", created_at: "2026-02-01T14:00:00.000Z" })],
+          error: null,
+        });
+      });
+      renderThread();
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+      // 1. Reconnect #1 starts fetch A.
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED");
+      expect(reconcileCallCount).toBe(1);
+
+      // 2/3. Reconnect #2 while A is still pending -- no concurrent
+      // second fetch; the request is retained instead of dropped.
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+      channel.statusCallback?.("SUBSCRIBED");
+      expect(reconcileCallCount).toBe(1);
+
+      // 4/5. A settles -- fetch B now starts automatically, and its own
+      // message (never part of A's result) renders.
+      await act(async () => {
+        resolveFetchA({ data: [], error: null });
+        await flushAsync();
+      });
+
+      expect(reconcileCallCount).toBe(2);
+      expect(screen.getAllByText("Only in fetch B")).toHaveLength(1);
+    });
+
+    it("6. the queued follow-up fetch B still runs even when fetch A fails", async () => {
+      let resolveFetchA: (value: { data: unknown; error: { message: string } | null }) => void = () => {};
+      let reconcileCallCount = 0;
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        reconcileCallCount += 1;
+        if (reconcileCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveFetchA = resolve;
+          });
+        }
+        return Promise.resolve({
+          data: [rpcRow({ message_id: "after-failed-a", body: "Arrived after A failed", created_at: "2026-02-01T14:00:00.000Z" })],
+          error: null,
+        });
+      });
+      renderThread();
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED"); // fetch A starts
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+      channel.statusCallback?.("SUBSCRIBED"); // queued while A pending
+      expect(reconcileCallCount).toBe(1);
+
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await act(async () => {
+        resolveFetchA({ data: null, error: { message: "boom" } }); // A fails
+        await flushAsync();
+      });
+      consoleErrorSpy.mockRestore();
+
+      expect(reconcileCallCount).toBe(2);
+      expect(screen.getAllByText("Arrived after A failed")).toHaveLength(1);
+    });
+
+    it("7. three reconnect requests while fetch A is pending coalesce into exactly ONE follow-up fetch, not one per request", async () => {
+      let resolveFetchA: (value: { data: unknown; error: null }) => void = () => {};
+      let reconcileCallCount = 0;
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        reconcileCallCount += 1;
+        if (reconcileCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveFetchA = resolve;
+          });
+        }
+        return Promise.resolve({ data: [], error: null });
+      });
+      renderThread();
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED"); // fetch A starts
+      // Three more reconnect cycles, all while A is still pending.
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom 2" });
+      channel.statusCallback?.("SUBSCRIBED");
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom 3" });
+      channel.statusCallback?.("SUBSCRIBED");
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom 4" });
+      channel.statusCallback?.("SUBSCRIBED");
+      expect(reconcileCallCount).toBe(1);
+
+      await act(async () => {
+        resolveFetchA({ data: [], error: null });
+        await flushAsync();
+      });
+
+      // Coalesced: exactly one additional fetch, not three.
+      expect(reconcileCallCount).toBe(2);
+    });
+
+    it("8. unmounting (cleanup) before fetch A resolves prevents the queued follow-up fetch from ever running", async () => {
+      let resolveFetchA: (value: { data: unknown; error: null }) => void = () => {};
+      let reconcileCallCount = 0;
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        reconcileCallCount += 1;
+        if (reconcileCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveFetchA = resolve;
+          });
+        }
+        return Promise.resolve({ data: [], error: null });
+      });
+      const { unmount } = renderThread();
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED"); // fetch A starts
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+      channel.statusCallback?.("SUBSCRIBED"); // queued while A pending
+      expect(reconcileCallCount).toBe(1);
+
+      unmount();
+      resolvePendingRemovals();
+
+      await act(async () => {
+        resolveFetchA({ data: [], error: null });
+        await flushAsync();
+      });
+
+      // cancelled (set by this effect's own cleanup) prevented the queued
+      // follow-up from ever starting.
+      expect(reconcileCallCount).toBe(1);
+    });
+  });
+
+  /**
+   * Chronological-ordering fix for a second race the coalescing fix
+   * (above) doesn't address by itself: a message MISSED during the
+   * outage (A) can be OLDER than a message that arrives LIVE (B) while
+   * reconciliation is still pending -- this same channel/binding keeps
+   * receiving events throughout, it is never torn down for the outage.
+   * Blindly appending A after B (appendMessageIfNew always appends at
+   * the end) rendered the conversation as M0 -> B -> A instead of the
+   * correct M0 -> A -> B -- confirmed reproducible before this fix via
+   * this exact scenario. ConversationThread's own reconciliation merge
+   * now uses insertMessageInOrder (lib/messaging/message-list.ts) instead
+   * of appendMessageIfNew for exactly this merge -- createdAt ascending,
+   * messageId ascending as a deterministic tie-breaker -- while the live
+   * handler and handleSend both keep using appendMessageIfNew unchanged
+   * (correct there: a live/just-sent message is always the newest thing
+   * that has ever existed).
+   */
+  describe("reconnect reconciliation -- chronological ordering when a live message races an older missed one", () => {
+    it("1/2/3/4/5/6. live newer B arrives while reconciliation is pending, then reconciliation returns older-missing A + already-known B -- final order is M0 -> A -> B, B renders once, and side effects fire exactly once per genuinely new message (not repeated for B)", async () => {
+      let resolveFetch: (value: { data: unknown; error: null }) => void = () => {};
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        return new Promise((resolve) => {
+          resolveFetch = resolve;
+        });
+      });
+      renderThread({ initialMessages: [sampleMessage({ messageId: "M0", body: "M0", createdAt: "2026-02-01T10:00:00.000Z" })] });
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      const registration = channelOnCalls[channelOnCalls.length - 1];
+
+      // 1. Reconciliation fetch starts (pending).
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED");
+
+      // Live message B (later createdAt) arrives WHILE reconciliation is
+      // still pending -- this channel/binding is never torn down for the
+      // outage, so live delivery continues throughout.
+      act(() => {
+        registration.callback({
+          new: { id: "B", conversation_id: "conv-1", sender_id: "other-user-1", body: "B", created_at: "2026-02-01T12:00:00.000Z" },
+        });
+      });
+      expect(screen.getAllByText("B", { selector: "p" })).toHaveLength(1);
+      expect(onIncomingMessageMock).toHaveBeenCalledTimes(1);
+      expect(markConversationReadMock).toHaveBeenCalledTimes(1);
+
+      // 2. Reconciliation now resolves with [A, B] chronologically -- A is
+      // older-missing, B is the same id the live handler already rendered.
+      await act(async () => {
+        resolveFetch({
+          data: [
+            rpcRow({ message_id: "B", body: "B", created_at: "2026-02-01T12:00:00.000Z" }),
+            rpcRow({ message_id: "A", body: "A", created_at: "2026-02-01T11:00:00.000Z" }),
+          ],
+          error: null,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // 3. Final rendered order: M0 -> A -> B.
+      const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+      const m0Index = items.findIndex((text) => text.includes("M0"));
+      const aIndex = items.findIndex((text) => text.includes("A") && !text.includes("M0"));
+      const bIndex = items.findIndex((text) => text.includes("B"));
+      expect(m0Index).toBeLessThan(aIndex);
+      expect(aIndex).toBeLessThan(bIndex);
+
+      // 4. B still renders exactly once (not duplicated by reconciliation).
+      expect(screen.getAllByText("B", { selector: "p" })).toHaveLength(1);
+
+      // 5/6. Side effects fired exactly once per genuinely new message --
+      // once for B's live arrival, once more for A's reconciliation batch
+      // (A is genuinely new and not-mine) -- never a repeat for B.
+      expect(onIncomingMessageMock).toHaveBeenCalledTimes(2);
+      expect(markConversationReadMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("7. reverse race: reconciliation adds older-missing A first, then live B arrives afterward -- still renders M0 -> A -> B", async () => {
+      renderThread({ initialMessages: [sampleMessage({ messageId: "M0", body: "M0", createdAt: "2026-02-01T10:00:00.000Z" })] });
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      const registration = channelOnCalls[channelOnCalls.length - 1];
+      rpcMock.mockResolvedValue({
+        data: [rpcRow({ message_id: "A", body: "A", created_at: "2026-02-01T11:00:00.000Z" })],
+        error: null,
+      });
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      act(() => {
+        registration.callback({
+          new: { id: "B", conversation_id: "conv-1", sender_id: "other-user-1", body: "B", created_at: "2026-02-01T12:00:00.000Z" },
+        });
+      });
+
+      const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+      const m0Index = items.findIndex((text) => text.includes("M0"));
+      const aIndex = items.findIndex((text) => text.includes("A") && !text.includes("M0"));
+      const bIndex = items.findIndex((text) => text.includes("B"));
+      expect(m0Index).toBeLessThan(aIndex);
+      expect(aIndex).toBeLessThan(bIndex);
+    });
+
+    it("8. multiple missing messages merge chronologically around an already-known live message, not just appended after it", async () => {
+      renderThread({ initialMessages: [sampleMessage({ messageId: "M0", body: "M0", createdAt: "2026-02-01T10:00:00.000Z" })] });
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      const registration = channelOnCalls[channelOnCalls.length - 1];
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED"); // reconciliation pending
+
+      act(() => {
+        registration.callback({
+          new: { id: "middle-live", conversation_id: "conv-1", sender_id: "other-user-1", body: "MiddleLive", created_at: "2026-02-01T11:30:00.000Z" },
+        });
+      });
+
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        return Promise.resolve({
+          data: [
+            rpcRow({ message_id: "middle-live", body: "MiddleLive", created_at: "2026-02-01T11:30:00.000Z" }),
+            rpcRow({ message_id: "before-middle", body: "BeforeMiddle", created_at: "2026-02-01T11:00:00.000Z" }),
+            rpcRow({ message_id: "after-middle", body: "AfterMiddle", created_at: "2026-02-01T12:00:00.000Z" }),
+          ],
+          error: null,
+        });
+      });
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+      const order = ["M0", "BeforeMiddle", "MiddleLive", "AfterMiddle"].map((label) => items.findIndex((text) => text.includes(label)));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      expect(order.every((i) => i !== -1)).toBe(true);
+    });
+
+    it("9. equal createdAt timestamps fall back to deterministic messageId ordering", async () => {
+      renderThread({ initialMessages: [sampleMessage({ messageId: "M0", body: "M0", createdAt: "2026-02-01T10:00:00.000Z" })] });
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      const SAME_TIMESTAMP = "2026-02-01T11:00:00.000Z";
+      rpcMock.mockResolvedValue({
+        data: [
+          rpcRow({ message_id: "id-b", body: "TieB", created_at: SAME_TIMESTAMP }),
+          rpcRow({ message_id: "id-a", body: "TieA", created_at: SAME_TIMESTAMP }),
+        ],
+        error: null,
+      });
+
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+      const aIndex = items.findIndex((text) => text.includes("TieA"));
+      const bIndex = items.findIndex((text) => text.includes("TieB"));
+      // "id-a" < "id-b" lexicographically -- deterministic tie-break.
+      expect(aIndex).toBeLessThan(bIndex);
+    });
+
+    it("10/11. loaded older pages and earlierCursor both remain intact through an out-of-order reconciliation merge", async () => {
+      loadEarlierMock.mockResolvedValue({
+        messages: [sampleMessage({ messageId: "older-page", body: "OlderPageMessage", createdAt: "2026-02-01T08:00:00.000Z" })],
+        hadError: false,
+        nextCursor: null,
+      });
+      renderThread({
+        initialMessages: [sampleMessage({ messageId: "M0", body: "M0", createdAt: "2026-02-01T10:00:00.000Z" })],
+        initialCursor: { createdAt: "2026-02-01T09:00:00.000Z", id: "cursor-1" },
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+      await waitFor(() => expect(screen.getAllByText("OlderPageMessage")).toHaveLength(1));
+      expect(loadEarlierMock).toHaveBeenCalledWith("conv-1", { createdAt: "2026-02-01T09:00:00.000Z", id: "cursor-1" });
+
+      const channel = latestChannelForTopicPrefix("messages:conv-1");
+      const registration = channelOnCalls[channelOnCalls.length - 1];
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom" });
+      channel.statusCallback?.("SUBSCRIBED"); // reconciliation pending
+
+      act(() => {
+        registration.callback({
+          new: { id: "B", conversation_id: "conv-1", sender_id: "other-user-1", body: "B", created_at: "2026-02-01T12:00:00.000Z" },
+        });
+      });
+
+      rpcMock.mockImplementation((name: string) => {
+        if (name !== RECONCILE_RPC) return Promise.resolve({ data: 0, error: null });
+        return Promise.resolve({
+          data: [
+            rpcRow({ message_id: "B", body: "B", created_at: "2026-02-01T12:00:00.000Z" }),
+            rpcRow({ message_id: "A", body: "A", created_at: "2026-02-01T11:00:00.000Z" }),
+          ],
+          error: null,
+        });
+      });
+      channel.statusCallback?.("CHANNEL_ERROR", { message: "boom again" });
+      await act(async () => {
+        channel.statusCallback?.("SUBSCRIBED");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // 10. The older loaded page survives, still first.
+      const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
+      expect(items[0]).toContain("OlderPageMessage");
+      // 11. earlierCursor was exhausted by the mocked nextCursor: null
+      // response above (a legitimate reason for the button to disappear),
+      // never reset/corrupted by reconciliation.
+      expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
+    });
+  });
+});
