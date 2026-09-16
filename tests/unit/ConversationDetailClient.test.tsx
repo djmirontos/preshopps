@@ -692,7 +692,11 @@ describe("ConversationDetailClient -- Realtime message subscription", () => {
   it("subscribes to postgres_changes INSERT on messages, filtered to this conversation's id", () => {
     renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
 
-    expect(channelNameCalls).toContain("messages:conv-1");
+    // The topic carries a uniquifying suffix (see ConversationThread.tsx's
+    // nextRealtimeChannelTopic -- the fix for "cannot add `postgres_changes`
+    // callbacks... after `subscribe()`") so this checks the base topic
+    // prefix rather than an exact string.
+    expect(channelNameCalls.some((name) => name.startsWith("messages:conv-1:"))).toBe(true);
     const registration = channelOnCalls[channelOnCalls.length - 1];
     expect(registration.event).toBe("postgres_changes");
     expect(registration.config).toMatchObject({
@@ -712,7 +716,7 @@ describe("ConversationDetailClient -- Realtime message subscription", () => {
 
   it("removes the old channel and opens a new one filtered to the new conversation when conversationId changes", () => {
     const { rerender } = renderConversation({ context: sampleContext({ conversationId: "conv-1" }) });
-    expect(channelNameCalls).toContain("messages:conv-1");
+    expect(channelNameCalls.some((name) => name.startsWith("messages:conv-1:"))).toBe(true);
 
     rerender(
       <ConversationDetailClient
@@ -726,7 +730,7 @@ describe("ConversationDetailClient -- Realtime message subscription", () => {
     );
 
     expect(removeChannelMock).toHaveBeenCalledTimes(1);
-    expect(channelNameCalls).toContain("messages:conv-2");
+    expect(channelNameCalls.some((name) => name.startsWith("messages:conv-2:"))).toBe(true);
   });
 
   it("appends an incoming INSERT immediately, without refetching the whole thread", () => {

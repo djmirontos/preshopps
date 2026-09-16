@@ -84,7 +84,11 @@ describe("Mobile conversation layout -- desktop (lg+) is provably unchanged", ()
 
   it("ConversationThread's own Realtime subscription, dedupe helper, and scroll effects are untouched by this task -- same file, same logic, only its parent's outer positioning changed", () => {
     const source = readFile("components/messaging/ConversationThread.tsx");
-    expect(source).toMatch(/\.channel\(`messages:/);
+    // The channel topic is still built from `messages:${conversationId}`,
+    // just now passed through nextRealtimeChannelTopic() (a later, separately
+    // approved Realtime bug fix that uniquifies each effect invocation's
+    // topic) rather than passed to .channel() as a bare template literal.
+    expect(source).toMatch(/nextRealtimeChannelTopic\(`messages:/);
     expect(source).toMatch(/appendMessageIfNew/);
     expect(source).toMatch(/NEAR_BOTTOM_THRESHOLD_PX/);
     expect(source).toMatch(/scrollMessagesToBottom/);

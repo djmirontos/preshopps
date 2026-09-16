@@ -39,6 +39,33 @@ type RawMessageRow = {
 
 const MAX_MESSAGE_LENGTH = 4000;
 
+/** @supabase/realtime-js's own RealtimeClient.channel(topic) deliberately
+ * REUSES an existing channel object whenever one with the same topic
+ * string is still present in its internal registry, and
+ * RealtimeClient.removeChannel() is async -- so a base topic keyed only
+ * on conversationId (e.g. `messages:${conversationId}`) can, under a
+ * fast enough remount/re-run (React Strict Mode's dev-only double-invoke
+ * of every effect on mount being the common real-world trigger), collide
+ * with the previous effect invocation's channel before its own async
+ * teardown has actually removed it from that registry -- and calling
+ * `.on('postgres_changes', ...)` on that reused, already-joining/joined
+ * object throws "cannot add `postgres_changes` callbacks for
+ * realtime:<topic> after `subscribe()`." This counter makes every single
+ * invocation's topic globally unique (module-level, not a per-instance
+ * ref, so this holds even across two ConversationThread instances that
+ * happen to share a conversation id at once), which removes the
+ * collision by construction rather than trying to win the race against
+ * removeChannel's own network round trip. The topic string carries no
+ * server-side meaning of its own -- the DB-level filter
+ * (conversation_id=eq.${conversationId}) is what actually scopes which
+ * rows a channel receives -- so appending a sequence number here changes
+ * nothing about what any channel is allowed to see. */
+let nextRealtimeChannelSequence = 0;
+function nextRealtimeChannelTopic(baseTopic: string): string {
+  nextRealtimeChannelSequence += 1;
+  return `${baseTopic}:${nextRealtimeChannelSequence}`;
+}
+
 /** How close to the bottom (in px of remaining scroll distance) still
  * counts as "already reading the latest messages" -- close enough that
  * an incoming message should pull the view down with it, rather than the
@@ -282,6 +309,18 @@ export function ConversationThread({
   // refreshUnreadMessageCount is NotificationsProvider's own stable
   // (empty-deps useCallback) function identity, so keeping it in the
   // dependency array below never causes a resubscribe either.
+  //
+  // Bug fix (hands-on QA): the channel topic below is built via
+  // nextRealtimeChannelTopic(), not a plain `messages:${conversationId}`
+  // string -- see that function's own doc comment (top of file) for why
+  // a topic keyed only on conversationId let two effect invocations
+  // (React Strict Mode's dev-only double-invoke on mount being the
+  // common trigger) unknowingly collide on the exact same underlying,
+  // already-subscribed channel object, throwing "cannot add
+  // `postgres_changes` callbacks... after `subscribe()`." on the second
+  // invocation. This was never about calling `.on()` after `.subscribe()`
+  // on any ONE channel (the two have always been chained correctly, in
+  // order, below) -- it was a channel-identity collision one level up.
   const latestRef = useRef({ isMinimized, onIncomingMessage });
   useEffect(() => {
     latestRef.current = { isMinimized, onIncomingMessage };
@@ -297,8 +336,10 @@ export function ConversationThread({
     // updates for this mount, same as before Realtime existed.
     try {
       const supabase = createClient();
+      // See this effect's own header comment above for why this must be
+      // globally unique per invocation, not just per conversationId.
       const channel = supabase
-        .channel(`messages:${conversationId}`)
+        .channel(nextRealtimeChannelTopic(`messages:${conversationId}`))
         .on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` },
