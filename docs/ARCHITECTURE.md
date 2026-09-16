@@ -41,7 +41,7 @@ Why:
 - Strong SEO support for public listing and shop pages.
 - Server rendering and static optimization where appropriate.
 - Excellent mobile-responsive support.
-- Simple deployment on Vercel.
+- Simple deployment on Netlify.
 - Good fit for Supabase-backed applications.
 
 ### 3.2 Backend Platform
@@ -62,16 +62,12 @@ Why:
 
 ### 3.3 Hosting
 
-- **Vercel** for the Next.js application
+- **Netlify** for the Next.js frontend application
 - **Supabase Cloud** for database/auth/storage
 
 ### 3.4 Transactional Email
 
-Use a transactional email provider through a server-side abstraction.
-
-Recommended initial implementation:
-
-- Resend or another simple transactional provider
+Transactional email uses **Supabase Cron → Supabase Edge Function → Resend**, independent of Netlify. The Edge Function processes the database email outbox server-side.
 
 Email sending must never occur directly from the browser.
 
@@ -911,10 +907,10 @@ Recommended flow:
 Domain action
   -> database mutation succeeds
   -> create in-app notification
-  -> enqueue/send transactional email server-side
+  -> enqueue transactional email in the database outbox
 ```
 
-For MVP, this can be handled synchronously or via a simple background/server function where practical.
+Supabase Cron invokes the Supabase Edge Function to process the outbox and send email through Resend, independent of Netlify.
 
 Do not introduce a complex queue system unless needed.
 
@@ -1350,7 +1346,7 @@ Local Next.js application connected to a development Supabase project where prac
 
 ### Preview
 
-Vercel preview deployments for feature branches/pull requests.
+Netlify preview deployments for feature branches/pull requests.
 
 ### Production
 

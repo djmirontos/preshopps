@@ -98,8 +98,8 @@ Expected technology direction:
 - Supabase PostgreSQL
 - Supabase Storage
 - Supabase RLS
-- Vercel
-- transactional email abstraction, initially Resend or equivalent
+- Netlify for the Next.js frontend
+- server-side transactional email: Supabase Cron → Supabase Edge Function → Resend, independent of Netlify
 
 Do not introduce:
 

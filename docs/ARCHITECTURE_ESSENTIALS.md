@@ -33,8 +33,8 @@ Use:
 - Supabase PostgreSQL
 - Supabase Storage
 - Supabase Row Level Security
-- Vercel
-- Server-side transactional email abstraction, initially Resend or equivalent
+- Netlify for the Next.js frontend
+- Server-side transactional email: Supabase Cron → Supabase Edge Function → Resend, independent of Netlify
 
 Do **not** introduce microservices, event buses, dedicated search infrastructure, complex job queues, or unnecessary infrastructure in MVP.
 
@@ -1008,7 +1008,7 @@ Rules:
 
 Hosting:
 
-- Vercel
+- Netlify for the Next.js frontend
 - Supabase Cloud
 
 ---

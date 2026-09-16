@@ -18,11 +18,22 @@ This file is expected to change often. Update it after any significant module or
 
 ---
 
-## Current baseline
+## Repository milestones
 
-- **HEAD:** `3d08cb2`
-- **Branch:** `main`
-- **Working tree at this handoff:** clean
+Last completed product implementation milestone:
+
+- Messaging MVP closeout
+- Implementation commit: `3d08cb2`
+
+Repository transition documentation milestone:
+
+- Codex handoff documentation commit: `283244e`
+
+Current branch:
+
+- `main`
+
+These hashes identify historical milestones, not the repository's current HEAD.
 
 ---
 
@@ -38,7 +49,7 @@ Keep this section current — it is the reason a new agent doesn't need to run `
 
 ## Completed major modules
 
-The following are implemented and merged as of the current baseline:
+The following are implemented and merged as of the product implementation milestone above:
 
 - Marketplace/listings core (browse, search, filter, listing detail)
 - Cart (guest + signed-in, multi-seller split)
