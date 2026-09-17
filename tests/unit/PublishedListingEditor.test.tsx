@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 
-const { pushMock, refreshMock, getPublishedListingEditStateMock, updatePublishedListingMock } = vi.hoisted(() => ({
-  pushMock: vi.fn(),
-  refreshMock: vi.fn(),
-  getPublishedListingEditStateMock: vi.fn(),
-  updatePublishedListingMock: vi.fn(),
-}));
+const { pushMock, refreshMock, getPublishedListingEditStateMock, updatePublishedListingMock, uploadImageMock, deleteUploadedImageMock } =
+  vi.hoisted(() => ({
+    pushMock: vi.fn(),
+    refreshMock: vi.fn(),
+    getPublishedListingEditStateMock: vi.fn(),
+    updatePublishedListingMock: vi.fn(),
+    uploadImageMock: vi.fn(),
+    deleteUploadedImageMock: vi.fn(),
+  }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock, refresh: refreshMock }),
@@ -22,8 +25,26 @@ vi.mock("@/lib/seller/published-listing-actions", async () => {
   };
 });
 
+// Same mocking convention as ListingImagesPicker.test.tsx -- proves this
+// component only ever reaches Storage through the shared uploadImage
+// helper, and lets tests assert deleteUploadedImage is NEVER called for a
+// published gallery (unlike Draft's own picker, which does call it).
+vi.mock("@/lib/image-processing/upload-image", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/image-processing/upload-image")>("@/lib/image-processing/upload-image");
+  return {
+    ...actual,
+    uploadImage: uploadImageMock,
+    deleteUploadedImage: deleteUploadedImageMock,
+  };
+});
+
+vi.mock("@/lib/marketplace/listing-image-url", () => ({
+  getListingImageUrl: (path: string | null) => (path ? `https://example.supabase.co/storage/v1/object/public/${path}` : undefined),
+}));
+
 import { PublishedListingEditor } from "@/components/seller/PublishedListingEditor";
 import type { PublishedListingEditState } from "@/lib/seller/published-listing-actions";
+import type { MyListingImage } from "@/lib/seller/get-my-listing";
 
 const CATEGORIES = [
   { id: 1, slug: "women", name: "Women" },
@@ -33,6 +54,16 @@ const CATEGORIES = [
 const PROVINCES = [{ id: 1, name: "Misamis Occidental" }];
 const CITIES = [{ id: 10, name: "Tangub City" }];
 const BARANGAYS = [{ id: 100, name: "Barangay Uno" }];
+
+function image(overrides: Partial<MyListingImage> = {}): MyListingImage {
+  return {
+    id: "img-1",
+    storagePath: "listing-images/u1/listing-1/a.jpg",
+    position: 0,
+    isReferenceImage: false,
+    ...overrides,
+  };
+}
 
 function sampleState(overrides: Partial<PublishedListingEditState> = {}): PublishedListingEditState {
   return {
@@ -59,13 +90,19 @@ function sampleState(overrides: Partial<PublishedListingEditState> = {}): Publis
     updatedAt: "2026-01-05T00:00:00.000Z",
     publishedAt: "2026-01-02T00:00:00.000Z",
     fulfillmentMethods: ["meetup"],
-    images: [],
+    // A real published (Available/Paused) listing always has at least one
+    // image already -- publish_listing itself enforces IMAGE_REQUIRED
+    // before a Draft can ever become Available. Defaulting to one image
+    // here (rather than []) keeps every non-gallery-focused test realistic
+    // without needing to pass images/coverImageId explicitly; tests that
+    // deliberately exercise the empty-gallery edge case override this.
+    images: [image()],
     vehicleDetails: null,
     rentalDetails: null,
     revision: "1",
     availableQuantity: 5,
     reservedQuantity: 0,
-    coverImageId: null,
+    coverImageId: "img-1",
     quantityEditable: true,
     ...overrides,
   };
@@ -75,6 +112,7 @@ function renderEditor(overrides: Partial<ComponentProps<typeof PublishedListingE
   return render(
     <PublishedListingEditor
       listingId="listing-1"
+      ownerUserId="u1"
       initialState={sampleState()}
       categories={CATEGORIES}
       provinces={PROVINCES}
@@ -87,8 +125,19 @@ function renderEditor(overrides: Partial<ComponentProps<typeof PublishedListingE
   );
 }
 
+function selectFile(name = "photo.jpg") {
+  const input = screen.getByLabelText("Add a listing photo");
+  const file = new File(["fake-bytes"], name, { type: "image/jpeg" });
+  fireEvent.change(input, { target: { files: [file] } });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  deleteUploadedImageMock.mockResolvedValue(true);
+  if (!("createObjectURL" in URL)) {
+    // @ts-expect-error -- test-environment polyfill
+    URL.createObjectURL = vi.fn(() => "blob:mock-preview");
+  }
 });
 
 describe("PublishedListingEditor -- Available", () => {
@@ -140,22 +189,6 @@ describe("PublishedListingEditor -- Available", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalledWith("listing-1", "9007199254740993", expect.anything(), null));
-  });
-
-  it("always sends images: null -- this step never mutates the gallery", async () => {
-    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState({ title: "New Title" }), changed: true });
-    renderEditor();
-
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
-    expect(updatePublishedListingMock.mock.calls[0][3]).toBeNull();
-  });
-
-  it("renders no file input or other image-mutation control", () => {
-    const { container } = renderEditor();
-    expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
   it("a successful material save updates the held revision/baseline, so a second no-op save sends no further RPC call", async () => {
@@ -215,7 +248,7 @@ describe("PublishedListingEditor -- Paused", () => {
 
 describe("PublishedListingEditor -- Available quantity rules", () => {
   it("Available cannot submit a quantity of 0", async () => {
-    renderEditor({ initialState: sampleState({ status: "available", availableQuantity: 1 }) });
+    renderEditor({ initialState: sampleState({ status: "available", availableQuantity: 1, images: [image()], coverImageId: "img-1" }) });
 
     fireEvent.change(screen.getByLabelText("Available quantity"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -320,6 +353,22 @@ describe("PublishedListingEditor -- stale revision conflict", () => {
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
   });
+
+  it("does not retry, upload, or modify any Storage object for a gallery change left pending by a stale conflict", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    updatePublishedListingMock.mockResolvedValue({ outcome: "stale_revision" });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    selectFile();
+    await waitFor(() => expect(uploadImageMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await screen.findByRole("alert");
+    expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+    expect(uploadImageMock).toHaveBeenCalledTimes(1);
+    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
 });
 
 describe("PublishedListingEditor -- expected save failures", () => {
@@ -385,5 +434,314 @@ describe("PublishedListingEditor -- vehicle/rental extensions", () => {
     renderEditor();
     expect(screen.queryByLabelText(/model/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/rental price/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("PublishedListingEditor -- published gallery", () => {
+  it("renders the existing published gallery, with the current cover marked", () => {
+    renderEditor({ initialState: sampleState({ images: [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/b.jpg", position: 1 })], coverImageId: "img-2" }) });
+
+    expect(screen.getByText("2 of 8 photos")).toBeInTheDocument();
+    expect(screen.getByText("Cover")).toBeInTheDocument();
+  });
+
+  it("uploading a new photo changes only the LOCAL gallery -- it never calls updatePublishedListing by itself", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    selectFile();
+
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+    expect(uploadImageMock).toHaveBeenCalledWith("listing-images", "u1", "listing-1", expect.any(File), expect.any(Function));
+    expect(updatePublishedListingMock).not.toHaveBeenCalled();
+  });
+
+  it("removing an existing image never calls deleteUploadedImage -- the underlying Storage object must survive", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState({ images: [], coverImageId: null }), changed: true });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 1" }));
+    expect(screen.getByText("0 of 8 photos")).toBeInTheDocument();
+    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+
+    // Removing the only photo down to zero is allowed locally; only Save
+    // enforces the minimum-1 rule (see the dedicated test below). Confirm
+    // the removal itself never touched Storage even after a later save
+    // attempt is blocked.
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Add at least one photo before saving.");
+    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+  });
+
+  it("removing a brand-new, never-saved upload also never calls deleteUploadedImage (orphans are accepted, cleaned up later)", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    selectFile();
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 2" }));
+    expect(screen.getByText("1 of 8 photos")).toBeInTheDocument();
+    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+  });
+
+  it("reordering produces a payload whose array order matches the new order (position is array index, never a separate field)", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    renderEditor({
+      initialState: sampleState({
+        images: [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/b.jpg", position: 1 })],
+        coverImageId: "img-1",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Move image 1 right" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const images = updatePublishedListingMock.mock.calls[0][3];
+    expect(images).toEqual([
+      { image_id: "img-2", is_reference_image: false, is_cover: false },
+      { image_id: "img-1", is_reference_image: false, is_cover: true },
+    ]);
+  });
+
+  it("Set as cover produces exactly one is_cover:true entry, wherever it is in the order", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    renderEditor({
+      initialState: sampleState({
+        images: [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/b.jpg", position: 1 })],
+        coverImageId: "img-1",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Set image 2 as cover" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const images = updatePublishedListingMock.mock.calls[0][3] as { is_cover: boolean }[];
+    expect(images.filter((entry) => entry.is_cover)).toHaveLength(1);
+    expect(images[1].is_cover).toBe(true);
+  });
+
+  it("removing the current cover automatically reassigns cover to a remaining photo -- never zero covers", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    renderEditor({
+      initialState: sampleState({
+        images: [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/b.jpg", position: 1 })],
+        coverImageId: "img-1",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const images = updatePublishedListingMock.mock.calls[0][3] as { image_id: string; is_cover: boolean }[];
+    expect(images).toEqual([{ image_id: "img-2", is_reference_image: false, is_cover: true }]);
+  });
+
+  it("a gallery-only change sends an empty patch alongside the complete images array, in one call", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    selectFile();
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const [, , patch, images] = updatePublishedListingMock.mock.calls[0];
+    expect(patch).toEqual({});
+    expect(images).not.toBeNull();
+    expect(images).toHaveLength(2);
+  });
+
+  it("changing text fields AND the gallery together saves both in ONE atomic RPC call", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    selectFile();
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalledTimes(1));
+    const [, , patch, images] = updatePublishedListingMock.mock.calls[0];
+    expect(patch).toEqual({ title: "New Title" });
+    expect(images).toHaveLength(2);
+  });
+
+  it("an unchanged gallery keeps images: null even when other fields change", async () => {
+    updatePublishedListingMock.mockResolvedValue({
+      outcome: "saved",
+      listing: sampleState({ title: "New Title", images: [image()], coverImageId: "img-1" }),
+      changed: true,
+    });
+    renderEditor({ initialState: sampleState({ title: "Old Title", images: [image()], coverImageId: "img-1" }) });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalledWith("listing-1", "1", { title: "New Title" }, null));
+  });
+
+  it("a successful gallery save updates the gallery baseline, so an immediate second save with no further edits is a no-op", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    const savedImages = [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/new.jpg", position: 1 })];
+    updatePublishedListingMock.mockResolvedValue({
+      outcome: "saved",
+      listing: sampleState({ images: savedImages, coverImageId: "img-1", revision: "2" }),
+      changed: true,
+    });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    selectFile();
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("No changes to save")).toBeInTheDocument();
+    expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("enforces a maximum of 8 photos -- Add photo is unavailable at the cap", () => {
+    const images = Array.from({ length: 8 }, (_, i) => image({ id: `img-${i}`, storagePath: `listing-images/u1/listing-1/${i}.jpg`, position: i }));
+    renderEditor({ initialState: sampleState({ images, coverImageId: "img-0" }) });
+
+    expect(screen.getByText("8 of 8 photos")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Add a listing photo")).not.toBeInTheDocument();
+  });
+
+  it("enforces a minimum of 1 photo -- Save is blocked with a friendly message when the gallery is emptied", async () => {
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Add at least one photo before saving.")).toBeInTheDocument();
+    expect(updatePublishedListingMock).not.toHaveBeenCalled();
+  });
+
+  it("two uploads always get distinct generated paths, so a duplicate path can never reach the save payload", async () => {
+    uploadImageMock.mockResolvedValueOnce({ ok: true, path: "listing-images/u1/listing-1/one.jpg" });
+    uploadImageMock.mockResolvedValueOnce({ ok: true, path: "listing-images/u1/listing-1/two.jpg" });
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    renderEditor({ initialState: sampleState({ images: [], coverImageId: null }) });
+
+    selectFile("one.jpg");
+    await waitFor(() => expect(screen.getByText("1 of 8 photos")).toBeInTheDocument());
+    selectFile("two.jpg");
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const images = updatePublishedListingMock.mock.calls[0][3] as { storage_path?: string }[];
+    const paths = images.map((entry) => entry.storage_path);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("a failed upload shows a sanitized message and is excluded from the save payload -- a failed-only 'change' still leaves the gallery unchanged", async () => {
+    uploadImageMock.mockResolvedValue({ ok: false, code: "UPLOAD_FAILED" });
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState({ title: "New Title" }), changed: true });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    selectFile();
+
+    expect(await screen.findByText("Upload failed. Please try again.")).toBeInTheDocument();
+    expect(screen.queryByText(/postgres|23505/i)).not.toBeInTheDocument();
+
+    // A failed upload alone never counts as a gallery change (it never
+    // became "ready"), so pair it with a real text edit to prove that real
+    // save still proceeds -- and that the failed upload is excluded from
+    // the payload so thoroughly that `images` stays `null` entirely.
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    const [, , patch, images] = updatePublishedListingMock.mock.calls[0];
+    expect(patch).toEqual({ title: "New Title" });
+    expect(images).toBeNull();
+  });
+
+  it("Pre-loved: an existing reference-tagged photo blocks Save with a friendly message, even without touching the toggle", async () => {
+    renderEditor({
+      initialState: sampleState({
+        listingType: "preloved",
+        images: [image({ isReferenceImage: true })],
+        coverImageId: "img-1",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      await screen.findByText(/pre-loved listings may only include actual-item photos/i),
+    ).toBeInTheDocument();
+    expect(updatePublishedListingMock).not.toHaveBeenCalled();
+  });
+
+  it("Brand New: a gallery with only reference photos blocks Save until at least one is marked Actual", async () => {
+    renderEditor({
+      initialState: sampleState({
+        listingType: "brand_new",
+        condition: "brand_new",
+        images: [image({ isReferenceImage: true })],
+        coverImageId: "img-1",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/brand new listings need at least one actual-item photo/i)).toBeInTheDocument();
+    expect(updatePublishedListingMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark image 1 as actual item" }));
+    updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState(), changed: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+  });
+
+  it("Reload latest discards pending gallery changes together with pending text changes", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
+    updatePublishedListingMock.mockResolvedValue({ outcome: "stale_revision" });
+    getPublishedListingEditStateMock.mockResolvedValue({
+      status: "found",
+      listing: sampleState({ images: [image({ id: "img-server", storagePath: "listing-images/u1/listing-1/server.jpg" })], coverImageId: "img-server", revision: "9" }),
+    });
+    renderEditor({ initialState: sampleState({ images: [image()], coverImageId: "img-1" }) });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Unsaved Text Edit" } });
+    selectFile();
+    await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
+
+    await waitFor(() => expect(screen.getByText("1 of 8 photos")).toBeInTheDocument());
+    expect(screen.getByLabelText("Title")).not.toHaveValue("Unsaved Text Edit");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("published gallery -- no Storage UPDATE/DELETE path", () => {
+  it("PublishedListingEditor never imports deleteUploadedImage or any Storage update/remove helper", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const source = readFileSync(path.join(process.cwd(), "components/seller/PublishedListingEditor.tsx"), "utf-8");
+    // Checks the import line specifically (not bare prose) -- this file's
+    // own header comment explains, in words, why deleteUploadedImage is
+    // never called; that explanation must not itself trip this assertion.
+    expect(source).not.toMatch(/import\s*\{[^}]*deleteUploadedImage/);
+    expect(source).not.toMatch(/storage\s*\.\s*(update|remove)/i);
+    expect(source).not.toMatch(/\.upload\(/); // uploadImage (the shared helper) is used, never a raw insert/upsert call
   });
 });

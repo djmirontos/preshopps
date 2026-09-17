@@ -104,10 +104,12 @@ function NotEditable({ title, status, publicCode }: { title: string; status: MyL
  * design (0059's own header), so Draft keeps its full existing editor here
  * verbatim. Available/Paused: routes into the new 0094 published-edit RPC
  * via getPublishedListingEditState and renders the real PublishedListingEditor
- * for every non-image field, seeded from that RPC's own response (never from
- * the earlier getMyListing snapshot, which can already be stale by the time
- * this renders). Gallery/image editing remains a later, separate step --
- * PublishedListingEditor always sends `images: null` to updatePublishedListing.
+ * for every field AND its gallery, seeded from that RPC's own response
+ * (never from the earlier getMyListing snapshot, which can already be stale
+ * by the time this renders). `ownerUserId` is passed through only so
+ * PublishedListingEditor can upload new photos via the same
+ * uploadImage(bucket, ownerUserId, listingId, file) helper Draft's
+ * ListingImagesPicker already uses -- it is never sent to any RPC itself.
  * Reserved/Sold/Archived: a read-only state; get_published_listing_edit_state
  * is never called for these -- 0094's own function would just reject them
  * with LISTING_NOT_EDITABLE, and getMyListing's status already tells this
@@ -175,6 +177,7 @@ export default async function SellListingEditPage({ params }: PageProps) {
     return (
       <PublishedListingEditor
         listingId={listing.listingId}
+        ownerUserId={user.id}
         initialState={publishedResult.listing}
         categories={categories}
         provinces={provinces}
