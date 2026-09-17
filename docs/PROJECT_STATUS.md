@@ -22,6 +22,11 @@ This file is expected to change often. Update it after any significant module or
 
 Last completed product implementation milestone:
 
+- Post-publish Listing Editing (Phase B) closeout
+- Implementation commit: `8480516`
+
+Previous product implementation milestone:
+
 - Messaging MVP closeout
 - Implementation commit: `3d08cb2`
 
@@ -68,25 +73,31 @@ The following are implemented and merged as of the product implementation milest
 
 **Messaging MVP — COMPLETE.**
 
+- Post-publish Listing Editing (Phase B): the seller edit route (`app/sell/[listingId]/edit`) now branches on live listing status instead of remaining draft-only.
+  - **Draft** — unchanged: existing `ListingForm` / `ListingImagesPicker` / `PublishListingButton` editor, `update_listing` / `replace_listing_images` / `publish_listing` flow, all verbatim.
+  - **Available** and **Paused** — a real, revision-aware `PublishedListingEditor` (`components/seller/PublishedListingEditor.tsx`) wired to 0094's `get_published_listing_edit_state` / `update_published_listing`:
+    - Seller-editable non-image fields (title, description, brand, known flaws, price, original price, negotiable, location, fulfillment methods, meetup note, vehicle/rental details) save through a diffed patch against the 0094 allowlist only.
+    - `category_id` / `listing_type` / `condition` are immutable — rendered as a read-only summary, never sent in any patch.
+    - Available quantity is editable with a minimum of 1 while Available and 0 while Paused, gated by the backend's own `quantity_editable` flag; raw `stock_quantity` / `reserved_quantity` are never exposed or sent.
+    - No Publish button on either status — publishing remains Draft-only.
+    - Revision-based optimistic concurrency: `revision` is handled as a string end-to-end (never a JS number); a `STALE_LISTING_REVISION` response shows a persistent conflict state, disables Save, and is never auto-retried; "Reload latest" explicitly discards both unsaved text and unsaved gallery state and replaces them from a fresh read.
+    - Published gallery editing: upload, remove, reorder, set-cover, and (for Brand New) actual/reference toggling, all held as local state and sent as one complete gallery array atomically with the text patch in a single `update_published_listing` call. Removing a photo never calls Storage delete/update — the `listing_images` row disappears but the underlying Storage object is retained, preserving historical/order image references. 1–8 images, exactly one cover, and the existing Pre-loved/Brand-New actual-photo rules are all enforced client-side ahead of the backend's own authoritative checks.
+  - **Reserved / Sold / Archived** — read-only: no editable form, no Publish button; the same route renders a dedicated read-only state.
+  - Server/browser Supabase-client boundary: the route's initial load uses the cookie-aware server client; "Reload latest" and Save use the browser client from within `PublishedListingEditor` itself; both share identical response/error mapping (`lib/seller/published-listing-edit-state.ts`).
+  - `next/image`'s allowed Storage hostname is derived from `NEXT_PUBLIC_SUPABASE_URL` at build time — no hardcoded project ref, no wildcard host.
+  - Verified via a dedicated rehearsal Supabase project (`preshopps-rehearsal-0094`, ref `rldccjrajfqfwskejyat`) and owner hands-on QA — **both passed**. The rehearsal project was deleted by the owner after successful completion and no longer exists; do not reference it as a live target.
+  - Full automated suite passed at closeout: 269 files / 4187 tests. Lint, typecheck, and production build all passed.
+  - No P1/P2 issues remain — see "Known accepted Phase B limitations" below for the one accepted, deferred P3.
+
+**Phase B Published Listing Editing — COMPLETE.**
+
 ---
 
 ## Current next major module
 
-**Post-publish Listing Editing.**
+**Moderation completion.**
 
-The current listing edit route (`app/sell/[listingId]/edit`) remains draft-only.
-
-Phase A — the database foundation (migration 0094: atomic published save/read
-RPCs, revisions, historical order snapshots, immutable listing media policies,
-and coherent order snapshot locking) — is **complete and live in production**.
-Phase B frontend work (wiring the edit route to the new published-edit RPCs)
-**has not started.**
-
-Listing Storage UPDATE/DELETE removal intentionally leaves temporary unreferenced
-objects, including failed best-effort draft cleanup. Draft gallery edits remain
-usable. Trusted orphan cleanup is deferred to later media/storage hardening.
-
-The product and technical rules are in `docs/PRD.md` and `docs/ARCHITECTURE.md`; the Phase B RPC contract is documented in `tests/database/README.md`.
+Post-publish Listing Editing (Phase B) is complete — see "Completed major modules" above. Per the current backlog ordering below, Moderation completion is next. The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
 
 ---
 
@@ -99,17 +110,23 @@ The product and technical rules are in `docs/PRD.md` and `docs/ARCHITECTURE.md`;
 
 ---
 
+## Known accepted Phase B limitations
+
+- A newly-uploaded published-listing photo that is never saved (the seller abandons the editor before pressing Save changes) can become an orphaned Storage object. This is the direct consequence of a deliberate choice, not an oversight: published gallery removal never issues a Storage delete/update at all (so historical/order image references are never broken by an edit), and that same "no cleanup" rule applies uniformly, including to an unsaved upload. Deferred to later media/storage hardening, not fixed in this phase.
+- Listing Storage UPDATE/DELETE removal (Phase A) intentionally leaves temporary unreferenced objects more broadly, including failed best-effort Draft cleanup — this predates and is unrelated to the Phase B limitation above. Draft gallery edits remain fully usable. Trusted, general orphan cleanup across both Draft and published galleries is deferred to the same later media/storage hardening work.
+
+---
+
 ## Current backlog ordering
 
 High-level order, not a committed schedule:
 
-1. Post-publish Listing Editing
-2. Moderation completion
-3. Marketplace transactional email production verification
-4. Duplicate-listing enforcement audit
-5. Remaining P2 discovery/UI work
-6. Technical SEO work
-7. Full pre-launch hardening / launch audit
+1. Moderation completion
+2. Marketplace transactional email production verification
+3. Duplicate-listing enforcement audit
+4. Remaining P2 discovery/UI work
+5. Technical SEO work
+6. Full pre-launch hardening / launch audit
 
 The following are deferred media/performance work, not currently scheduled or in progress:
 
