@@ -139,9 +139,10 @@ describe("Netlify deployment readiness -- required application routes remain int
     expect(exists("app/auth/confirm/route.ts")).toBe(true);
   });
 
-  it("next.config.ts still scopes next/image remotePatterns to this project's Supabase Storage host", () => {
+  it("next.config.ts still scopes next/image remotePatterns to the active Supabase Storage host, derived from NEXT_PUBLIC_SUPABASE_URL rather than a hardcoded ref", () => {
     const nextConfig = readFile("next.config.ts");
     expect(nextConfig).toMatch(/remotePatterns/);
-    expect(nextConfig).toMatch(/ylhfbqcyxjmxrbpkxtgu\.supabase\.co/);
+    expect(nextConfig).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(nextConfig).not.toMatch(/ylhfbqcyxjmxrbpkxtgu\.supabase\.co/);
   });
 });

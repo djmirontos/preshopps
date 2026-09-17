@@ -262,9 +262,10 @@ describe("mapDetailRowToListingDetail", () => {
 });
 
 describe("next.config.ts image allowlist", () => {
-  it("remains unchanged by this task (exact Supabase Storage host/path only)", () => {
+  it("derives its single allowed hostname from NEXT_PUBLIC_SUPABASE_URL (exact Supabase Storage host/path only, never a hardcoded project ref)", () => {
     const source = readFileSync(path.join(process.cwd(), "next.config.ts"), "utf-8");
-    expect(source).toContain("ylhfbqcyxjmxrbpkxtgu.supabase.co");
+    expect(source).toContain("NEXT_PUBLIC_SUPABASE_URL");
+    expect(source).not.toContain("ylhfbqcyxjmxrbpkxtgu.supabase.co");
     expect(source).toContain("/storage/v1/object/public/**");
     expect(source).not.toContain('hostname: "*"');
   });

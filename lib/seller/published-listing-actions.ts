@@ -1,22 +1,38 @@
 import { createClient } from "@/lib/supabase/client";
-import type { ListingTypeFilter, FulfillmentMethod } from "@/lib/marketplace/search-params";
-import type { ListingCondition } from "@/components/marketplace/ListingCard";
-import type { MyListingStatus, MyListingImage, MyListingVehicleDetails, MyListingRentalDetails } from "@/lib/seller/get-my-listing";
+import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
+import {
+  mapPublishedListingEditStateRow,
+  mapGetPublishedListingEditStateResponse,
+  type PublishedListingEditState,
+  type PublishedListingEditStateRow,
+  type GetPublishedListingEditStateResult,
+} from "@/lib/seller/published-listing-edit-state";
 
 /**
- * Thin client wrappers around the two 0094 published-listing-edit RPCs --
- * get_published_listing_edit_state and update_published_listing -- following
- * the exact conventions already established by lib/seller/get-my-listing.ts
- * (read side: a `status`-discriminated result, collapsing
- * LISTING_NOT_FOUND/NOT_LISTING_OWNER into one privacy-preserving "not_found"
- * outcome) and lib/seller/listing-actions.ts (write side: identity is always
- * derived server-side from auth.uid(), never sent from the client; every
- * failure mode maps to a typed code + safe copy, never a raw Postgres error).
+ * Browser-side wrappers around the two 0094 published-listing-edit RPCs --
+ * get_published_listing_edit_state and update_published_listing.
  *
- * Both RPCs `returns jsonb` (a single scalar object), unlike every other RPC
- * wrapped in listing-actions.ts (which `returns table(...)` and therefore
- * comes back as a one-row array in `data`). `data` here is the JSON object
- * itself -- never `((data ?? [])[0])`.
+ * BOUNDARY: this module always uses the browser Supabase client
+ * (@/lib/supabase/client), so every export here is for client-component
+ * callers only -- PublishedListingEditor's own "Reload latest" action
+ * (getPublishedListingEditState) and its Save action (updatePublishedListing).
+ * The Server Component route (app/sell/[listingId]/edit/page.tsx) does NOT
+ * import getPublishedListingEditState from here -- a browser client
+ * constructed during SSR has no cookies to read, silently carries no
+ * session, and every RPC call it makes executes as `anon` (which correctly
+ * gets rejected: anon has no EXECUTE grant on either function). That
+ * Server Component instead uses the cookie-aware server-safe loader at
+ * lib/seller/get-published-listing-edit-state.ts, which shares this
+ * module's exact result/error mapping (see published-listing-edit-state.ts)
+ * without sharing this module's client. There is deliberately no server
+ * equivalent of updatePublishedListing -- every save happens from
+ * PublishedListingEditor in the browser, where a real session exists.
+ *
+ * get_published_listing_edit_state and update_published_listing both
+ * `returns jsonb` (a single scalar object), unlike every other RPC wrapped
+ * in listing-actions.ts (which `returns table(...)` and therefore comes back
+ * as a one-row array in `data`). `data` here is the JSON object itself --
+ * never `((data ?? [])[0])`.
  *
  * Revision precision: listings.revision is bigint. This module never parses
  * it into a JS number anywhere -- get_published_listing_edit_state casts it
@@ -37,6 +53,12 @@ import type { MyListingStatus, MyListingImage, MyListingVehicleDetails, MyListin
  * scope here (see this task's own "no side effects" instruction).
  */
 
+// Re-exported so every existing importer of this module (PublishedListingEditor,
+// tests) keeps working unchanged -- the canonical definitions now live in
+// published-listing-edit-state.ts so the server-safe loader can share them
+// without importing this (browser-client) module at all.
+export type { PublishedListingEditState, GetPublishedListingEditStateResult };
+
 type ErrorMap<Code extends string> = Record<Code | "UNKNOWN", string>;
 
 function toErrorCode<Code extends string>(detail: string | undefined, known: ReadonlySet<string>): Code | "UNKNOWN" {
@@ -44,190 +66,17 @@ function toErrorCode<Code extends string>(detail: string | undefined, known: Rea
 }
 
 // ============================================================
-// Shared listing shape (the get_my_listing projection embedded in both
-// RPCs' jsonb response) plus the published-edit-only fields each adds.
-// ============================================================
-
-export type PublishedListingEditState = {
-  listingId: string;
-  publicCode: string;
-  slug: string;
-  status: MyListingStatus;
-  title: string;
-  description: string | null;
-  categoryId: number | null;
-  listingType: ListingTypeFilter | null;
-  condition: (ListingCondition | "brand_new") | null;
-  priceCents: number | null;
-  originalPriceCents: number | null;
-  isNegotiable: boolean;
-  brand: string | null;
-  knownFlaws: string | null;
-  stockQuantity: number;
-  provinceId: number | null;
-  cityId: number | null;
-  barangayId: number | null;
-  meetupNote: string | null;
-  createdAt: string;
-  updatedAt: string;
-  publishedAt: string | null;
-  fulfillmentMethods: FulfillmentMethod[];
-  images: MyListingImage[];
-  vehicleDetails: MyListingVehicleDetails | null;
-  rentalDetails: MyListingRentalDetails | null;
-  /** Decimal string, e.g. "42". Never parse this as a JS number -- pass it
-   * straight back into updatePublishedListing's expectedRevision unchanged. */
-  revision: string;
-  availableQuantity: number;
-  reservedQuantity: number;
-  coverImageId: string | null;
-  /** True only when reserved_quantity is 0 and no active reservation exists
-   * for this listing -- the same condition update_published_listing itself
-   * enforces before allowing available_quantity to change. Use this instead
-   * of re-deriving the same rule client-side. */
-  quantityEditable: boolean;
-};
-
-type PublishedListingEditStateRow = {
-  listing_id: string;
-  public_code: string;
-  slug: string;
-  status: MyListingStatus;
-  title: string;
-  description: string | null;
-  category_id: number | null;
-  listing_type: ListingTypeFilter | null;
-  condition: (ListingCondition | "brand_new") | null;
-  price_cents: number | null;
-  original_price_cents: number | null;
-  is_negotiable: boolean;
-  brand: string | null;
-  known_flaws: string | null;
-  stock_quantity: number;
-  province_id: number | null;
-  city_id: number | null;
-  barangay_id: number | null;
-  meetup_note: string | null;
-  created_at: string;
-  updated_at: string;
-  published_at: string | null;
-  fulfillment_methods: FulfillmentMethod[] | null;
-  images: { id: string; storage_path: string; position: number; is_reference_image: boolean }[] | null;
-  vehicle_details: {
-    brand: string | null;
-    model: string | null;
-    year: number | null;
-    mileage_km: number | null;
-    transmission: string | null;
-    fuel_type: string | null;
-    registration_status: "registered" | "expired_registration" | "for_renewal" | null;
-    documents_available: string[] | null;
-  } | null;
-  rental_details: {
-    rental_price_cents: number | null;
-    rental_period: "daily" | "weekly" | "monthly" | "other" | null;
-    security_deposit_cents: number | null;
-    rental_terms: string | null;
-    minimum_rental_period: string | null;
-    capacity: number | null;
-    whats_included: string | null;
-    rules_restrictions: string | null;
-    availability: "available" | "unavailable" | "paused" | null;
-  } | null;
-  revision: string;
-  available_quantity: number;
-  reserved_quantity: number;
-  cover_image_id: string | null;
-  quantity_editable: boolean;
-};
-
-function mapRow(row: PublishedListingEditStateRow): PublishedListingEditState {
-  return {
-    listingId: row.listing_id,
-    publicCode: row.public_code,
-    slug: row.slug,
-    status: row.status,
-    title: row.title,
-    description: row.description,
-    categoryId: row.category_id,
-    listingType: row.listing_type,
-    condition: row.condition,
-    priceCents: row.price_cents,
-    originalPriceCents: row.original_price_cents,
-    isNegotiable: row.is_negotiable,
-    brand: row.brand,
-    knownFlaws: row.known_flaws,
-    stockQuantity: row.stock_quantity,
-    provinceId: row.province_id,
-    cityId: row.city_id,
-    barangayId: row.barangay_id,
-    meetupNote: row.meetup_note,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    publishedAt: row.published_at,
-    fulfillmentMethods: row.fulfillment_methods ?? [],
-    images: (row.images ?? []).map((image) => ({
-      id: image.id,
-      storagePath: image.storage_path,
-      position: image.position,
-      isReferenceImage: image.is_reference_image,
-    })),
-    vehicleDetails: row.vehicle_details
-      ? {
-          brand: row.vehicle_details.brand,
-          model: row.vehicle_details.model,
-          year: row.vehicle_details.year,
-          mileageKm: row.vehicle_details.mileage_km,
-          transmission: row.vehicle_details.transmission,
-          fuelType: row.vehicle_details.fuel_type,
-          registrationStatus: row.vehicle_details.registration_status,
-          documentsAvailable: row.vehicle_details.documents_available,
-        }
-      : null,
-    rentalDetails: row.rental_details
-      ? {
-          rentalPriceCents: row.rental_details.rental_price_cents,
-          rentalPeriod: row.rental_details.rental_period,
-          securityDepositCents: row.rental_details.security_deposit_cents,
-          rentalTerms: row.rental_details.rental_terms,
-          minimumRentalPeriod: row.rental_details.minimum_rental_period,
-          capacity: row.rental_details.capacity,
-          whatsIncluded: row.rental_details.whats_included,
-          rulesRestrictions: row.rental_details.rules_restrictions,
-          availability: row.rental_details.availability,
-        }
-      : null,
-    revision: row.revision,
-    availableQuantity: row.available_quantity,
-    reservedQuantity: row.reserved_quantity,
-    coverImageId: row.cover_image_id,
-    quantityEditable: row.quantity_editable,
-  };
-}
-
-// ============================================================
 // getPublishedListingEditState (get_published_listing_edit_state)
 // ============================================================
 
 /**
- * Read wrapper, mirroring getMyListing's own established privacy pattern
- * exactly: LISTING_NOT_FOUND and NOT_LISTING_OWNER collapse to the same
- * "not_found" result -- a listing id belonging to another seller, or one
- * that doesn't exist, must never be distinguishable from the outside.
- * LISTING_NOT_EDITABLE is kept as its own distinct result (not collapsed):
- * it is a real, expected, actionable state -- the listing exists and is the
- * caller's own, it is simply Reserved/Sold/Archived right now -- and a
- * caller needs to tell that apart from "this isn't your listing" to render
- * a read-only view instead of a 404-shaped state.
+ * Browser-side read wrapper -- for PublishedListingEditor's own "Reload
+ * latest" action only. The Server Component route uses the separate
+ * server-safe loader at lib/seller/get-published-listing-edit-state.ts
+ * instead (see this module's own header). Both share the exact same
+ * result/error mapping via mapGetPublishedListingEditStateResponse
+ * (published-listing-edit-state.ts) -- only the Supabase client differs.
  */
-export type GetPublishedListingEditStateResult =
-  | { status: "found"; listing: PublishedListingEditState }
-  | { status: "not_found" }
-  | { status: "not_editable" }
-  | { status: "not_authenticated" }
-  | { status: "interaction_blocked" }
-  | { status: "error" };
-
 export async function getPublishedListingEditState(listingId: string): Promise<GetPublishedListingEditStateResult> {
   const supabase = createClient();
 
@@ -241,30 +90,7 @@ export async function getPublishedListingEditState(listingId: string): Promise<G
     return { status: "error" };
   }
 
-  if (error) {
-    const detail = (error as { details?: string }).details;
-    if (detail === "LISTING_NOT_FOUND" || detail === "NOT_LISTING_OWNER") {
-      return { status: "not_found" };
-    }
-    if (detail === "LISTING_NOT_EDITABLE") {
-      return { status: "not_editable" };
-    }
-    if (detail === "NOT_AUTHENTICATED") {
-      return { status: "not_authenticated" };
-    }
-    if (detail === "INTERACTION_BLOCKED") {
-      return { status: "interaction_blocked" };
-    }
-    console.error("get_published_listing_edit_state RPC failed:", error.message);
-    return { status: "error" };
-  }
-
-  // Scalar jsonb return -- `data` is the object itself, never a row array.
-  if (!data) {
-    return { status: "error" };
-  }
-
-  return { status: "found", listing: mapRow(data as PublishedListingEditStateRow) };
+  return mapGetPublishedListingEditStateResponse(data, error);
 }
 
 // ============================================================
@@ -417,5 +243,5 @@ export async function updatePublishedListing(
   }
 
   const row = data as UpdatePublishedListingRpcRow;
-  return { outcome: "saved", listing: mapRow(row), changed: row.changed };
+  return { outcome: "saved", listing: mapPublishedListingEditStateRow(row), changed: row.changed };
 }

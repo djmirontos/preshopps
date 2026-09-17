@@ -54,7 +54,12 @@ vi.mock("@/lib/seller/get-my-listing", () => ({
   getMyListing: getMyListingMock,
 }));
 
-vi.mock("@/lib/seller/published-listing-actions", () => ({
+// page.tsx uses the server-safe loader, never the browser wrapper -- see
+// published-listing-edit-state-boundary-architecture.test.ts for the static
+// proof of this. Mocking only this path (and not published-listing-actions)
+// means these tests would fail loudly if page.tsx ever regressed back to
+// importing getPublishedListingEditState from the browser module.
+vi.mock("@/lib/seller/get-published-listing-edit-state", () => ({
   getPublishedListingEditState: getPublishedListingEditStateMock,
 }));
 
@@ -351,7 +356,7 @@ describe("SellListingEditPage", () => {
     });
   });
 
-  describe("Available/Paused (published-edit placeholder)", () => {
+  describe("Available/Paused (real published editor)", () => {
     it.each(["available", "paused"] as const)("routes %s through getPublishedListingEditState, not the draft loader path", async (status) => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
@@ -362,17 +367,16 @@ describe("SellListingEditPage", () => {
       expect(getPublishedListingEditStateMock).toHaveBeenCalledWith("listing-1");
     });
 
-    it.each(["available", "paused"] as const)("renders the temporary published placeholder for %s, not the Draft form", async (status) => {
+    it.each(["available", "paused"] as const)("renders the real published editor for %s, not the Draft form", async (status) => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
       getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing({ status }) });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(screen.getByRole("heading", { level: 1, name: "Published listing editing" })).toBeInTheDocument();
-      expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
-      expect(screen.getByText(/published editing is being prepared/i)).toBeInTheDocument();
-      expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "Edit Listing" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Save Draft" })).not.toBeInTheDocument();
     });
 
@@ -386,31 +390,34 @@ describe("SellListingEditPage", () => {
       expect(screen.queryByRole("button", { name: "Publish Listing" })).not.toBeInTheDocument();
     });
 
-    it("never renders editable inputs or a Save action for the placeholder", async () => {
+    it("renders category/type/condition as a read-only summary, never an editable control", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
       getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing() });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(screen.queryAllByRole("textbox")).toHaveLength(0);
-      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      expect(screen.getByText("Women")).toBeInTheDocument();
+      expect(screen.getByText("Pre-loved")).toBeInTheDocument();
+      expect(screen.getByText("Good")).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^category/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/listing type/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^condition/i)).not.toBeInTheDocument();
     });
 
-    it("never fetches Draft reference data (categories/provinces/etc.) for the placeholder", async () => {
+    it("fetches Draft-style reference data (categories/provinces/location) for the real editor", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available", provinceId: 1, cityId: 10 }) });
       getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing() });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(getCategoriesMock).not.toHaveBeenCalled();
-      expect(getProvincesMock).not.toHaveBeenCalled();
-      expect(getCitiesForProvinceMock).not.toHaveBeenCalled();
-      expect(getBarangaysForCityMock).not.toHaveBeenCalled();
+      expect(getCategoriesMock).toHaveBeenCalled();
+      expect(getProvincesMock).toHaveBeenCalled();
+      expect(getCitiesForProvinceMock).toHaveBeenCalledWith(1);
     });
 
-    it("renders the placeholder from the published loader's own title/status, not the earlier get_my_listing read", async () => {
+    it("renders the editor from the published loader's own title/status, not the earlier get_my_listing read", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available", title: "Stale Title" }) });
       getPublishedListingEditStateMock.mockResolvedValue({
@@ -420,11 +427,11 @@ describe("SellListingEditPage", () => {
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(screen.getByText("Fresh Published Title")).toBeInTheDocument();
-      expect(screen.queryByText("Stale Title")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Fresh Published Title");
+      expect(screen.queryByDisplayValue("Stale Title")).not.toBeInTheDocument();
     });
 
-    it("does not render the raw revision value anywhere in the placeholder UI", async () => {
+    it("does not render the raw revision value anywhere in the editor UI", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
       getPublishedListingEditStateMock.mockResolvedValue({
@@ -436,8 +443,8 @@ describe("SellListingEditPage", () => {
 
       // Proves the wrapper's response (including a bigint-range revision)
       // reached the render without crashing or needing to be displayed --
-      // this task's own instruction is to verify revision availability via
-      // tests rather than surfacing it in the UI.
+      // revision is tracked internally and only ever round-tripped back to
+      // updatePublishedListing, never shown in the UI.
       expect(getPublishedListingEditStateMock).toHaveBeenCalledWith("listing-1");
       expect(container.textContent).not.toContain("9007199254740993");
     });

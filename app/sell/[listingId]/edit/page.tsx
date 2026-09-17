@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyListing, type MyListingStatus } from "@/lib/seller/get-my-listing";
-import { getPublishedListingEditState } from "@/lib/seller/published-listing-actions";
+import { getPublishedListingEditState } from "@/lib/seller/get-published-listing-edit-state";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { type ListingFieldValues } from "@/components/seller/ListingForm";
 import { ListingFormWithPublish } from "@/components/seller/ListingFormWithPublish";
 import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
+import { PublishedListingEditor } from "@/components/seller/PublishedListingEditor";
 import { vehicleFieldValuesFromServer, rentalFieldValuesFromServer } from "@/components/listings/listing-field-mappers";
 import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 
@@ -86,31 +87,6 @@ function NotEditable({ title, status, publicCode }: { title: string; status: MyL
 }
 
 /**
- * Temporary published-edit placeholder -- a route-integration checkpoint
- * only (this task's own instruction), not the real editor. Proves the
- * correct 0094 RPC loaded (get_published_listing_edit_state, via
- * getPublishedListingEditState) and that its response reached this render:
- * title and status come straight from that response, not from the earlier
- * getMyListing read. Deliberately does not render `revision` -- there is no
- * seller-facing use for the raw number yet, and this task's own instruction
- * prefers verifying it lands correctly via a test over surfacing it in UI
- * (see PublishedListingEditPlaceholder.test coverage instead). No Save, no
- * Publish, no editable inputs -- those are later, separate steps.
- */
-function PublishedListingEditPlaceholder({ title, status }: { title: string; status: "available" | "paused" }) {
-  return (
-    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-xl font-bold text-ink lg:text-2xl">Published listing editing</h1>
-      <div className="mt-6 rounded-[14px] border border-border bg-surface p-6">
-        <p className="text-sm font-semibold text-ink">{title}</p>
-        <p className="mt-1 text-xs font-medium text-ink-muted">Status: {status === "available" ? "Available" : "Paused"}</p>
-        <p className="mt-4 text-sm text-ink-secondary">Published editing is being prepared.</p>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Real edit-listing page. getMyListing (get_my_listing, 0063) applies no
  * status restriction at all -- confirmed via its own live definition, it is
  * "deliberately reusable for any status the caller owns" -- so one call
@@ -127,9 +103,11 @@ function PublishedListingEditPlaceholder({ title, status }: { title: string; sta
  * Draft: unchanged -- update_listing/publish_listing remain Draft-only by
  * design (0059's own header), so Draft keeps its full existing editor here
  * verbatim. Available/Paused: routes into the new 0094 published-edit RPC
- * via getPublishedListingEditState, currently rendering only a temporary
- * placeholder (this step's own scope) -- the real editable form, save flow,
- * gallery editing, and stale-revision UX are later, separate steps.
+ * via getPublishedListingEditState and renders the real PublishedListingEditor
+ * for every non-image field, seeded from that RPC's own response (never from
+ * the earlier getMyListing snapshot, which can already be stale by the time
+ * this renders). Gallery/image editing remains a later, separate step --
+ * PublishedListingEditor always sends `images: null` to updatePublishedListing.
  * Reserved/Sold/Archived: a read-only state; get_published_listing_edit_state
  * is never called for these -- 0094's own function would just reject them
  * with LISTING_NOT_EDITABLE, and getMyListing's status already tells this
@@ -159,6 +137,16 @@ export default async function SellListingEditPage({ params }: PageProps) {
     return <NotEditable title={listing.title} status={listing.status} publicCode={listing.publicCode} />;
   }
 
+  async function loadCitiesAction(provinceId: number): Promise<LocationRef[]> {
+    "use server";
+    return getCitiesForProvince(provinceId);
+  }
+
+  async function loadBarangaysAction(cityId: number): Promise<LocationRef[]> {
+    "use server";
+    return getBarangaysForCity(cityId);
+  }
+
   if (listing.status === "available" || listing.status === "paused") {
     const publishedResult = await getPublishedListingEditState(listing.listingId);
 
@@ -177,7 +165,25 @@ export default async function SellListingEditPage({ params }: PageProps) {
       return <UnableToLoad />;
     }
 
-    return <PublishedListingEditPlaceholder title={publishedResult.listing.title} status={listing.status} />;
+    const [categories, provinces, initialCities, initialBarangays] = await Promise.all([
+      getCategories(),
+      getProvinces(),
+      listing.provinceId !== null ? getCitiesForProvince(listing.provinceId) : Promise.resolve([] as LocationRef[]),
+      listing.barangayId !== null ? getBarangaysForCity(listing.cityId as number) : Promise.resolve([] as LocationRef[]),
+    ]);
+
+    return (
+      <PublishedListingEditor
+        listingId={listing.listingId}
+        initialState={publishedResult.listing}
+        categories={categories}
+        provinces={provinces}
+        initialCities={initialCities}
+        initialBarangays={initialBarangays}
+        loadCities={loadCitiesAction}
+        loadBarangays={loadBarangaysAction}
+      />
+    );
   }
 
   const [categories, provinces, initialCities, initialBarangays] = await Promise.all([
@@ -186,16 +192,6 @@ export default async function SellListingEditPage({ params }: PageProps) {
     listing.provinceId !== null ? getCitiesForProvince(listing.provinceId) : Promise.resolve([] as LocationRef[]),
     listing.barangayId !== null ? getBarangaysForCity(listing.cityId as number) : Promise.resolve([] as LocationRef[]),
   ]);
-
-  async function loadCitiesAction(provinceId: number): Promise<LocationRef[]> {
-    "use server";
-    return getCitiesForProvince(provinceId);
-  }
-
-  async function loadBarangaysAction(cityId: number): Promise<LocationRef[]> {
-    "use server";
-    return getBarangaysForCity(cityId);
-  }
 
   const initialValues: ListingFieldValues = {
     title: listing.title,
