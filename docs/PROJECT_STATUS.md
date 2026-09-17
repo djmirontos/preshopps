@@ -39,10 +39,9 @@ These hashes identify historical milestones, not the repository's current HEAD.
 
 ## Database state
 
-- **Latest repository migration:** `0094_published_listing_editing.sql` — Phase A foundation; not applied to live Supabase.
-- **Latest verified live migration:** `0093_seller_order_messaging.sql`.
+- **Latest verified live migration:** `0094_published_listing_editing.sql` — Phase A foundation. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`), SHA-256 `898e26c7d44b6495a5de20fc1959762078bf8051d4ad276d790bd00161eee2c6`. Deployment was preceded by a full hosted rehearsal (isolated Supabase project, real Auth/RLS/Storage/RPC exercise) that passed, and the production apply itself passed its immediate post-deploy schema, security/grant, and data-integrity checks (existing listings/orders unchanged, pre-existing order items still carry `NULL` snapshot columns, inventory/reservation math consistent, no unintended grant widening).
 - **`0086`:** intentionally and permanently skipped — no migration with this number exists or should ever be created. This is enforced by an existing automated test; do not backfill it under any circumstances.
-- **Next unused migration number:** `0095` (`0094` is reserved by the repository-local migration above).
+- **Next unused migration number:** `0095`.
 
 Keep this section current — it is the reason a new agent doesn't need to run `ls supabase/migrations` and guess.
 
@@ -76,10 +75,12 @@ The following are implemented and merged as of the product implementation milest
 **Post-publish Listing Editing.**
 
 The current listing edit route (`app/sell/[listingId]/edit`) remains draft-only.
-Phase A adds the database foundation in repository-local migration 0094: atomic
-published save/read RPCs, revisions, historical order snapshots, immutable listing
-media policies, and coherent order snapshot locking. It has not been applied to
-live Supabase. Phase B frontend work has not started.
+
+Phase A — the database foundation (migration 0094: atomic published save/read
+RPCs, revisions, historical order snapshots, immutable listing media policies,
+and coherent order snapshot locking) — is **complete and live in production**.
+Phase B frontend work (wiring the edit route to the new published-edit RPCs)
+**has not started.**
 
 Listing Storage UPDATE/DELETE removal intentionally leaves temporary unreferenced
 objects, including failed best-effort draft cleanup. Draft gallery edits remain
