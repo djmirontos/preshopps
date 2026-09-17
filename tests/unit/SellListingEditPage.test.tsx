@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { GetMyListingResult, MyListing } from "@/lib/seller/get-my-listing";
+import type { GetPublishedListingEditStateResult, PublishedListingEditState } from "@/lib/seller/published-listing-actions";
 import type { CategoryRef, LocationRef } from "@/lib/marketplace/reference-data";
 
 const {
   getAuthUserMock,
   getMyListingMock,
+  getPublishedListingEditStateMock,
   getCategoriesMock,
   getProvincesMock,
   getCitiesForProvinceMock,
@@ -19,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
   getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
   getMyListingMock: vi.fn<(listingId: string) => Promise<GetMyListingResult>>(),
+  getPublishedListingEditStateMock: vi.fn<(listingId: string) => Promise<GetPublishedListingEditStateResult>>(),
   getCategoriesMock: vi.fn<() => Promise<CategoryRef[]>>(),
   getProvincesMock: vi.fn<() => Promise<LocationRef[]>>(),
   getCitiesForProvinceMock: vi.fn<(provinceId: number) => Promise<LocationRef[]>>(),
@@ -49,6 +52,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/seller/get-my-listing", () => ({
   getMyListing: getMyListingMock,
+}));
+
+vi.mock("@/lib/seller/published-listing-actions", () => ({
+  getPublishedListingEditState: getPublishedListingEditStateMock,
 }));
 
 vi.mock("@/lib/marketplace/reference-data", () => ({
@@ -102,6 +109,43 @@ function sampleListing(overrides: Partial<MyListing> = {}): MyListing {
   };
 }
 
+function samplePublishedListing(overrides: Partial<PublishedListingEditState> = {}): PublishedListingEditState {
+  return {
+    listingId: "listing-1",
+    publicCode: "PSL-ABC123",
+    slug: "nike-air-max-270",
+    status: "available",
+    title: "Nike Air Max 270",
+    description: "Worn twice.",
+    categoryId: 1,
+    listingType: "preloved",
+    condition: "good",
+    priceCents: 150000,
+    originalPriceCents: null,
+    isNegotiable: false,
+    brand: "Nike",
+    knownFlaws: null,
+    stockQuantity: 5,
+    provinceId: 1,
+    cityId: 10,
+    barangayId: 100,
+    meetupNote: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-05T00:00:00.000Z",
+    publishedAt: "2026-01-02T00:00:00.000Z",
+    fulfillmentMethods: ["meetup"],
+    images: [],
+    vehicleDetails: null,
+    rentalDetails: null,
+    revision: "1",
+    availableQuantity: 5,
+    reservedQuantity: 0,
+    coverImageId: null,
+    quantityEditable: true,
+    ...overrides,
+  };
+}
+
 function params(listingId = "listing-1") {
   return Promise.resolve({ listingId });
 }
@@ -139,189 +183,394 @@ describe("SellListingEditPage", () => {
     expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
   });
 
-  it("loads the form for a Draft listing, prefilled from get_my_listing", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByRole("heading", { level: 1, name: "Edit Draft" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
-    expect(screen.getByRole("button", { name: "Save Draft" })).toBeInTheDocument();
-  });
-
-  it("renders the images picker showing the listing's existing photos", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({
-      status: "found",
-      listing: sampleListing({
-        images: [{ id: "img-1", storagePath: "listing-images/u1/listing-1/a.jpg", position: 0, isReferenceImage: false }],
-      }),
-    });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByText("1 of 8 photos")).toBeInTheDocument();
-    expect(screen.getByText("Cover")).toBeInTheDocument();
-  });
-
-  it("renders the images picker in a zero-photo state for a listing with no images yet", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ images: [] }) });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByText("0 of 8 photos")).toBeInTheDocument();
-  });
-
-  it("prefills an incomplete Draft's blank/null fields as empty, without crashing", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByLabelText(/description/i)).toHaveValue("");
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("");
-    expect(screen.getByLabelText(/brand/i)).toHaveValue("");
-    expect(screen.getByLabelText(/^category/i)).toHaveValue("");
-  });
-
-  it("displays a stored price in pesos, converted from cents", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ priceCents: 1999, originalPriceCents: 2500 }) });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("19.99");
-    expect(screen.getByLabelText(/original price/i)).toHaveValue("25.00");
-  });
-
-  it("displays a stored ₱0 price as 0.00, not blank", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ priceCents: 0 }) });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("0.00");
-  });
-
-  it("loads city/barangay reference options for the listing's stored location", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({
-      status: "found",
-      listing: sampleListing({ provinceId: 1, cityId: 10, barangayId: 100 }),
-    });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(getCitiesForProvinceMock).toHaveBeenCalledWith(1);
-    expect(getBarangaysForCityMock).toHaveBeenCalledWith(10);
-    expect(screen.getByLabelText("Province")).toHaveValue("1");
-    expect(screen.getByLabelText("City / Municipality")).toHaveValue("10");
-  });
-
-  it("does not fetch barangays when the listing has no barangay set", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({
-      status: "found",
-      listing: sampleListing({ provinceId: 1, cityId: 10, barangayId: null }),
-    });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(getBarangaysForCityMock).not.toHaveBeenCalled();
-  });
-
-  it("shows a not-editable state, with a link to the public listing, for a non-draft listing", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(screen.getByRole("heading", { level: 1, name: /isn.t editable here/i })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View listing" })).toHaveAttribute("href", "/item/PSL-ABC123");
-  });
-
-  it("never fetches reference data (categories/provinces) for a non-draft listing", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "paused" }) });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-
-    expect(getCategoriesMock).not.toHaveBeenCalled();
-  });
-
-  it("exactly one h1 renders for the editable case", async () => {
-    getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-    getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
-
-    render(await SellListingEditPage({ params: params("listing-1") }));
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  });
-
-  describe("Publish", () => {
-    it("shows the Publish action alongside Save Draft for a Draft listing", async () => {
+  describe("Draft", () => {
+    it("loads the form for a Draft listing, prefilled from get_my_listing", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
+      expect(screen.getByRole("heading", { level: 1, name: "Edit Draft" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
       expect(screen.getByRole("button", { name: "Save Draft" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Publish Listing" })).toBeInTheDocument();
     });
 
-    it("never shows Publish for a non-draft listing (only the not-editable state renders)", async () => {
+    it("never calls the published-edit loader for a Draft listing", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getPublishedListingEditStateMock).not.toHaveBeenCalled();
+    });
+
+    it("renders the images picker showing the listing's existing photos", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({
+        status: "found",
+        listing: sampleListing({
+          images: [{ id: "img-1", storagePath: "listing-images/u1/listing-1/a.jpg", position: 0, isReferenceImage: false }],
+        }),
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText("1 of 8 photos")).toBeInTheDocument();
+      expect(screen.getByText("Cover")).toBeInTheDocument();
+    });
+
+    it("renders the images picker in a zero-photo state for a listing with no images yet", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ images: [] }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText("0 of 8 photos")).toBeInTheDocument();
+    });
+
+    it("prefills an incomplete Draft's blank/null fields as empty, without crashing", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByLabelText(/description/i)).toHaveValue("");
+      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("");
+      expect(screen.getByLabelText(/brand/i)).toHaveValue("");
+      expect(screen.getByLabelText(/^category/i)).toHaveValue("");
+    });
+
+    it("displays a stored price in pesos, converted from cents", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ priceCents: 1999, originalPriceCents: 2500 }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("19.99");
+      expect(screen.getByLabelText(/original price/i)).toHaveValue("25.00");
+    });
+
+    it("displays a stored ₱0 price as 0.00, not blank", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ priceCents: 0 }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("0.00");
+    });
+
+    it("loads city/barangay reference options for the listing's stored location", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({
+        status: "found",
+        listing: sampleListing({ provinceId: 1, cityId: 10, barangayId: 100 }),
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getCitiesForProvinceMock).toHaveBeenCalledWith(1);
+      expect(getBarangaysForCityMock).toHaveBeenCalledWith(10);
+      expect(screen.getByLabelText("Province")).toHaveValue("1");
+      expect(screen.getByLabelText("City / Municipality")).toHaveValue("10");
+    });
+
+    it("does not fetch barangays when the listing has no barangay set", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({
+        status: "found",
+        listing: sampleListing({ provinceId: 1, cityId: 10, barangayId: null }),
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getBarangaysForCityMock).not.toHaveBeenCalled();
+    });
+
+    it("exactly one h1 renders for the editable case", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    });
+
+    describe("Publish", () => {
+      it("shows the Publish action alongside Save Draft for a Draft listing", async () => {
+        getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+        getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+        render(await SellListingEditPage({ params: params("listing-1") }));
+
+        expect(screen.getByRole("button", { name: "Save Draft" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Publish Listing" })).toBeInTheDocument();
+      });
+
+      it("clicking Publish on the real page wiring calls publish_listing and navigates to the public listing on success", async () => {
+        getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+        getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+        publishListingMock.mockResolvedValue({
+          ok: true,
+          listingId: "listing-1",
+          publicCode: "PSL-ABC123",
+          slug: "nike-air-max-270",
+          status: "available",
+          publishedAt: "now",
+        });
+
+        render(await SellListingEditPage({ params: params("listing-1") }));
+        fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+        await waitFor(() => expect(publishListingMock).toHaveBeenCalledWith("listing-1"));
+        await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-ABC123"));
+      });
+
+      it("disables Publish with a clear message while the seller has unsaved Draft changes", async () => {
+        getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+        getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+
+        render(await SellListingEditPage({ params: params("listing-1") }));
+
+        fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
+
+        expect(screen.getByRole("button", { name: "Publish Listing" })).toBeDisabled();
+        expect(screen.getByText(/save your draft changes before publishing/i)).toBeInTheDocument();
+        expect(publishListingMock).not.toHaveBeenCalled();
+      });
+
+      it("opens the seller-policy consent dialog reactively when publish_listing reports SELLER_POLICIES_NOT_ACCEPTED", async () => {
+        getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+        getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+        publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
+
+        render(await SellListingEditPage({ params: params("listing-1") }));
+        fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+        expect(await screen.findByRole("dialog")).toBeInTheDocument();
+        expect(acceptSellerPoliciesMock).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("Available/Paused (published-edit placeholder)", () => {
+    it.each(["available", "paused"] as const)("routes %s through getPublishedListingEditState, not the draft loader path", async (status) => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing({ status }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getPublishedListingEditStateMock).toHaveBeenCalledWith("listing-1");
+    });
+
+    it.each(["available", "paused"] as const)("renders the temporary published placeholder for %s, not the Draft form", async (status) => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing({ status }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByRole("heading", { level: 1, name: "Published listing editing" })).toBeInTheDocument();
+      expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
+      expect(screen.getByText(/published editing is being prepared/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save Draft" })).not.toBeInTheDocument();
+    });
+
+    it.each(["available", "paused"] as const)("never shows a Publish button for %s", async (status) => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing({ status }) });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
       expect(screen.queryByRole("button", { name: "Publish Listing" })).not.toBeInTheDocument();
     });
 
-    it("clicking Publish on the real page wiring calls publish_listing and navigates to the public listing on success", async () => {
+    it("never renders editable inputs or a Save action for the placeholder", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
-      publishListingMock.mockResolvedValue({
-        ok: true,
-        listingId: "listing-1",
-        publicCode: "PSL-ABC123",
-        slug: "nike-air-max-270",
-        status: "available",
-        publishedAt: "now",
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+      expect(screen.queryAllByRole("button")).toHaveLength(0);
+    });
+
+    it("never fetches Draft reference data (categories/provinces/etc.) for the placeholder", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getCategoriesMock).not.toHaveBeenCalled();
+      expect(getProvincesMock).not.toHaveBeenCalled();
+      expect(getCitiesForProvinceMock).not.toHaveBeenCalled();
+      expect(getBarangaysForCityMock).not.toHaveBeenCalled();
+    });
+
+    it("renders the placeholder from the published loader's own title/status, not the earlier get_my_listing read", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available", title: "Stale Title" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({
+        status: "found",
+        listing: samplePublishedListing({ title: "Fresh Published Title" }),
       });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
-      fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
 
-      await waitFor(() => expect(publishListingMock).toHaveBeenCalledWith("listing-1"));
-      await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-ABC123"));
+      expect(screen.getByText("Fresh Published Title")).toBeInTheDocument();
+      expect(screen.queryByText("Stale Title")).not.toBeInTheDocument();
     });
 
-    it("disables Publish with a clear message while the seller has unsaved Draft changes", async () => {
+    it("does not render the raw revision value anywhere in the placeholder UI", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({
+        status: "found",
+        listing: samplePublishedListing({ revision: "9007199254740993" }),
+      });
+
+      const { container } = render(await SellListingEditPage({ params: params("listing-1") }));
+
+      // Proves the wrapper's response (including a bigint-range revision)
+      // reached the render without crashing or needing to be displayed --
+      // this task's own instruction is to verify revision availability via
+      // tests rather than surfacing it in the UI.
+      expect(getPublishedListingEditStateMock).toHaveBeenCalledWith("listing-1");
+      expect(container.textContent).not.toContain("9007199254740993");
+    });
+  });
+
+  describe("Reserved/Sold/Archived (read-only)", () => {
+    it.each(["reserved", "sold", "archived"] as const)("renders a read-only not-editable state for %s", async (status) => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
-
-      expect(screen.getByRole("button", { name: "Publish Listing" })).toBeDisabled();
-      expect(screen.getByText(/save your draft changes before publishing/i)).toBeInTheDocument();
-      expect(publishListingMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { level: 1, name: /isn.t editable right now/i })).toBeInTheDocument();
+      expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
     });
 
-    it("opens the seller-policy consent dialog reactively when publish_listing reports SELLER_POLICIES_NOT_ACCEPTED", async () => {
+    it.each(["reserved", "sold", "archived"] as const)("never calls the published-edit loader for %s", async (status) => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
-      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing() });
-      publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
 
       render(await SellListingEditPage({ params: params("listing-1") }));
-      fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
 
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-      expect(acceptSellerPoliciesMock).not.toHaveBeenCalled();
+      expect(getPublishedListingEditStateMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["reserved", "sold", "archived"] as const)("shows no form and no Publish button for %s", async (status) => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Publish Listing" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save Draft" })).not.toBeInTheDocument();
+    });
+
+    it.each(["reserved", "sold", "archived"] as const)(
+      "offers navigation back to the seller's listings and to the public listing for %s (publicly viewable per get_listing_detail/canViewPublicly)",
+      async (status) => {
+        getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+        getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status }) });
+
+        render(await SellListingEditPage({ params: params("listing-1") }));
+
+        expect(screen.getByRole("link", { name: "Back to my listings" })).toHaveAttribute("href", "/sell");
+        expect(screen.getByRole("link", { name: "View listing" })).toHaveAttribute("href", "/item/PSL-ABC123");
+      },
+    );
+
+    it("shows a specific reservation explanation for Reserved, distinct from Sold/Archived's generic copy", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "reserved" }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/reserved by an active order/i)).toBeInTheDocument();
+    });
+
+    it("never fetches Draft reference data for a read-only status", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "archived" }) });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(getCategoriesMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("published-edit loader privacy/error outcomes", () => {
+    it("falls back to the read-only state (not a crash or a generic error) when the published loader reports LISTING_NOT_EDITABLE, and still offers View listing for the (publicly viewable) available status", async () => {
+      // Race: status moved out of Available/Paused between the two reads.
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "not_editable" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByRole("heading", { level: 1, name: /isn.t editable right now/i })).toBeInTheDocument();
+      expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View listing" })).toHaveAttribute("href", "/item/PSL-ABC123");
+    });
+
+    it("falls back to the read-only state for the same LISTING_NOT_EDITABLE race on a Paused listing, but does not offer View listing (Paused is not publicly viewable per get_listing_detail/canViewPublicly)", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "paused" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "not_editable" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByRole("heading", { level: 1, name: /isn.t editable right now/i })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Back to my listings" })).toHaveAttribute("href", "/sell");
+      expect(screen.queryByRole("link", { name: "View listing" })).not.toBeInTheDocument();
+    });
+
+    it("shows the generic unable-to-load message for not_found from the published loader, without a 404 and without leaking ownership info", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "not_found" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
+      expect(notFoundMock).not.toHaveBeenCalled();
+    });
+
+    it("shows the generic unable-to-load message for not_authenticated from the published loader", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "paused" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "not_authenticated" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
+    });
+
+    it("shows the generic unable-to-load message for interaction_blocked from the published loader", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "interaction_blocked" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
+    });
+
+    it("shows the generic unable-to-load message, without crashing, for an unexpected published-loader failure", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "error" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
     });
   });
 });
