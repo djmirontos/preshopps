@@ -90,6 +90,7 @@ describe("Realtime Slice 2 -- no backend/migration change was made in this slice
       "0095_restriction_visibility_notifications.sql",
       "0096_restriction_visibility_notifications.sql",
       "0097_fix_apply_user_restriction_output_collision.sql",
+      "0098_fix_submit_report_output_collision.sql",
     ]);
   });
 
