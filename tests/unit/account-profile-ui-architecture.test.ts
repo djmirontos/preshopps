@@ -36,6 +36,7 @@ describe("Account/Profile UI slice adds no backend/migration change", () => {
       "0094_published_listing_editing.sql",
       "0095_restriction_visibility_notifications.sql",
       "0096_restriction_visibility_notifications.sql",
+      "0097_fix_apply_user_restriction_output_collision.sql",
     ]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });

@@ -107,6 +107,7 @@ describe("Realtime Slice 3 -- the only backend change is migration 0088's two ad
       "0094_published_listing_editing.sql",
       "0095_restriction_visibility_notifications.sql",
       "0096_restriction_visibility_notifications.sql",
+      "0097_fix_apply_user_restriction_output_collision.sql",
     ]);
     expect(migrationFiles).toContain("0088_exact_unread_badge_counts.sql");
   });
