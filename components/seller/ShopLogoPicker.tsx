@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, RotateCcw, Store, X } from "lucide-react";
 import { uploadImage, deleteUploadedImage, UPLOAD_IMAGE_ERROR_MESSAGES, type UploadImageErrorCode } from "@/lib/image-processing/upload-image";
 
@@ -55,11 +55,18 @@ export function ShopLogoPicker({ ownerId, initialPath, initialUrl, onPathChange,
     initialPath ? { kind: "existing", path: initialPath, url: initialUrl ?? "" } : { kind: "empty" },
   );
 
-  function updateSlot(next: Slot) {
-    setSlot(next);
-    onPathChange(readyPath(next));
-    onUploadingChange(isUploading(next));
-  }
+  // Parent notification is a committed side effect, never a side effect of
+  // computing the next Slot value itself -- calling onPathChange/
+  // onUploadingChange from inside a setSlot functional updater runs them
+  // during React's render phase (the updater can be invoked while another
+  // component is rendering), which is exactly what produced "Cannot update
+  // a component while rendering a different component". Deriving from
+  // `slot` here instead means every setSlot call, however it computes its
+  // next value, notifies the parent the same way: once, after commit.
+  useEffect(() => {
+    onPathChange(readyPath(slot));
+    onUploadingChange(isUploading(slot));
+  }, [slot, onPathChange, onUploadingChange]);
 
   async function startUpload(file: File) {
     const result = await uploadImage("shop-images", ownerId, LOGO_ENTITY, file, (status) => {
@@ -68,10 +75,7 @@ export function ShopLogoPicker({ ownerId, initialPath, initialUrl, onPathChange,
 
     setSlot((prev) => {
       if (prev.kind !== "new" || prev.file !== file) return prev;
-      const next: Slot = result.ok ? { ...prev, status: "uploaded", path: result.path } : { ...prev, status: "error", errorCode: result.code };
-      onPathChange(readyPath(next));
-      onUploadingChange(isUploading(next));
-      return next;
+      return result.ok ? { ...prev, status: "uploaded", path: result.path } : { ...prev, status: "error", errorCode: result.code };
     });
   }
 
@@ -87,14 +91,14 @@ export function ShopLogoPicker({ ownerId, initialPath, initialUrl, onPathChange,
       void deleteUploadedImage(slot.path);
     }
 
-    updateSlot({ kind: "new", file, previewUrl: URL.createObjectURL(file), status: "compressing" });
+    setSlot({ kind: "new", file, previewUrl: URL.createObjectURL(file), status: "compressing" });
     void startUpload(file);
   }
 
   function handleRetry() {
     if (slot.kind !== "new") return;
     const file = slot.file;
-    updateSlot({ ...slot, status: "compressing", errorCode: undefined });
+    setSlot({ ...slot, status: "compressing", errorCode: undefined });
     void startUpload(file);
   }
 
@@ -105,7 +109,7 @@ export function ShopLogoPicker({ ownerId, initialPath, initialUrl, onPathChange,
     if (slot.kind === "new" && slot.status === "uploaded" && slot.path) {
       void deleteUploadedImage(slot.path);
     }
-    updateSlot({ kind: "empty" });
+    setSlot({ kind: "empty" });
   }
 
   const previewUrl = slot.kind === "existing" ? slot.url : slot.kind === "new" ? slot.previewUrl : undefined;
