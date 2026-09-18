@@ -44,9 +44,13 @@ These hashes identify historical milestones, not the repository's current HEAD.
 
 ## Database state
 
-- **Latest verified live migration:** `0094_published_listing_editing.sql` — Phase A foundation. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`), SHA-256 `898e26c7d44b6495a5de20fc1959762078bf8051d4ad276d790bd00161eee2c6`. Deployment was preceded by a full hosted rehearsal (isolated Supabase project, real Auth/RLS/Storage/RPC exercise) that passed, and the production apply itself passed its immediate post-deploy schema, security/grant, and data-integrity checks (existing listings/orders unchanged, pre-existing order items still carry `NULL` snapshot columns, inventory/reservation math consistent, no unintended grant widening).
+- **Latest verified live migration:** `0098_fix_submit_report_output_collision.sql`. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`) as part of the Moderation Completion Step A1 backend deployment (`0095` → `0096` → `0097` → `0098`, each its own sequential migration/transaction). See "Moderation Completion — Step A1 (backend)" under Completed major modules for the full deployment record.
+  - `0095_restriction_visibility_notifications.sql` — added the two new `notification_type_enum` values (`moderation_restriction_applied`, `moderation_restriction_lifted`) as its own, separately-committed migration, required ahead of `0096` by Postgres's enum-value-cannot-be-referenced-in-the-same-transaction-it-was-added-in rule.
+  - `0096_restriction_visibility_notifications.sql` — added `notifications.restriction_id` (nullable FK to `user_restrictions(id)`, `on delete cascade`), the new self-read RPC `get_my_active_restrictions()`, and in-app restriction-applied/restriction-lifted notification creation inside `apply_user_restriction` / `lift_user_restriction` (alongside their pre-existing email/audit/trusted-seller logic, otherwise reproduced verbatim).
+  - `0097_fix_apply_user_restriction_output_collision.sql` — fixed a pre-existing PL/pgSQL output-column collision in `apply_user_restriction`: its `RETURNS TABLE`'s `created_at` OUT parameter collided with a bare, unqualified `returning id, created_at` on the function's own fresh-insert branch, raising Postgres `42702` on every first-time (non-idempotent) restriction application. Fixed via table-aliased, column-qualified `RETURNING ur.id, ur.created_at`, matching the schema's own established fix convention from `0079_fix_plpgsql_output_column_collisions.sql`.
+  - `0098_fix_submit_report_output_collision.sql` — fixed the identical collision class in `submit_report` (bare `returning id, created_at` colliding with its own `created_at` OUT parameter). Unlike `apply_user_restriction`, `submit_report` has no idempotent early-return branch, so this bug blocked **every** real report submission in production prior to this fix. Fixed the same way, via `RETURNING r.id, r.created_at`.
 - **`0086`:** intentionally and permanently skipped — no migration with this number exists or should ever be created. This is enforced by an existing automated test; do not backfill it under any circumstances.
-- **Next unused migration number:** `0095`.
+- **Next unused migration number:** `0099`.
 
 Keep this section current — it is the reason a new agent doesn't need to run `ls supabase/migrations` and guess.
 
@@ -91,13 +95,24 @@ The following are implemented and merged as of the product implementation milest
 
 **Phase B Published Listing Editing — COMPLETE.**
 
+- Moderation Completion — Step A1 (backend): restriction visibility/notifications plus two pre-existing PL/pgSQL bug fixes, deployed to live production as migrations `0095` → `0096` → `0097` → `0098`, each applied and verified as its own sequential migration/transaction.
+  - `0095`/`0096` (new capability): affected users can now see their own active moderation restrictions via `get_my_active_restrictions()`, and both restriction-applied and restriction-lifted events now create an in-app notification (via the new `notifications.restriction_id` column) alongside the pre-existing transactional email and audit-trail behavior. No RLS policy was added or changed; access to `user_restrictions` remains solely through existing SECURITY DEFINER RPCs.
+  - `0097` (bug fix): `apply_user_restriction` previously raised Postgres error `42702` on every first-time (non-idempotent) restriction application, due to a PL/pgSQL output-column collision between its `RETURNS TABLE`'s `created_at` OUT parameter and a bare, unqualified `returning id, created_at`. Fixed via table-aliased, column-qualified `RETURNING`, matching the fix convention already established by `0079_fix_plpgsql_output_column_collisions.sql`.
+  - `0098` (bug fix): the identical collision class was found and fixed in `submit_report`. Unlike `apply_user_restriction`, `submit_report` has no idempotent early-return branch, so this bug blocked **100% of real report submissions** in production before this fix — there was no working path at all prior to `0098`.
+  - **Rehearsal validation (hosted, disposable Supabase project, real Auth/RLS exercise via `SET ROLE authenticated` + JWT-claims GUC — not a mocked test):** all four migrations applied and verified on `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) before any production apply. Passed: restriction apply → duplicate apply (idempotent) → lift → duplicate lift (idempotent); self-read privacy (a user sees only their own restrictions, never another's or the moderator's identity); anon/non-admin denial on the admin-only apply/lift RPCs; trusted-seller recalculation triggered correctly on suspension-class restrictions; all four `submit_report` target types (listing, shop, review, conversation) with their existing self-report/non-participant guards; duplicate-reporting behavior preserved as-is (multiple reports against the same target from different reporters remain allowed by design, per `0067`'s own documented rationale — not a bug); admin report visibility unaffected.
+  - **Production deployment:** `0095` → `0096` → `0097` → `0098` applied sequentially to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`), each gated on its own post-apply verification before the next was applied. Post-deployment schema, grants, and RLS state were confirmed to match rehearsal's post-`0098` state exactly. No synthetic production users, restrictions, moderation actions, or reports were created at any point — pre- and post-deployment data-integrity checks both showed `user_restrictions` 0 active/0 lifted, `moderation_actions` 0, `reports` 0.
+  - **Rehearsal project status:** `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) has **not** been deleted yet. Do not assume it is gone; confirm before treating the ref as reusable or unused.
+  - **Open operational investigation (pre-existing, not introduced by this work):** production `email_outbox` currently has 26 rows with `sent_at IS NULL` (pending) despite the existing `process-email-outbox` Supabase Cron → Edge Function pipeline appearing correctly configured (cron jobs, `pg_net` call, and vault secret wiring were all confirmed unchanged by `0095`–`0098`). This was observed, not investigated or repaired, during this deployment. **Do not treat moderation-restriction email delivery (or any transactional email delivery) as verified until this is separately investigated.** This gap predates `0095`–`0098` and is not a regression from this work.
+
+**Moderation Completion Step A1 (backend) — COMPLETE.**
+
 ---
 
 ## Current next major module
 
-**Moderation completion.**
+**Moderation completion — Step A2 (frontend).**
 
-Post-publish Listing Editing (Phase B) is complete — see "Completed major modules" above. Per the current backlog ordering below, Moderation completion is next. The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
+Moderation Completion Step A1 (backend) is complete and live in production — see "Completed major modules" above. Step A2 (the frontend surface for restriction visibility and any remaining moderation UI work) has not been started. Per the current backlog ordering below, Moderation completion remains the current top-priority module until A2 is done. The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
 
 ---
 
