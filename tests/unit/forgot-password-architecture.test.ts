@@ -23,7 +23,12 @@ describe("Forgot Password recovery-code slice adds no backend/migration change",
   it("only approved 0093/0094 follow 0092 -- this is a frontend/auth-only slice (0093 is a later, separately-approved migration)", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newer).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
+    expect(newer).toEqual([
+      "0093_seller_order_messaging.sql",
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 
   it("no recovery file references a database table, RPC name, or storage bucket", () => {

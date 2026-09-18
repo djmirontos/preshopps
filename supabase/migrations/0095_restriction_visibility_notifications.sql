@@ -1,0 +1,37 @@
+-- Moderation completion, Step A1 (part 1 of 2): enum additions only.
+--
+-- PostgreSQL's own documentation for ALTER TYPE ... ADD VALUE is explicit:
+-- a value added to a PRE-EXISTING enum type cannot be used until the
+-- transaction that added it has committed, unless the enum type itself was
+-- created in that same transaction. public.notification_type_enum is
+-- pre-existing (0040) -- it was not created here -- so the two new values
+-- below must not be referenced (in a column default, a CREATE OR REPLACE
+-- FUNCTION body, a CAST, anywhere) until this migration has committed as
+-- its own, separate transaction. This project already has three prior
+-- precedents for exactly this split (0015 added 'changes_pending' alone,
+-- used only in later migrations; 0073 added 'dispute_opened'/
+-- 'dispute_resolved' alone, used only in 0074/0075; 0080 added
+-- 'account_anonymized' alone, used only in 0081) -- this migration follows
+-- that same established convention instead of the single-file approach an
+-- earlier draft of this exact step incorrectly used.
+--
+-- Pre-inspection findings (read-only, immediately before writing this file)
+-- -----------------------------------------------------------------------
+-- Migration history ends at 0094_published_listing_editing (confirmed --
+-- no drift). public.notification_type_enum (0040) currently has 14
+-- values (order_request_received ... review_reply); neither
+-- 'moderation_restriction_applied' nor 'moderation_restriction_lifted'
+-- exists on it yet. Both names are reused verbatim from the existing
+-- public.email_event_type_enum (0083), which already has both -- same
+-- naming, two different enums, for cross-system consistency between the
+-- email and in-app notification a restriction event produces.
+--
+-- Nothing else lives in this file. notifications.restriction_id,
+-- get_my_active_restrictions(), and the apply_user_restriction/
+-- lift_user_restriction redefinitions that actually use these two values
+-- all move to 0096_restriction_visibility_notifications.sql, which is free
+-- to reference them because this migration will already be a prior,
+-- committed one by the time 0096 runs.
+
+alter type public.notification_type_enum add value 'moderation_restriction_applied';
+alter type public.notification_type_enum add value 'moderation_restriction_lifted';

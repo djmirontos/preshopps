@@ -36,7 +36,12 @@ describe("Floating Messenger slice -- no backend/migration/RLS change was made",
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
     const newerThan0092 = migrationFiles.filter((f) => f > "0092_account_profile_management.sql");
-    expect(newerThan0092).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
+    expect(newerThan0092).toEqual([
+      "0093_seller_order_messaging.sql",
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 
   it("no slice file contains RLS/policy/grant DDL", () => {

@@ -84,7 +84,12 @@ describe("Realtime Slice 2 -- no backend/migration change was made in this slice
   it("only approved 0093/0094 follow 0092 -- Slice 2 itself added none; 0088/0089/0090/0091/0092/0093 all belong to later, separately-approved tasks (see their own architecture test files)", () => {
     const latestAllowed = "0092_account_profile_management.sql";
     const files = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql") && f > latestAllowed);
-    expect(files).toEqual(["0093_seller_order_messaging.sql", "0094_published_listing_editing.sql"]);
+    expect(files).toEqual([
+      "0093_seller_order_messaging.sql",
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 
   it("no Slice 2 file contains RLS/policy/grant DDL -- this is a frontend-only slice", () => {

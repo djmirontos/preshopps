@@ -19,7 +19,11 @@ describe("Seller order messaging frontend wiring: no backend/migration/RLS chang
   it("only separately-approved 0094 follows 0093 -- this slice remains frontend-only", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0093_seller_order_messaging.sql");
-    expect(newer).toEqual(["0094_published_listing_editing.sql"]);
+    expect(newer).toEqual([
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 
   it("0093 still adds exactly the two approved RPCs -- untouched by this frontend-only slice", () => {

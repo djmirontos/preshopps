@@ -420,7 +420,11 @@ describe("Realtime bug fix: no migration/RLS/publication change", () => {
   it("8. no migration file was added or changed by this fix -- only separately-approved 0094 follows 0093", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0093_seller_order_messaging.sql");
-    expect(newer).toEqual(["0094_published_listing_editing.sql"]);
+    expect(newer).toEqual([
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 });
 
@@ -1066,7 +1070,11 @@ describe("ConversationThread Realtime -- reconnect reconciliation", () => {
   it("20. no migration file was added or changed by this feature -- only separately-approved 0094 follows 0093", () => {
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     const newer = migrationFiles.filter((f) => f > "0093_seller_order_messaging.sql");
-    expect(newer).toEqual(["0094_published_listing_editing.sql"]);
+    expect(newer).toEqual([
+      "0094_published_listing_editing.sql",
+      "0095_restriction_visibility_notifications.sql",
+      "0096_restriction_visibility_notifications.sql",
+    ]);
   });
 
   /**
