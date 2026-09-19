@@ -745,6 +745,7 @@ Partial-acceptance flow requires buyer confirmation before proceeding.
 
 - Pending request expires after 72 hours if unanswered.
 - Send one seller reminder about 24 hours before expiry.
+- Both the expiry sweep and the reminder scan run as independent Supabase Cron (pg_cron) jobs invoking their own SECURITY DEFINER database function directly on a schedule — no HTTP call or Edge Function is involved for either.
 
 ### Accepted orders
 

@@ -44,13 +44,14 @@ These hashes identify historical milestones, not the repository's current HEAD.
 
 ## Database state
 
-- **Latest verified live migration:** `0098_fix_submit_report_output_collision.sql`. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`) as part of the Moderation Completion Step A1 backend deployment (`0095` → `0096` → `0097` → `0098`, each its own sequential migration/transaction). See "Moderation Completion — Step A1 (backend)" under Completed major modules for the full deployment record.
+- **Latest verified live migration:** `0099_schedule_pending_order_expiry.sql`. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`). See "Pending Order Auto-Expiration — COMPLETE" under Completed major modules for the full deployment record.
   - `0095_restriction_visibility_notifications.sql` — added the two new `notification_type_enum` values (`moderation_restriction_applied`, `moderation_restriction_lifted`) as its own, separately-committed migration, required ahead of `0096` by Postgres's enum-value-cannot-be-referenced-in-the-same-transaction-it-was-added-in rule.
   - `0096_restriction_visibility_notifications.sql` — added `notifications.restriction_id` (nullable FK to `user_restrictions(id)`, `on delete cascade`), the new self-read RPC `get_my_active_restrictions()`, and in-app restriction-applied/restriction-lifted notification creation inside `apply_user_restriction` / `lift_user_restriction` (alongside their pre-existing email/audit/trusted-seller logic, otherwise reproduced verbatim).
   - `0097_fix_apply_user_restriction_output_collision.sql` — fixed a pre-existing PL/pgSQL output-column collision in `apply_user_restriction`: its `RETURNS TABLE`'s `created_at` OUT parameter collided with a bare, unqualified `returning id, created_at` on the function's own fresh-insert branch, raising Postgres `42702` on every first-time (non-idempotent) restriction application. Fixed via table-aliased, column-qualified `RETURNING ur.id, ur.created_at`, matching the schema's own established fix convention from `0079_fix_plpgsql_output_column_collisions.sql`.
   - `0098_fix_submit_report_output_collision.sql` — fixed the identical collision class in `submit_report` (bare `returning id, created_at` colliding with its own `created_at` OUT parameter). Unlike `apply_user_restriction`, `submit_report` has no idempotent early-return branch, so this bug blocked **every** real report submission in production prior to this fix. Fixed the same way, via `RETURNING r.id, r.created_at`.
+  - `0099_schedule_pending_order_expiry.sql` — schedules the existing, already-correct `expire_pending_orders()` RPC (`0024`, notification added in `0040`) via a new `pg_cron` job (`expire-pending-orders-every-15-min`, `*/15 * * * *`, direct SQL call — no HTTP, no Edge Function, no secret). No function redefinition, no schema change. See "Pending Order Auto-Expiration — COMPLETE" below.
 - **`0086`:** intentionally and permanently skipped — no migration with this number exists or should ever be created. This is enforced by an existing automated test; do not backfill it under any circumstances.
-- **Next unused migration number:** `0099`.
+- **Next unused migration number:** `0100`.
 
 Keep this section current — it is the reason a new agent doesn't need to run `ls supabase/migrations` and guess.
 
@@ -102,9 +103,25 @@ The following are implemented and merged as of the product implementation milest
   - **Rehearsal validation (hosted, disposable Supabase project, real Auth/RLS exercise via `SET ROLE authenticated` + JWT-claims GUC — not a mocked test):** all four migrations applied and verified on `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) before any production apply. Passed: restriction apply → duplicate apply (idempotent) → lift → duplicate lift (idempotent); self-read privacy (a user sees only their own restrictions, never another's or the moderator's identity); anon/non-admin denial on the admin-only apply/lift RPCs; trusted-seller recalculation triggered correctly on suspension-class restrictions; all four `submit_report` target types (listing, shop, review, conversation) with their existing self-report/non-participant guards; duplicate-reporting behavior preserved as-is (multiple reports against the same target from different reporters remain allowed by design, per `0067`'s own documented rationale — not a bug); admin report visibility unaffected.
   - **Production deployment:** `0095` → `0096` → `0097` → `0098` applied sequentially to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`), each gated on its own post-apply verification before the next was applied. Post-deployment schema, grants, and RLS state were confirmed to match rehearsal's post-`0098` state exactly. No synthetic production users, restrictions, moderation actions, or reports were created at any point — pre- and post-deployment data-integrity checks both showed `user_restrictions` 0 active/0 lifted, `moderation_actions` 0, `reports` 0.
   - **Rehearsal project status:** `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) has **not** been deleted yet. Do not assume it is gone; confirm before treating the ref as reusable or unused.
-  - **Open operational investigation (pre-existing, not introduced by this work):** production `email_outbox` currently has 26 rows with `sent_at IS NULL` (pending) despite the existing `process-email-outbox` Supabase Cron → Edge Function pipeline appearing correctly configured (cron jobs, `pg_net` call, and vault secret wiring were all confirmed unchanged by `0095`–`0098`). This was observed, not investigated or repaired, during this deployment. **Do not treat moderation-restriction email delivery (or any transactional email delivery) as verified until this is separately investigated.** This gap predates `0095`–`0098` and is not a regression from this work.
+  - **Operational investigation opened here — since resolved:** production `email_outbox` was found with 26 rows stuck `sent_at IS NULL` (pending) during this deployment. This predated `0095`–`0098` and was not a regression from this work. See "Transactional Email Recovery — COMPLETE" below for the root cause and resolution — moderation-restriction email delivery is now production-verified.
 
 **Moderation Completion Step A1 (backend) — COMPLETE.**
+
+- Transactional Email Recovery: the pre-existing `email_outbox` backlog (26 rows stuck pending, flagged above) was root-caused and fully resolved.
+  - **Root cause:** `pg_cron` → `net.http_post` requests were reaching the `process-email-outbox` Edge Function correctly, but the function returned HTTP 401 on every invocation because its `CRON_SECRET` secret and Supabase Vault's `email_processor_cron_secret` were not aligned. Separately, the Edge Function's provider secrets (`RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`) were also initially unconfigured.
+  - **Backlog classification:** of the 26 stuck rows, 22 were proven stale (their underlying order had already moved past the point the email was about — e.g. a `new_order_request` for an order already resolved days earlier) and were cancelled (`email_outbox.status='cancelled'`, `last_error` set to a sanitized operational reason, no PII); the remaining 4 (`order_accepted` for orders still genuinely in progress) were preserved.
+  - **Recovery:** provider secrets configured, `CRON_SECRET` reconciled with the Vault secret, cron recovered from HTTP 401 to HTTP 200 on its own next natural tick — no manual invocation. All 4 preserved emails sent exactly once. Final state: `sent=4`, `cancelled=22`, `pending=0`, `processing=0`, `failed=0`.
+  - **No currently known email backlog remains from this incident.** Transactional email delivery is production-verified end-to-end (real send, not a rehearsal/simulated one).
+  - Secret values are never recorded in this file or anywhere else in the repository.
+
+**Transactional Email Recovery — COMPLETE.**
+
+- Pending Order Auto-Expiration: `public.expire_pending_orders()` (added `0024`, notification added `0040`) already existed, was already correct (eligibility, locking, idempotency, active-reservation anomaly handling, `order_expired` notification, zero inventory/email side effects — all independently re-audited and confirmed unchanged), but had **never been invoked by anything** — no scheduler, cron job, or application code called it. Migration `0099_schedule_pending_order_expiry.sql` closes exactly that gap with a single new `pg_cron` job (`expire-pending-orders-every-15-min`, `*/15 * * * *`, direct SQL call to `expire_pending_orders(200)` — no HTTP, no Edge Function, no secret, mirroring the existing hourly reminder job's own pattern). No function redefinition, no schema change.
+  - **Rehearsal validation:** the exact committed `0099` file was applied to `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) and exercised across four real, unforced natural `pg_cron` ticks (never manually invoked) against four synthetic fixtures: an overdue normal pending order (expired exactly once, correct history/notification, no duplicate across repeated ticks), an overdue order with a deliberately-induced active-reservation anomaly (correctly left pending, repeat-visible as `anomaly=true` on every subsequent tick — the function's own intended behavior), an old accepted order (untouched), and a pending order under 72h old (untouched).
+  - **Production deployment:** applied as commit `2e83fe9` (`feat: schedule pending order auto-expiration`). The first natural tick (`2026-09-19 09:45:00 UTC`, no manual trigger) correctly expired the 3 real production orders that had been stuck `pending` past 72h since before the email-recovery work above (their staleness is what originally surfaced this scheduler gap) — exactly 3 `pending→expired` history rows, exactly 3 `order_expired` notifications, zero duplicates, zero email created (no `order_expired` email event exists in this schema — canon requires email only for the *reminder*, never for actual expiry), zero inventory/reservation/order-item mutation. 12 consecutive natural production ticks verified with no SQL error by final check. `pending >72h` is now 0.
+  - Rehearsal project `preshopps-rehearsal-0096` (ref `kntjxgujeekmshmdxkrh`) has **not** been deleted yet — do not assume it is gone.
+
+**Pending Order Auto-Expiration — COMPLETE.**
 
 ---
 
@@ -137,11 +154,12 @@ Moderation Completion Step A1 (backend) is complete and live in production — s
 High-level order, not a committed schedule:
 
 1. Moderation completion
-2. Marketplace transactional email production verification
-3. Duplicate-listing enforcement audit
-4. Remaining P2 discovery/UI work
-5. Technical SEO work
-6. Full pre-launch hardening / launch audit
+2. Duplicate-listing enforcement audit
+3. Remaining P2 discovery/UI work
+4. Technical SEO work
+5. Full pre-launch hardening / launch audit
+
+Marketplace transactional email production verification (formerly item 2 here) is complete — see "Transactional Email Recovery — COMPLETE" above.
 
 The following are deferred media/performance work, not currently scheduled or in progress:
 
