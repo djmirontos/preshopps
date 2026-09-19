@@ -139,3 +139,105 @@ describe("submitCartOrder", () => {
     expect(result).toEqual({ ok: false, code: "UNKNOWN" });
   });
 });
+
+describe("submitCartOrder -- INTERACTION_BLOCKED restriction-aware presentation (A2.2.1)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  it("attaches the buying-access message and link when buyer_restricted is confirmed", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result).toEqual({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: {
+        message: "Your buying access is currently restricted.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result.ok).toBe(false);
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("account_suspended wins when both account_suspended and buyer_restricted are active", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }, { restriction_type: "account_suspended" }]);
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when only seller_suspended (unrelated) exists -- generic error preserved", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }]);
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic error preserved", async () => {
+    mockBlocked([]);
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({ data: null, error: { message: "lookup failed" } });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("never calls get_my_active_restrictions for a non-INTERACTION_BLOCKED failure", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "price changed", details: "PRICE_CHANGED" } });
+
+    const result = await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(result).toEqual({ ok: false, code: "PRICE_CHANGED" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+
+  it("never calls get_my_active_restrictions on a successful submission", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ order_id: "o1", shop_id: "shop-1", order_public_code: "PSO-ABC", item_count: 1, total_cents: 500000, status: "pending" }],
+      error: null,
+    });
+
+    await submitCartOrder({ rows: [makeRow()], fulfillmentChoices: { "shop-1": "meetup" } });
+
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+});

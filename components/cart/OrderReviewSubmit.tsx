@@ -13,6 +13,7 @@ import {
 } from "@/lib/cart/submit-cart-order";
 import { refreshMyCart, type RefreshMyCartResult } from "@/lib/cart/refresh-my-cart-client";
 import type { CartLineDisplay } from "@/lib/cart/map-cart-row";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
 type Props = {
   lines: CartLineDisplay[];
@@ -96,7 +97,7 @@ function groupSubmittableByShop(rows: CartLineDisplay[]): ShopGroup[] {
 
 type Result =
   | { kind: "success"; orders: SubmittedOrder[]; shopNames: Record<string, string> }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; restriction?: InteractionBlockedPresentation };
 
 /**
  * Restrained order-review area on /cart -- not a multi-step checkout
@@ -209,7 +210,7 @@ export function OrderReviewSubmit({
       setResult({ kind: "success", orders: outcome.orders, shopNames });
       setFulfillmentChoices({});
     } else {
-      setResult({ kind: "error", message: ORDER_ERROR_MESSAGES[outcome.code] });
+      setResult({ kind: "error", message: ORDER_ERROR_MESSAGES[outcome.code], restriction: outcome.restriction });
     }
 
     // Always reconcile against server truth after an attempt -- covers
@@ -250,9 +251,17 @@ export function OrderReviewSubmit({
       )}
 
       {result?.kind === "error" && (
-        <p role="alert" className="mb-4 text-sm text-danger">
-          {result.message}
-        </p>
+        <div role="alert" className="mb-4">
+          <p className="text-sm text-danger">{result.message}</p>
+          {result.restriction && (
+            <p className="mt-1 text-sm text-danger">
+              {result.restriction.message}{" "}
+              <Link href={result.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {result.restriction.ctaLabel}
+              </Link>
+            </p>
+          )}
+        </div>
       )}
 
       {showForm && (

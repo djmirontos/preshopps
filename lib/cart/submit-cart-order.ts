@@ -1,6 +1,14 @@
 import { createClient } from "@/lib/supabase/client";
 import type { CartLineDisplay } from "@/lib/cart/map-cart-row";
 import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
+
+/** Precedence order for submit_cart_order's own INTERACTION_BLOCKED
+ * interpretation -- account_suspended first, buyer_restricted second.
+ * seller_suspended is intentionally excluded: it is unrelated to a
+ * buyer's own checkout action. */
+const CHECKOUT_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
 
 export type SubmitCartOrderInput = {
   /** Only rows the caller has already filtered to isSubmittable -- this
@@ -47,6 +55,14 @@ export type SubmitCartOrderErrorCode =
 export type SubmitCartOrderFailure = {
   ok: false;
   code: SubmitCartOrderErrorCode;
+  /** Populated only when code is INTERACTION_BLOCKED and the caller's own
+   * current restriction state confirms a checkout-relevant restriction
+   * (account_suspended or buyer_restricted) -- see
+   * interpretInteractionBlocked. Absent for every other code, for an
+   * unrelated deleted-account INTERACTION_BLOCKED, or when the lookup
+   * itself fails; the existing generic ORDER_ERROR_MESSAGES copy is the
+   * fallback in all of those cases. */
+  restriction?: InteractionBlockedPresentation;
 };
 
 export type SubmitCartOrderResult = SubmitCartOrderSuccess | SubmitCartOrderFailure;
@@ -135,7 +151,9 @@ export async function submitCartOrder({ rows, fulfillmentChoices }: SubmitCartOr
 
     if (error) {
       console.error("submit_cart_order RPC failed:", error.message);
-      return { ok: false, code: toErrorCode((error as { details?: string }).details) };
+      const code = toErrorCode((error as { details?: string }).details);
+      const restriction = await interpretInteractionBlocked(code, CHECKOUT_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const orderRows = (data ?? []) as SubmitCartOrderRpcRow[];

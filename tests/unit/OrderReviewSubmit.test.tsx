@@ -760,3 +760,92 @@ describe("OrderReviewSubmit -- onSuccess callback (Buy Now's own post-submit nav
     expect(screen.getByRole("link", { name: "View orders" })).toBeInTheDocument();
   });
 });
+
+describe("OrderReviewSubmit -- restriction-aware INTERACTION_BLOCKED error (A2.2.1)", () => {
+  function mockBlockedWithRestriction(restrictionType: string) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: [{ restriction_id: "r1", restriction_type: restrictionType, reason: "x", created_at: "2026-01-01T00:00:00.000Z" }],
+          error: null,
+        });
+      }
+      if (fn === "get_my_cart") {
+        return Promise.resolve({ data: [], error: null });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  it("shows the buying-access message and a 'View account status' link for buyer_restricted", async () => {
+    mockBlockedWithRestriction("buyer_restricted");
+    render(<Harness initialLines={[makeRow()]} />);
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/buying access is currently restricted/i));
+    const link = screen.getByRole("link", { name: "View account status" });
+    expect(link).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the account-suspended message and a 'View account status' link for account_suspended", async () => {
+    mockBlockedWithRestriction("account_suspended");
+    render(<Harness initialLines={[makeRow()]} />);
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/account is currently suspended/i));
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when only seller_suspended (unrelated) is active", async () => {
+    mockBlockedWithRestriction("seller_suspended");
+    render(<Harness initialLines={[makeRow()]} />);
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/account can't complete this action/i));
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "submit_cart_order") {
+        return Promise.resolve({ data: null, error: { message: "price changed", details: "PRICE_CHANGED" } });
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+    render(<Harness initialLines={[makeRow()]} />);
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("Buy Now's injected submit is never affected -- an INTERACTION_BLOCKED failure with no restriction field shows the generic error only", async () => {
+    render(
+      <InjectedHarness
+        initialLines={[makeRow({ cartItemId: null })]}
+        submit={async () => ({ ok: false, code: "INTERACTION_BLOCKED" })}
+        refreshLines={async () => ({ lines: [makeRow({ cartItemId: null })], hadError: false })}
+        removeFromCartOnSuccess={false}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Anne's Closet/), { target: { value: "meetup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit Order" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/account can't complete this action/i));
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+});
