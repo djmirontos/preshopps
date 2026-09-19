@@ -25,6 +25,7 @@ describe("Seller order messaging frontend wiring: no backend/migration/RLS chang
       "0096_restriction_visibility_notifications.sql",
       "0097_fix_apply_user_restriction_output_collision.sql",
       "0098_fix_submit_report_output_collision.sql",
+      "0099_schedule_pending_order_expiry.sql",
     ]);
   });
 

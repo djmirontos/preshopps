@@ -426,6 +426,7 @@ describe("Realtime bug fix: no migration/RLS/publication change", () => {
       "0096_restriction_visibility_notifications.sql",
       "0097_fix_apply_user_restriction_output_collision.sql",
       "0098_fix_submit_report_output_collision.sql",
+      "0099_schedule_pending_order_expiry.sql",
     ]);
   });
 });
@@ -1078,6 +1079,7 @@ describe("ConversationThread Realtime -- reconnect reconciliation", () => {
       "0096_restriction_visibility_notifications.sql",
       "0097_fix_apply_user_restriction_output_collision.sql",
       "0098_fix_submit_report_output_collision.sql",
+      "0099_schedule_pending_order_expiry.sql",
     ]);
   });
 

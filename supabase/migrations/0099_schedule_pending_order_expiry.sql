@@ -1,0 +1,108 @@
+-- Pending Order Auto-Expiration, Step X2: schedule the existing, already
+-- correct expire_pending_orders() RPC (0024, notification added in 0040)
+-- to actually run. Creates ONLY a pg_cron schedule. No function
+-- redefinition, no new table/enum/column, no email logic, no HTTP call,
+-- no pg_net dependency, no secret.
+--
+-- Root cause recap (Step X1's own read-only audit, immediately before
+-- writing this file)
+-- -----------------------------------------------------------------------
+-- expire_pending_orders() itself was re-confirmed correct: production's
+-- live pg_get_functiondef matches this repo's 0040 definition exactly
+-- (byte-for-byte), grants are service_role/postgres only (no anon/
+-- authenticated), eligibility is exactly `status = 'pending' AND
+-- created_at <= now() - interval '72 hours'`, locking is `FOR UPDATE SKIP
+-- LOCKED` oldest-first (the same job-queue pattern this schema already
+-- uses for expire_pending_orders' own row-lock races against
+-- accept_order_items/cancel_pending_order/mark_order_ready), the
+-- active-reservation anomaly check correctly leaves a corrupted order
+-- untouched rather than blocking the rest of the batch, and the
+-- in-app `order_expired` notification (buyer-only, deduped, actor NULL)
+-- already exists. Zero code defect was found. The sole gap: nothing in
+-- production has ever invoked this function -- cron.job contained only
+-- order-expiry-reminders-hourly and process-email-outbox-every-15-min,
+-- neither of which calls or wraps expire_pending_orders in any way. This
+-- migration closes exactly that one gap.
+--
+-- Why a direct SQL cron.schedule, not an Edge Function/HTTP call
+-- -----------------------------------------------------------------------
+-- Unlike email delivery (which requires an outbound HTTPS call to Resend,
+-- necessarily outside Postgres), expiring an order is a pure SQL
+-- operation already fully implemented as a SECURITY DEFINER RPC callable
+-- by service_role. This is exactly the same shape as the existing
+-- order-expiry-reminders-hourly job (0084): `select
+-- cron.schedule(name, schedule, $$select public.<fn>(<limit>);$$)`, no
+-- net.http_post, no Edge Function URL, no x-cron-secret header, no Vault
+-- lookup. Reusing that established pattern verbatim is the smallest
+-- possible change -- one more cron.schedule() call, nothing else.
+--
+-- Cadence: every 15 minutes, not hourly
+-- -----------------------------------------------------------------------
+-- Canonical behavior (PRD 21.7 / ARCHITECTURE.md 16) states unanswered
+-- requests "expire after 72 hours" -- a precise instant, not a rounded
+-- hour. The RPC's own eligibility predicate (created_at <= now() -
+-- interval '72 hours') is already exact and is the sole source of
+-- truth for whether an order is due; running the scheduler more often
+-- only reduces how long an already-eligible order sits unexpired before
+-- the next tick notices it -- it can never cause an order to expire
+-- early, since the WHERE clause re-evaluates "72 hours" against the
+-- actual current time on every single invocation regardless of how
+-- frequently it runs. A 15-minute cadence (matching the email
+-- processor's own existing cadence, though for an unrelated reason)
+-- bounds that operational delay to under 15 minutes instead of up to a
+-- full hour, at negligible cost: eligible rows are typically zero or a
+-- handful per tick, and an empty/near-empty SELECT ... FOR UPDATE SKIP
+-- LOCKED ... LIMIT 200 is cheap.
+--
+-- Job-name / idempotency check (per this project's own established
+-- convention, re-confirmed against 0084 immediately before writing this
+-- file)
+-- -----------------------------------------------------------------------
+-- cron.schedule() upserts by job name -- re-running this migration (or
+-- any future migration naming the same job) against an existing job name
+-- updates that job in place rather than erroring or creating a duplicate.
+-- 0084 relies on this exact same property for both of its own jobs and
+-- documents it explicitly; no additional cron.unschedule() guard exists
+-- anywhere in this project's migration history, and none is warranted
+-- here either. Production currently has no job named
+-- expire-pending-orders-every-15-min (confirmed read-only immediately
+-- before writing this file: cron.job contains only the two jobs named
+-- above), so this migration is a clean, uncontested first creation --
+-- not over-engineered with a guard this schema's own convention has
+-- never needed.
+--
+-- create extension if not exists pg_cron: pg_cron is already installed
+-- in production (0084) -- this statement is a no-op there. It is
+-- included so this migration is self-sufficient if ever applied to an
+-- environment (for example a fresh rehearsal project) where pg_cron has
+-- not yet been enabled, matching 0084's own defensive style.
+--
+-- What this migration deliberately does NOT do (reported plainly)
+-- -----------------------------------------------------------------------
+-- Does not CREATE OR REPLACE public.expire_pending_orders -- its
+-- existing 0040 definition is reused entirely as-is. Does not add an
+-- order_expired (or any other) email_event_type_enum value or any
+-- enqueue_email call -- Step X1 confirmed canon requires email only for
+-- the *reminder*, never for actual expiry, and adding one is an
+-- unrelated, separately-scoped product decision, not part of closing
+-- this scheduler gap. Does not touch enqueue_pending_order_expiry_reminders
+-- or its own existing hourly schedule. Does not touch pg_net, any Vault
+-- secret, any Edge Function, public.orders, public.order_items,
+-- public.listings, public.inventory_reservations, public.notifications,
+-- or any RLS policy/grant on any table.
+
+create extension if not exists pg_cron;
+
+-- ============================================================
+-- every-15-minutes pending-order expiry sweep: direct SQL function
+-- call, no HTTP, no secret of any kind. expire_pending_orders' own
+-- eligibility predicate (status='pending' AND created_at <= now() -
+-- interval '72 hours') remains the sole authority for what actually
+-- expires -- this cadence only bounds how long an eligible order can sit
+-- unprocessed, never how early one becomes eligible.
+-- ============================================================
+select cron.schedule(
+  'expire-pending-orders-every-15-min',
+  '*/15 * * * *',
+  $$select public.expire_pending_orders(200);$$
+);
