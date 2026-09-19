@@ -90,6 +90,15 @@ function canViewPublicly(status: MyListingStatus): boolean {
   return status === "available" || status === "reserved" || status === "sold" || status === "archived";
 }
 
+/** Matches /sell/{listingId}/edit's own status branching exactly (Draft:
+ * full existing editor; Available/Paused: PublishedListingEditor via 0094;
+ * Reserved/Sold/Archived: a read-only NotEditable state, never a form) --
+ * confirmed against that page's own live implementation immediately before
+ * this change. Owner decision: fix Edit visibility only, no Delete. */
+function canEditListing(status: MyListingStatus): boolean {
+  return status === "draft" || status === "available" || status === "paused";
+}
+
 const CONFIRM_COPY: Record<"mark_sold" | "archive", { title: string; description: string }> = {
   mark_sold: {
     title: "Mark as Sold?",
@@ -241,7 +250,7 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
               {rowError && <p className="mt-2 text-xs text-danger">{rowError}</p>}
 
               <div className="mt-3 flex flex-wrap gap-2">
-                {listing.status === "draft" && (
+                {canEditListing(listing.status) && (
                   <Link
                     href={`/sell/${listing.listingId}/edit`}
                     className="flex h-8 items-center rounded-[8px] border border-border px-3 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"

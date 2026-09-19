@@ -86,18 +86,19 @@ describe("SellerListingsListClient -- action visibility by status", () => {
     expect(screen.queryByRole("button", { name: "Mark Sold" })).not.toBeInTheDocument();
   });
 
-  it("Available shows View listing, Pause, Mark Sold, and Archive", () => {
+  it("Available shows Edit, View listing, Pause, Mark Sold, and Archive", () => {
     renderList({ initialListings: [listing({ status: "available" })] });
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/sell/listing-1/edit");
     expect(screen.getByRole("link", { name: "View listing" })).toHaveAttribute("href", "/item/PSL-ABC123");
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark Sold" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
   });
 
-  it("Paused shows View listing (never, per canon), Resume, Mark Sold, and Archive -- no public view link", () => {
+  it("Paused shows Edit, Resume, Mark Sold, and Archive -- no public view link (never, per canon)", () => {
     renderList({ initialListings: [listing({ status: "paused" })] });
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/sell/listing-1/edit");
     expect(screen.queryByRole("link", { name: "View listing" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark Sold" })).toBeInTheDocument();
@@ -105,32 +106,56 @@ describe("SellerListingsListClient -- action visibility by status", () => {
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
   });
 
-  it("Sold shows View listing and Archive only", () => {
+  it("Sold shows View listing and Archive only -- no Edit", () => {
     renderList({ initialListings: [listing({ status: "sold" })] });
     expect(screen.getByRole("link", { name: "View listing" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark Sold" })).not.toBeInTheDocument();
   });
 
-  it("Archived shows View listing only -- no status actions, terminal state", () => {
+  it("Archived shows View listing only -- no Edit, no status actions, terminal state", () => {
     renderList({ initialListings: [listing({ status: "archived" })] });
     expect(screen.getByRole("link", { name: "View listing" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark Sold" })).not.toBeInTheDocument();
   });
 
-  it("Reserved shows View listing but zero status actions, with an explanatory note -- system-controlled only", () => {
+  it("Reserved shows View listing but zero status actions and no Edit, with an explanatory note -- system-controlled only", () => {
     renderList({ initialListings: [listing({ status: "reserved", reservedQuantity: 1, availableQuantity: 0 })] });
     expect(screen.getByRole("link", { name: "View listing" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark Sold" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.getByText(/reserved by an active order/i)).toBeInTheDocument();
+  });
+});
+
+describe("SellerListingsListClient -- Edit link visibility and destination (canEditListing)", () => {
+  it.each(["draft", "available", "paused"] as const)("shows Edit linking to /sell/{listingId}/edit for %s", (status) => {
+    renderList({ initialListings: [listing({ status })] });
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", "/sell/listing-1/edit");
+  });
+
+  it.each(["reserved", "sold", "archived"] as const)("never shows Edit for %s", (status) => {
+    renderList({ initialListings: [listing({ status })] });
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("never shows a Delete action for any status -- Archive remains the only removal/hide behavior", () => {
+    for (const status of ["draft", "available", "paused", "reserved", "sold", "archived"] as const) {
+      const { unmount } = renderList({ initialListings: [listing({ status })] });
+      expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /delete/i })).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });
 
