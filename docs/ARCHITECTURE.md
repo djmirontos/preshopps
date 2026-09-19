@@ -1024,6 +1024,12 @@ Suspended seller:
 - Can access history/disputes/support.
 - Can submit appeal.
 
+Self-facing restriction visibility (implemented):
+
+- Authenticated user → `get_my_active_restrictions()` → Account status section on `/account`, one card per active restriction (`seller_suspended`/`buyer_restricted`/`account_suspended`), showing reason and applied date only.
+- `account_suspended` → additionally shown via a persistent, non-dismissible banner on every authenticated page, linking to the Account status section.
+- Moderation restriction notifications (applied/lifted) navigate into the Account status section (or plain `/account` once a lift may have cleared it).
+
 ### Appeals
 
 Simple suspension appeal form to admin.
