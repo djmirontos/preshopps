@@ -418,3 +418,69 @@ describe("BuyNowDialog -- error handling", () => {
     );
   });
 });
+
+describe("BuyNowDialog -- restriction-aware INTERACTION_BLOCKED error (A2.2.2a, reusing OrderReviewSubmit's existing rendering unmodified)", () => {
+  function mockBlockedWithRestriction(restrictionType: string) {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "get_listing_detail") return Promise.resolve({ data: [detailRow()], error: null });
+      if (name === "submit_buy_now_order") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (name === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: [{ restriction_id: "r1", restriction_type: restrictionType, reason: "x", created_at: "2026-01-01T00:00:00.000Z" }],
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${name}`);
+    });
+  }
+
+  it("shows the buying-access message and a 'View account status' link for buyer_restricted", async () => {
+    mockBlockedWithRestriction("buyer_restricted");
+    renderDialog();
+
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/buying access is currently restricted/i));
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the account-suspended message and a 'View account status' link for account_suspended", async () => {
+    mockBlockedWithRestriction("account_suspended");
+    renderDialog();
+
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/account is currently suspended/i));
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when only seller_suspended (unrelated) is active", async () => {
+    mockBlockedWithRestriction("seller_suspended");
+    renderDialog();
+
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("LISTING_NOT_ORDERABLE never triggers the restriction lookup or link", async () => {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "get_listing_detail") return Promise.resolve({ data: [detailRow()], error: null });
+      if (name === "submit_buy_now_order") {
+        return Promise.resolve({ data: null, error: { message: "not orderable", details: "LISTING_NOT_ORDERABLE" } });
+      }
+      throw new Error(`unexpected rpc ${name}`);
+    });
+    renderDialog();
+
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    expect(rpcNamesCalled()).not.toContain("get_my_active_restrictions");
+  });
+});

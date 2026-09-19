@@ -6,9 +6,16 @@ import {
   type SubmittedOrder,
 } from "@/lib/cart/submit-cart-order";
 import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
+import { interpretInteractionBlocked } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
 export { ORDER_ERROR_MESSAGES };
 export type { SubmitCartOrderResult, SubmittedOrder };
+
+/** Same shared A2.2.1 helper and precedence submit_cart_order itself uses
+ * -- account_suspended first, buyer_restricted second. seller_suspended is
+ * intentionally excluded: unrelated to a buyer's own Buy Now action. */
+const BUY_NOW_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
 
 export type SubmitBuyNowOrderInput = {
   listingId: string;
@@ -78,7 +85,9 @@ export async function submitBuyNowOrder({
 
     if (error) {
       console.error("submit_buy_now_order RPC failed:", error.message);
-      return { ok: false, code: toErrorCode((error as { details?: string }).details) };
+      const code = toErrorCode((error as { details?: string }).details);
+      const restriction = await interpretInteractionBlocked(code, BUY_NOW_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const orderRows = (data ?? []) as SubmitBuyNowOrderRpcRow[];
