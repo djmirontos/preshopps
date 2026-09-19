@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { getNotificationTitle, getNotificationMessage, getNotificationHref } from "@/lib/notifications/notification-copy";
 import type { NotificationItem, NotificationType } from "@/lib/notifications/get-my-notifications";
 
-/** All fourteen values of the live notification_type_enum
- * (0040_notifications.sql) -- never invent a fifteenth. */
+/** Every value this frontend module's NotificationType union currently
+ * covers (the order/messaging/review lifecycle set from
+ * 0040_notifications.sql, plus the two moderation restriction values
+ * added by A2.1). dispute_opened/dispute_resolved remain a separate,
+ * pre-existing, out-of-scope gap -- not added here. */
 const ALL_TYPES: NotificationType[] = [
   "order_request_received",
   "order_accepted",
@@ -19,6 +22,8 @@ const ALL_TYPES: NotificationType[] = [
   "new_message",
   "new_review",
   "review_reply",
+  "moderation_restriction_applied",
+  "moderation_restriction_lifted",
 ];
 
 function item(overrides: Partial<NotificationItem> = {}): NotificationItem {
@@ -39,7 +44,7 @@ function item(overrides: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 describe("notification-copy", () => {
-  it("has a non-empty title and message for every one of the fourteen canonical types", () => {
+  it("has a non-empty title and message for every one of this module's covered types", () => {
     for (const type of ALL_TYPES) {
       expect(getNotificationTitle(type).length).toBeGreaterThan(0);
       expect(getNotificationMessage(item({ type })).length).toBeGreaterThan(0);
@@ -104,5 +109,53 @@ describe("notification-copy", () => {
   it("falls back to generic wording when the actor name is unavailable, never rendering null/undefined text", () => {
     const message = getNotificationMessage(item({ type: "order_request_received", actorDisplayName: null, orderPublicCode: "PSO-ABC12345" }));
     expect(message).not.toMatch(/null|undefined/i);
+  });
+
+  describe("moderation_restriction_applied / moderation_restriction_lifted (A2.1)", () => {
+    it("has the exact expected titles", () => {
+      expect(getNotificationTitle("moderation_restriction_applied")).toBe("Account restriction applied");
+      expect(getNotificationTitle("moderation_restriction_lifted")).toBe("Account restriction lifted");
+    });
+
+    it("applied message tells the user to review Account status", () => {
+      const message = getNotificationMessage(item({ type: "moderation_restriction_applied" }));
+      expect(message).toMatch(/account status/i);
+    });
+
+    it("lifted message says a restriction has been removed", () => {
+      const message = getNotificationMessage(item({ type: "moderation_restriction_lifted" }));
+      expect(message).toMatch(/removed/i);
+    });
+
+    it("never infers or names a specific restriction type -- get_my_notifications returns no restriction_id/type on this row", () => {
+      const applied = getNotificationMessage(item({ type: "moderation_restriction_applied" }));
+      const lifted = getNotificationMessage(item({ type: "moderation_restriction_lifted" }));
+      for (const message of [applied, lifted]) {
+        expect(message).not.toMatch(/seller_suspended|buyer_restricted|account_suspended/);
+      }
+    });
+
+    it("applied routes to /account#account-status", () => {
+      expect(getNotificationHref(item({ type: "moderation_restriction_applied" }))).toBe("/account#account-status");
+    });
+
+    it("lifted routes to plain /account, never the #account-status anchor -- a lift can leave zero active restrictions, in which case AccountStatusSection renders nothing and that element wouldn't exist", () => {
+      expect(getNotificationHref(item({ type: "moderation_restriction_lifted" }))).toBe("/account");
+    });
+  });
+
+  describe("existing notification types are unchanged by the A2.1 additions", () => {
+    it("order_accepted title/message/href are byte-identical to before", () => {
+      expect(getNotificationTitle("order_accepted")).toBe("Order accepted");
+      expect(getNotificationMessage(item({ type: "order_accepted", orderPublicCode: "PSO-ABC12345" }))).toBe(
+        "Your order PSO-ABC12345 was accepted.",
+      );
+      expect(getNotificationHref(item({ type: "order_accepted", orderPublicCode: "PSO-ABC12345" }))).toBe("/orders/PSO-ABC12345");
+    });
+
+    it("new_message title/message/href are byte-identical to before", () => {
+      expect(getNotificationTitle("new_message")).toBe("New message");
+      expect(getNotificationHref(item({ type: "new_message", conversationId: "conv-1" }))).toBe("/messages/conv-1");
+    });
   });
 });

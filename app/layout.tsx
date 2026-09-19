@@ -16,6 +16,8 @@ import { getMyGeneralNotificationUnreadCount } from "@/lib/notifications/get-my-
 import { getMyShop } from "@/lib/seller/get-my-shop";
 import { FloatingMessengerProvider } from "@/components/messaging/FloatingMessengerProvider";
 import { FloatingChatPanel } from "@/components/messaging/FloatingChatPanel";
+import { getMyActiveRestrictions } from "@/lib/moderation/get-my-active-restrictions";
+import { AccountSuspendedBanner } from "@/components/moderation/AccountSuspendedBanner";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -48,14 +50,16 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // double-count new_message into the Bell. getMyShop is the same narrow
   // {id, slug, name} read already used elsewhere for exactly this "does
   // this account have a shop" question.
-  const [user, favoritedIds, cartLines, initialUnreadMessageCount, initialUnreadNotificationCount, myShop] = await Promise.all([
-    getAuthUser(),
-    getMyFavoriteListingIds(),
-    getMyCartQuantities(),
-    getMyUnreadConversationCountServer(),
-    getMyGeneralNotificationUnreadCount(),
-    getMyShop(),
-  ]);
+  const [user, favoritedIds, cartLines, initialUnreadMessageCount, initialUnreadNotificationCount, myShop, restrictionsResult] =
+    await Promise.all([
+      getAuthUser(),
+      getMyFavoriteListingIds(),
+      getMyCartQuantities(),
+      getMyUnreadConversationCountServer(),
+      getMyGeneralNotificationUnreadCount(),
+      getMyShop(),
+      getMyActiveRestrictions(),
+    ]);
 
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
@@ -79,6 +83,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                     signed-in viewer. */}
                 <FloatingMessengerProvider>
                   <AppHeader user={user} hasShop={Boolean(myShop)} />
+                  <AccountSuspendedBanner restrictions={restrictionsResult.restrictions} />
                   <main className="flex-1">{children}</main>
                   <ConditionalFooter />
                   <MobileBottomNav user={user} hasShop={Boolean(myShop)} />

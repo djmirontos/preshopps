@@ -3,20 +3,29 @@ import { render, screen } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { GetMyProfileResult, MyProfile } from "@/lib/account/get-my-profile";
 import type { LocationRef } from "@/lib/marketplace/reference-data";
+import type { GetMyActiveRestrictionsResult, MyActiveRestriction } from "@/lib/moderation/get-my-active-restrictions";
 
-const { getAuthUserMock, getMyProfileMock, getProvincesMock, getCitiesForProvinceMock, getBarangaysForCityMock, redirectMock, signOutActionMock } = vi.hoisted(
-  () => ({
-    getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
-    getMyProfileMock: vi.fn<() => Promise<GetMyProfileResult>>(),
-    getProvincesMock: vi.fn<() => Promise<LocationRef[]>>(),
-    getCitiesForProvinceMock: vi.fn<(provinceId: number) => Promise<LocationRef[]>>(),
-    getBarangaysForCityMock: vi.fn<(cityId: number) => Promise<LocationRef[]>>(),
-    redirectMock: vi.fn((url: string) => {
-      throw new Error(`NEXT_REDIRECT:${url}`);
-    }),
-    signOutActionMock: vi.fn(),
+const {
+  getAuthUserMock,
+  getMyProfileMock,
+  getProvincesMock,
+  getCitiesForProvinceMock,
+  getBarangaysForCityMock,
+  getMyActiveRestrictionsMock,
+  redirectMock,
+  signOutActionMock,
+} = vi.hoisted(() => ({
+  getAuthUserMock: vi.fn<() => Promise<AuthUser | null>>(),
+  getMyProfileMock: vi.fn<() => Promise<GetMyProfileResult>>(),
+  getProvincesMock: vi.fn<() => Promise<LocationRef[]>>(),
+  getCitiesForProvinceMock: vi.fn<(provinceId: number) => Promise<LocationRef[]>>(),
+  getBarangaysForCityMock: vi.fn<(cityId: number) => Promise<LocationRef[]>>(),
+  getMyActiveRestrictionsMock: vi.fn<() => Promise<GetMyActiveRestrictionsResult>>(),
+  redirectMock: vi.fn((url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   }),
-);
+  signOutActionMock: vi.fn(),
+}));
 
 vi.mock("@/lib/auth/session", () => ({
   getAuthUser: getAuthUserMock,
@@ -36,11 +45,25 @@ vi.mock("@/lib/marketplace/reference-data", () => ({
   getBarangaysForCity: getBarangaysForCityMock,
 }));
 
+vi.mock("@/lib/moderation/get-my-active-restrictions", () => ({
+  getMyActiveRestrictions: getMyActiveRestrictionsMock,
+}));
+
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
 }));
 
 import AccountPage from "@/app/account/page";
+
+function restriction(overrides: Partial<MyActiveRestriction> = {}): MyActiveRestriction {
+  return {
+    restrictionId: "r1",
+    restrictionType: "seller_suspended",
+    reason: "Repeated late shipments.",
+    createdAt: "2026-09-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
 
 function sampleProfile(overrides: Partial<MyProfile> = {}): MyProfile {
   return {
@@ -68,6 +91,7 @@ describe("AccountPage", () => {
     getProvincesMock.mockResolvedValue([]);
     getCitiesForProvinceMock.mockResolvedValue([]);
     getBarangaysForCityMock.mockResolvedValue([]);
+    getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [], hadError: false });
   });
 
   it("redirects a guest to sign-in with next=/account before fetching any profile data", async () => {
@@ -204,6 +228,67 @@ describe("AccountPage", () => {
       const marketplaceIndex = headings.indexOf("Marketplace");
       expect(securityIndex).toBeGreaterThan(-1);
       expect(marketplaceIndex).toBeGreaterThan(securityIndex);
+    });
+  });
+
+  describe("Account status section (A2.1)", () => {
+    beforeEach(() => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "buyer@example.com" });
+      getMyProfileMock.mockResolvedValue({ profile: sampleProfile(), hadError: false });
+    });
+
+    it("renders no Account status section, and no #account-status element, when there are zero active restrictions -- the rest of the page is unaffected", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [], hadError: false });
+      render(await AccountPage());
+      expect(screen.queryByRole("heading", { name: "Account status" })).not.toBeInTheDocument();
+      expect(document.getElementById("account-status")).toBeNull();
+      // The rest of the page still renders exactly as before.
+      expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument();
+    });
+
+    it("renders the Account status section with id=\"account-status\" and a seller_suspended card, placed before Profile/Location", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [restriction({ restrictionType: "seller_suspended" })], hadError: false });
+      render(await AccountPage());
+      expect(document.getElementById("account-status")).not.toBeNull();
+      expect(screen.getByRole("heading", { name: "Account status" })).toBeInTheDocument();
+      expect(screen.getByText("Selling suspended")).toBeInTheDocument();
+
+      const headings = screen.getAllByRole("heading").map((h) => h.textContent);
+      const accountHeadingIndex = headings.indexOf("Account");
+      const statusHeadingIndex = headings.indexOf("Account status");
+      expect(accountHeadingIndex).toBeGreaterThan(-1);
+      expect(statusHeadingIndex).toBeGreaterThan(accountHeadingIndex);
+    });
+
+    it("renders a buyer_restricted card", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [restriction({ restrictionType: "buyer_restricted" })], hadError: false });
+      render(await AccountPage());
+      expect(screen.getByText("Buying restricted")).toBeInTheDocument();
+    });
+
+    it("renders an account_suspended card", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [restriction({ restrictionType: "account_suspended" })], hadError: false });
+      render(await AccountPage());
+      expect(screen.getByText("Account suspended")).toBeInTheDocument();
+    });
+
+    it("renders multiple simultaneous restrictions as independent cards", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({
+        restrictions: [
+          restriction({ restrictionId: "r1", restrictionType: "seller_suspended" }),
+          restriction({ restrictionId: "r2", restrictionType: "account_suspended" }),
+        ],
+        hadError: false,
+      });
+      render(await AccountPage());
+      expect(screen.getByText("Selling suspended")).toBeInTheDocument();
+      expect(screen.getByText("Account suspended")).toBeInTheDocument();
+    });
+
+    it("never renders moderator/admin metadata -- the page passes through only what getMyActiveRestrictions returns, which never includes it", async () => {
+      getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [restriction()], hadError: false });
+      render(await AccountPage());
+      expect(screen.queryByText(/issued by|lifted by/i)).not.toBeInTheDocument();
     });
   });
 });

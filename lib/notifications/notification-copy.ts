@@ -37,6 +37,10 @@ export function getNotificationTitle(type: NotificationType): string {
       return "New review";
     case "review_reply":
       return "Seller replied to your review";
+    case "moderation_restriction_applied":
+      return "Account restriction applied";
+    case "moderation_restriction_lifted":
+      return "Account restriction lifted";
   }
 }
 
@@ -79,6 +83,10 @@ export function getNotificationMessage(item: NotificationItem): string {
       return `${actor} left a review on your shop.`;
     case "review_reply":
       return "The seller replied to your review.";
+    case "moderation_restriction_applied":
+      return "A restriction was applied to your account. Review your Account status for details.";
+    case "moderation_restriction_lifted":
+      return "A restriction on your account has been removed.";
   }
 }
 
@@ -109,6 +117,18 @@ export function getNotificationMessage(item: NotificationItem): string {
  * - new_review / review_reply: get_my_notifications returns only
  *   review_id, with no shop slug or order code to route to -- no reviews
  *   UI exists in this module's scope either.
+ * - moderation_restriction_applied (A2.1): routes to /account#account-
+ *   status, the one self-facing surface that shows active restrictions --
+ *   get_my_notifications returns no restriction_id on this row, so which
+ *   specific restriction was applied is never inferred here; the Account
+ *   status section itself reads the caller's current state fresh via
+ *   get_my_active_restrictions.
+ * - moderation_restriction_lifted (A2.1): routes to plain /account, not
+ *   the #account-status anchor -- a lift can bring the caller's active-
+ *   restriction count to zero, in which case AccountStatusSection
+ *   deliberately renders nothing and the #account-status element would
+ *   not exist on the page. Landing on plain /account is always correct
+ *   regardless of whether other restrictions remain active.
  */
 export function getNotificationHref(item: NotificationItem): string | null {
   switch (item.type) {
@@ -126,6 +146,10 @@ export function getNotificationHref(item: NotificationItem): string | null {
       return item.orderPublicCode ? `/orders/${item.orderPublicCode}` : null;
     case "new_message":
       return item.conversationId ? `/messages/${item.conversationId}` : null;
+    case "moderation_restriction_applied":
+      return "/account#account-status";
+    case "moderation_restriction_lifted":
+      return "/account";
     case "order_completed":
     case "new_review":
     case "review_reply":

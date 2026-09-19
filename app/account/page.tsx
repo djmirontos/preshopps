@@ -5,8 +5,10 @@ import { getAuthUser } from "@/lib/auth/session";
 import { signOutAction } from "@/lib/auth/actions";
 import { getMyProfile } from "@/lib/account/get-my-profile";
 import { getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
+import { getMyActiveRestrictions } from "@/lib/moderation/get-my-active-restrictions";
 import { AccountProfileForm } from "@/components/account/AccountProfileForm";
 import { SecuritySection } from "@/components/account/SecuritySection";
+import { AccountStatusSection } from "@/components/account/AccountStatusSection";
 
 export const metadata = { title: "Account | Preshopps" };
 
@@ -40,7 +42,7 @@ export default async function AccountPage() {
     redirect(`/sign-in?next=${encodeURIComponent("/account")}`);
   }
 
-  const [profileResult, provinces] = await Promise.all([getMyProfile(), getProvinces()]);
+  const [profileResult, provinces, restrictionsResult] = await Promise.all([getMyProfile(), getProvinces(), getMyActiveRestrictions()]);
 
   async function loadCitiesAction(provinceId: number): Promise<LocationRef[]> {
     "use server";
@@ -80,6 +82,8 @@ export default async function AccountPage() {
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
       <h1 className="text-xl font-bold text-ink lg:text-2xl">Account</h1>
       <p className="mt-1 text-sm text-ink-secondary">Manage your profile, location, and contact details.</p>
+
+      <AccountStatusSection restrictions={restrictionsResult.restrictions} />
 
       <div className="mt-6">
         <AccountProfileForm

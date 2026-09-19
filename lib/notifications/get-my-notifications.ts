@@ -2,9 +2,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 
 /**
- * Exactly the fourteen values of public.notification_type_enum
- * (0040_notifications.sql) -- confirmed live, no drift since. Never invent
- * a fifteenth.
+ * The order/messaging/review lifecycle values of public.
+ * notification_type_enum (0040_notifications.sql) plus the two moderation
+ * restriction values added by A1 (0096_restriction_visibility_
+ * notifications.sql) that A2.1 now renders. `dispute_opened`/
+ * `dispute_resolved` (0074/0078) are a separate, pre-existing, out-of-
+ * scope gap for this frontend module -- not added here.
  */
 export type NotificationType =
   | "order_request_received"
@@ -20,7 +23,9 @@ export type NotificationType =
   | "order_expired"
   | "new_message"
   | "new_review"
-  | "review_reply";
+  | "review_reply"
+  | "moderation_restriction_applied"
+  | "moderation_restriction_lifted";
 
 /**
  * Row shape exactly matching public.get_my_notifications' RETURNS TABLE
