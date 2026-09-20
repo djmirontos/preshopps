@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { formatMessageTimestamp } from "@/lib/messaging/format-message-time";
 import { containsExternalLink } from "@/lib/messaging/detect-link";
 import { sendMessage, SEND_MESSAGE_ERROR_MESSAGES } from "@/lib/messaging/send-message";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import { appendMessageIfNew, insertMessageInOrder } from "@/lib/messaging/message-list";
 import { getLatestConversationMessages } from "@/lib/messaging/get-latest-conversation-messages";
 import { handleComposerKeyDown } from "@/lib/messaging/composer-keydown";
@@ -80,6 +81,10 @@ type LoadEarlierResult = {
   hadError: boolean;
   nextCursor: MessagesCursor | null;
 };
+
+/** Carries an optional restriction presentation whenever a genuine
+ * sendMessage() failure returns one. */
+type SendError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   context: ConversationContext;
@@ -182,7 +187,7 @@ export function ConversationThread({
 
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<SendError | null>(null);
 
   const refreshUnreadMessageCount = useRefreshUnreadMessageCount();
 
@@ -658,11 +663,11 @@ export function ConversationThread({
     setIsSending(true);
     setSendError(null);
 
-    const result = await sendMessage(context.conversationId, trimmed);
+    const result = await sendMessage(context.conversationId, trimmed, context.viewerRole);
     setIsSending(false);
 
     if (!result.ok) {
-      setSendError(SEND_MESSAGE_ERROR_MESSAGES[result.code]);
+      setSendError({ message: SEND_MESSAGE_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return;
     }
 
@@ -952,7 +957,21 @@ export function ConversationThread({
             You can&apos;t send messages in this conversation.
           </p>
         )}
-        {sendError && <p className="mt-2 text-sm text-danger">{sendError}</p>}
+        {sendError && (
+          <>
+            <p className="mt-2 text-sm text-danger">{sendError.message}</p>
+            {sendError.restriction && (
+              <>
+                <p className="mt-1 text-sm text-danger">{sendError.restriction.message}</p>
+                <p className="mt-1 text-sm text-danger">
+                  <Link href={sendError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                    {sendError.restriction.ctaLabel}
+                  </Link>
+                </p>
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {isBlockConfirmOpen && (

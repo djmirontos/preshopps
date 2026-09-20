@@ -202,7 +202,7 @@ describe("ConversationDetailClient -- composer", () => {
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!"));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!", "initiator"));
     expect(await screen.findByText("Hello!")).toBeInTheDocument();
     // Draft clears after a confirmed send.
     expect(screen.getByLabelText("Message")).toHaveValue("");
@@ -251,6 +251,122 @@ describe("ConversationDetailClient -- composer", () => {
     renderConversation({ context: sampleContext({ canSend: false }) });
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
     expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
+  });
+});
+
+describe("ConversationDetailClient -- restriction-aware INTERACTION_BLOCKED error on send (A2.2.2f.3)", () => {
+  async function sendAndFail(context: ConversationContext, body = "Hello!") {
+    renderConversation({ context });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: body } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalled());
+  }
+
+  it("buyer role: passes context.viewerRole through to sendMessage", async () => {
+    sendMessageMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    await sendAndFail(sampleContext({ viewerRole: "initiator" }));
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!", "initiator");
+  });
+
+  it("seller role: passes context.viewerRole through to sendMessage", async () => {
+    sendMessageMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+    expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!", "seller");
+  });
+
+  it("buyer role: a buyer_restricted failure shows the generic message, the specific buying-access message, and a 'View account status' link", async () => {
+    sendMessageMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your buying access is currently restricted.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    await sendAndFail(sampleContext({ viewerRole: "initiator" }));
+
+    expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
+    expect(screen.getByText("Your buying access is currently restricted.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("seller role: a seller_suspended failure shows the generic message, the specific selling-access message, and a 'View account status' link", async () => {
+    sendMessageMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+
+    expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
+    expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("an account_suspended failure shows the specific account-suspended message and link, for either role", async () => {
+    sendMessageMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+
+    expect(screen.getByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("a generic blocked result (no confirmed restriction, e.g. an other-participant/unrelated-restriction-type collision) shows only the existing generic message, with no detail and no link", async () => {
+    sendMessageMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+
+    expect(screen.getByText("You can't send messages in this conversation.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a generic (non-restriction) failure code shows only the generic message, with no detail and no link", async () => {
+    sendMessageMock.mockResolvedValue({ ok: false, code: "NOT_CONVERSATION_PARTICIPANT" });
+    await sendAndFail(sampleContext({ viewerRole: "initiator" }));
+
+    expect(screen.getByText("You don't have permission to send messages here.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("retrying after a restriction failure replaces the stale presentation with the new attempt's result", async () => {
+    sendMessageMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+    expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    sendMessageMock.mockResolvedValueOnce({ ok: false, code: "MESSAGE_TOO_LONG" });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello again!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(screen.getByText("Messages can be up to 4000 characters.")).toBeInTheDocument());
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a successful retry after a restriction failure clears the error and link entirely, appends the confirmed message, and clears the draft -- without any optimistic message ever having been added", async () => {
+    sendMessageMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    await sendAndFail(sampleContext({ viewerRole: "seller" }));
+    expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    // The failed attempt never appended anything to the visible message list
+    // (the draft textarea still legitimately contains "Hello!" -- that is
+    // not a rendered message bubble).
+    expect(within(screen.getByTestId("messages-scroll-container")).queryByText("Hello!")).not.toBeInTheDocument();
+
+    sendMessageMock.mockResolvedValueOnce({ ok: true, messageId: "msg-new", createdAt: "2026-02-01T11:00:00.000Z" });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello again!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("Hello again!")).toBeInTheDocument();
+    expect(screen.getByLabelText("Message")).toHaveValue("");
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 });
 
@@ -321,7 +437,7 @@ describe("ConversationDetailClient -- desktop Enter-to-send / Shift+Enter-newlin
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
 
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!"));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!", "initiator"));
   });
 
   it("desktop (>= lg): Shift+Enter never sends -- the draft is left for the default newline", () => {
@@ -372,7 +488,7 @@ describe("ConversationDetailClient -- desktop Enter-to-send / Shift+Enter-newlin
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello!" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!"));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledWith("conv-1", "Hello!", "initiator"));
   });
 });
 
