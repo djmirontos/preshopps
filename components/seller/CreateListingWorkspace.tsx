@@ -1,10 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { ListingForm, CREATE_DEFAULTS, type ListingFormHandle } from "@/components/seller/ListingForm";
 import { ListingImagesPicker } from "@/components/seller/ListingImagesPicker";
 import { CreateListingPublishButton } from "@/components/seller/CreateListingPublishButton";
 import { createListing, CREATE_LISTING_ERROR_MESSAGES, type CreateListingInput } from "@/lib/seller/listing-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import type { ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import type { CategoryRef, LocationRef } from "@/lib/marketplace/reference-data";
 import type { ListingTypeFilter } from "@/lib/marketplace/search-params";
@@ -21,6 +23,7 @@ type Props = {
 };
 
 type Draft = { listingId: string; publicCode: string; slug: string };
+type DraftError = { message: string; restriction?: InteractionBlockedPresentation };
 
 /** Used only when the seller adds a photo (or clicks Save Draft) before
  * ever typing a title -- overwritten the instant they type a real one and
@@ -78,7 +81,7 @@ export function CreateListingWorkspace({
   initialLocation,
 }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<DraftError | null>(null);
   const [listingType, setListingType] = useState<ListingTypeFilter | null>(null);
   const [isFormPublishReady, setIsFormPublishReady] = useState(false);
   const [isPhotosReady, setIsPhotosReady] = useState(false);
@@ -106,7 +109,7 @@ export function CreateListingWorkspace({
 
       const result = await createListing(input);
       if (!result.ok) {
-        setDraftError(CREATE_LISTING_ERROR_MESSAGES[result.code]);
+        setDraftError({ message: CREATE_LISTING_ERROR_MESSAGES[result.code], restriction: result.restriction });
         return null;
       }
 
@@ -141,6 +144,19 @@ export function CreateListingWorkspace({
   return (
     <div className="space-y-8">
       <div>
+        {draftError && (
+          <div role="alert" className="mt-2">
+            <p className="text-xs text-danger">{draftError.message}</p>
+            {draftError.restriction && (
+              <p className="mt-1 text-xs text-danger">
+                {draftError.restriction.message}{" "}
+                <Link href={draftError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                  {draftError.restriction.ctaLabel}
+                </Link>
+              </p>
+            )}
+          </div>
+        )}
         <ListingImagesPicker
           listingId={draft?.listingId ?? null}
           ensureListingId={ensureDraft}
@@ -149,11 +165,6 @@ export function CreateListingWorkspace({
           initialImages={[]}
           onPhotosReadyChange={setIsPhotosReady}
         />
-        {draftError && (
-          <p role="alert" className="mt-2 text-xs text-danger">
-            {draftError}
-          </p>
-        )}
       </div>
 
       <ListingForm

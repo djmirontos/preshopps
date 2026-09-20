@@ -102,6 +102,115 @@ describe("publishListing", () => {
   });
 });
 
+describe("publishListing -- INTERACTION_BLOCKED restriction-aware presentation (A2.2.2b)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "publish_listing") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  it("attaches the selling-access message and link when seller_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }]);
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: {
+        message: "Your selling access is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: {
+        message: "Your account is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("account_suspended wins when both account_suspended and seller_suspended are active", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }, { restriction_type: "account_suspended" }]);
+
+    const result = await publishListing("listing-1");
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when only buyer_restricted (unrelated) exists -- generic error preserved", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic error preserved", async () => {
+    mockBlocked([]);
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "publish_listing") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({ data: null, error: { message: "lookup failed" } });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("never calls get_my_active_restrictions for a non-INTERACTION_BLOCKED failure", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "not draft", details: "LISTING_NOT_DRAFT" } });
+
+    const result = await publishListing("listing-1");
+
+    expect(result).toEqual({ ok: false, code: "LISTING_NOT_DRAFT" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+
+  it("never calls get_my_active_restrictions on a successful publish", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ listing_id: "listing-1", public_code: "PSL-ABC", slug: "nike-air-max-270", status: "available", published_at: "2026-01-05T00:00:00.000Z" }],
+      error: null,
+    });
+
+    await publishListing("listing-1");
+
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+});
+
 describe("acceptSellerPolicies", () => {
   it("calls accept_seller_policies with no parameters", async () => {
     rpcMock.mockResolvedValue({ data: [{ accepted_at: "2026-01-05T00:00:00.000Z" }], error: null });

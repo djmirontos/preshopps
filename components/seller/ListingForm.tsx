@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import {
   createListing,
@@ -11,6 +12,7 @@ import {
   type CreateListingInput,
   type UpdateListingPatch,
 } from "@/lib/seller/listing-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import { parsePesosToCents, centsToPesosInput } from "@/lib/seller/price-cents";
 import {
   LISTING_TYPE_LABELS,
@@ -173,6 +175,14 @@ type FieldErrors = {
   stockQuantity?: string;
 };
 
+/** Carries an optional restriction presentation only when this submit went
+ * through the standalone create_listing branch below and it returned one
+ * -- the update_listing branch (true edit mode, or an orchestrated
+ * create-mode form that already has a draft) never populates `restriction`
+ * at all, since UpdateListingResult itself carries no such field; this
+ * type only needs to be wide enough to hold it when present. */
+type SubmitError = { message: string; restriction?: InteractionBlockedPresentation };
+
 function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): boolean {
   return a.length === b.length && a.every((method) => b.includes(method));
 }
@@ -255,7 +265,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
   const [fulfillmentMethods, setFulfillmentMethods] = useState<FulfillmentMethod[]>(baselineValues.fulfillmentMethods);
   const [meetupNote, setMeetupNote] = useState(baselineValues.meetupNote ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<SubmitError | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -437,7 +447,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
       setIsSubmitting(false);
 
       if (!result.ok) {
-        setSubmitError(CREATE_LISTING_ERROR_MESSAGES[result.code]);
+        setSubmitError({ message: CREATE_LISTING_ERROR_MESSAGES[result.code], restriction: result.restriction });
         return { ok: false };
       }
 
@@ -463,7 +473,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
       resolvedListingId = await ensureListingId!();
       if (resolvedListingId === null) {
         setIsSubmitting(false);
-        setSubmitError(CREATE_LISTING_ERROR_MESSAGES.UNKNOWN);
+        setSubmitError({ message: CREATE_LISTING_ERROR_MESSAGES.UNKNOWN });
         return { ok: false };
       }
     }
@@ -527,7 +537,11 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
     setIsSubmitting(false);
 
     if (!result.ok) {
-      setSubmitError(UPDATE_LISTING_ERROR_MESSAGES[result.code]);
+      // update_listing's own result never carries a restriction
+      // presentation (out of scope for this task -- see UpdateListingResult)
+      // -- this branch always shows the existing generic message only,
+      // for both true edit mode and an orchestrated create-mode form.
+      setSubmitError({ message: UPDATE_LISTING_ERROR_MESSAGES[result.code] });
       return { ok: false };
     }
 
@@ -949,7 +963,19 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
         )}
       </section>
 
-      {submitError && <p className="text-sm text-danger">{submitError}</p>}
+      {submitError && (
+        <div>
+          <p className="text-sm text-danger">{submitError.message}</p>
+          {submitError.restriction && (
+            <p className="mt-1 text-sm text-danger">
+              {submitError.restriction.message}{" "}
+              <Link href={submitError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {submitError.restriction.ctaLabel}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
       {saveStatus === "saved" && <p className="text-sm text-success">Draft saved</p>}
       {saveStatus === "no_changes" && <p className="text-sm text-ink-muted">No changes to save</p>}
 

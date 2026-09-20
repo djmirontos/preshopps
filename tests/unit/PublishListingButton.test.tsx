@@ -249,3 +249,74 @@ describe("PublishListingButton -- SELLER_POLICIES_NOT_ACCEPTED consent flow", ()
     expect(publishListingMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PublishListingButton -- restriction-aware INTERACTION_BLOCKED error (A2.2.2b)", () => {
+  it("shows the selling-access message and a 'View account status' link when publish_listing returns a seller_suspended restriction", async () => {
+    publishListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the account-suspended message and link when publish_listing returns an account_suspended restriction", async () => {
+    publishListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when publish_listing returns INTERACTION_BLOCKED with no restriction presentation", async () => {
+    publishListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+    expect(await screen.findByText("You are not able to publish listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure", async () => {
+    publishListingMock.mockResolvedValue({ ok: false, code: "PRICE_REQUIRED" });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+
+    expect(await screen.findByText("Please enter a price before publishing.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows the restriction link after a successful policy-acceptance retry that itself fails with a restriction", async () => {
+    publishListingMock
+      .mockResolvedValueOnce({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "INTERACTION_BLOCKED",
+        restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+      });
+    acceptSellerPoliciesMock.mockResolvedValue({ ok: true, acceptedAt: "2026-01-05T00:00:00.000Z" });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Accept & Publish" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toBeInTheDocument();
+  });
+});

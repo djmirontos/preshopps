@@ -478,3 +478,80 @@ describe("CreateListingWorkspace -- ownership/security unchanged", () => {
     await waitFor(() => expect(uploadImageMock).toHaveBeenCalledWith(expect.anything(), "owner-1", expect.anything(), expect.anything(), expect.anything()));
   });
 });
+
+describe("CreateListingWorkspace -- restriction-aware draft error (A2.2.2b)", () => {
+  it("shows the selling-access message and a 'View account status' link when create_listing returns a seller_suspended restriction", async () => {
+    createListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderWorkspace();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/selling access is currently suspended/i));
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the account-suspended message and link when create_listing returns an account_suspended restriction", async () => {
+    createListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderWorkspace();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/account is currently suspended/i));
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when create_listing returns INTERACTION_BLOCKED with no restriction presentation", async () => {
+    createListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    renderWorkspace();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/not able to create listings right now/i));
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure", async () => {
+    createListingMock.mockResolvedValue({ ok: false, code: "SHOP_NOT_FOUND" });
+    renderWorkspace();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/set up your shop first/i));
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("for a photo-triggered restricted ensureDraft() failure, the restriction-aware alert renders before the picker's own generic fallback in document order (STEP 4 ordering regression)", async () => {
+    createListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderWorkspace();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/selling access is currently suspended/i);
+    expect(screen.getByRole("link", { name: "View account status" })).toBeInTheDocument();
+
+    // The picker's own generic fallback (its independent image-operation
+    // error state) is a separate, still-legitimate message and may still
+    // render alongside the restriction-aware alert -- this fix does not
+    // suppress it.
+    const pickerFallback = await screen.findByText("Couldn't start your listing. Please try again.");
+    expect(pickerFallback).toBeInTheDocument();
+
+    // Ordering: the restriction-aware alert must come earlier in DOM/
+    // document order than the picker's generic fallback, so a sighted
+    // seller reading top-to-bottom reaches the actionable guidance first.
+    expect(alert.compareDocumentPosition(pickerFallback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

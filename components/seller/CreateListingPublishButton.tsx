@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   publishListing,
   acceptSellerPolicies,
@@ -9,6 +10,9 @@ import {
   ACCEPT_SELLER_POLICIES_ERROR_MESSAGES,
 } from "@/lib/seller/listing-actions";
 import { SellerPolicyConsentDialog } from "@/components/seller/SellerPolicyConsentDialog";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+
+type PublishError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   /** True once the CURRENT form state and photos satisfy every
@@ -49,7 +53,7 @@ type Props = {
 export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Props) {
   const router = useRouter();
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<PublishError | null>(null);
   const [showConsent, setShowConsent] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
@@ -64,7 +68,7 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
     const listingId = await ensureAndPersist();
     if (!listingId) {
       setIsPublishing(false);
-      setPublishError("Couldn't save your listing. Please try again.");
+      setPublishError({ message: "Couldn't save your listing. Please try again." });
       return;
     }
 
@@ -82,7 +86,7 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
       return;
     }
 
-    setPublishError(PUBLISH_LISTING_ERROR_MESSAGES[result.code]);
+    setPublishError({ message: PUBLISH_LISTING_ERROR_MESSAGES[result.code], restriction: result.restriction });
   }
 
   async function handleAcceptAndPublish() {
@@ -111,7 +115,7 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
     // the consent dialog and surface the actual publish error on the main
     // action, rather than looping back into the dialog again.
     setShowConsent(false);
-    setPublishError(PUBLISH_LISTING_ERROR_MESSAGES[publishResult.code]);
+    setPublishError({ message: PUBLISH_LISTING_ERROR_MESSAGES[publishResult.code], restriction: publishResult.restriction });
   }
 
   function handleCancelConsent() {
@@ -122,7 +126,19 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
 
   return (
     <div>
-      {publishError && <p className="mb-2 text-sm text-danger">{publishError}</p>}
+      {publishError && (
+        <div className="mb-2">
+          <p className="text-sm text-danger">{publishError.message}</p>
+          {publishError.restriction && (
+            <p className="mt-1 text-sm text-danger">
+              {publishError.restriction.message}{" "}
+              <Link href={publishError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {publishError.restriction.ctaLabel}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
 
       <button
         type="button"

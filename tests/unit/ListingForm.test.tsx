@@ -1288,3 +1288,82 @@ describe("ListingForm -- persistCurrentState imperative handle (direct-publish s
     expect(result).toEqual({ ok: false });
   });
 });
+
+describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2b, dormant standalone create branch only)", () => {
+  it("shows the selling-access message and a 'View account status' link when the standalone create_listing call returns a seller_suspended restriction", async () => {
+    createListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the account-suspended message and link when the standalone create_listing call returns an account_suspended restriction", async () => {
+    createListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when create_listing returns INTERACTION_BLOCKED with no restriction presentation", async () => {
+    createListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("You are not able to create listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure (regression: SHOP_NOT_FOUND)", async () => {
+    createListingMock.mockResolvedValue({ ok: false, code: "SHOP_NOT_FOUND" });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Please set up your shop first.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("edit mode never renders an Account-status link for an INTERACTION_BLOCKED update_listing failure -- UpdateListingResult carries no restriction field", async () => {
+    updateListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    expect(createListingMock).not.toHaveBeenCalled();
+  });
+
+  it("an orchestrated create-mode form (existingDraftId/ensureListingId provided) never shows the link for an update_listing failure either -- only the dormant standalone create branch ever carries a restriction", async () => {
+    updateListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    const ensureListingId = vi.fn().mockResolvedValue("listing-99");
+    renderForm({ existingDraftId: "listing-99", ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    expect(createListingMock).not.toHaveBeenCalled();
+  });
+});

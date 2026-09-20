@@ -1,6 +1,16 @@
 import { createClient } from "@/lib/supabase/client";
 import type { ListingTypeFilter, FulfillmentMethod } from "@/lib/marketplace/search-params";
 import type { ListingCondition } from "@/components/marketplace/ListingCard";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
+
+/** Shared by createListing and publishListing's own INTERACTION_BLOCKED
+ * interpretation -- account_suspended first, seller_suspended second.
+ * Both RPCs check exactly these two restriction types (confirmed live in
+ * 0082_harden_anonymized_account_mutations.sql: `restriction_type in
+ * ('seller_suspended', 'account_suspended')`) -- buyer_restricted is never
+ * checked by either, so it is deliberately excluded here. */
+const LISTING_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "seller_suspended"];
 
 /**
  * Thin client wrapper around create_listing (0054/0055/0056/0062), mirroring
@@ -118,7 +128,18 @@ export const CREATE_LISTING_ERROR_MESSAGES: ErrorMap<CreateListingErrorCode> = {
 
 export type CreateListingResult =
   | { ok: true; listingId: string; publicCode: string; slug: string; status: string; createdAt: string }
-  | { ok: false; code: CreateListingErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: CreateListingErrorCode | "UNKNOWN";
+      /** Populated only when code is INTERACTION_BLOCKED and the caller's
+       * own current restriction state confirms account_suspended or
+       * seller_suspended -- see interpretInteractionBlocked. Absent for
+       * every other code, for an unrelated deleted-account
+       * INTERACTION_BLOCKED, or when the lookup itself fails; the existing
+       * generic CREATE_LISTING_ERROR_MESSAGES copy is the fallback in all
+       * of those cases. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type CreateListingRpcRow = { listing_id: string; public_code: string; slug: string; status: string; created_at: string };
 
@@ -150,7 +171,9 @@ export async function createListing(input: CreateListingInput): Promise<CreateLi
 
     if (error) {
       console.error("create_listing RPC failed:", error.message);
-      return { ok: false, code: toErrorCode<CreateListingErrorCode>((error as { details?: string }).details, CREATE_LISTING_ERROR_CODES) };
+      const code = toErrorCode<CreateListingErrorCode>((error as { details?: string }).details, CREATE_LISTING_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, LISTING_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as CreateListingRpcRow[])[0];
@@ -538,7 +561,15 @@ export const PUBLISH_LISTING_ERROR_MESSAGES: ErrorMap<PublishListingErrorCode> =
 
 export type PublishListingResult =
   | { ok: true; listingId: string; publicCode: string; slug: string; status: string; publishedAt: string }
-  | { ok: false; code: PublishListingErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: PublishListingErrorCode | "UNKNOWN";
+      /** Same contract as CreateListingResult's own `restriction` field --
+       * populated only when code is INTERACTION_BLOCKED and a
+       * publish-relevant restriction (account_suspended/seller_suspended)
+       * is confirmed. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type PublishListingRpcRow = { listing_id: string; public_code: string; slug: string; status: string; published_at: string };
 
@@ -552,7 +583,9 @@ export async function publishListing(listingId: string): Promise<PublishListingR
 
     if (error) {
       console.error("publish_listing RPC failed:", error.message);
-      return { ok: false, code: toErrorCode<PublishListingErrorCode>((error as { details?: string }).details, PUBLISH_LISTING_ERROR_CODES) };
+      const code = toErrorCode<PublishListingErrorCode>((error as { details?: string }).details, PUBLISH_LISTING_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, LISTING_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as PublishListingRpcRow[])[0];

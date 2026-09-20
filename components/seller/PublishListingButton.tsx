@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   publishListing,
   acceptSellerPolicies,
@@ -10,6 +11,9 @@ import {
 } from "@/lib/seller/listing-actions";
 import { SellerPolicyConsentDialog } from "@/components/seller/SellerPolicyConsentDialog";
 import type { MyListingStatus } from "@/lib/seller/get-my-listing";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+
+type PublishError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   listingId: string;
@@ -42,7 +46,7 @@ type Props = {
 export function PublishListingButton({ listingId, status, isDirty }: Props) {
   const router = useRouter();
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<PublishError | null>(null);
   const [showConsent, setShowConsent] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
@@ -70,7 +74,7 @@ export function PublishListingButton({ listingId, status, isDirty }: Props) {
       return;
     }
 
-    setPublishError(PUBLISH_LISTING_ERROR_MESSAGES[result.code]);
+    setPublishError({ message: PUBLISH_LISTING_ERROR_MESSAGES[result.code], restriction: result.restriction });
   }
 
   async function handleAcceptAndPublish() {
@@ -98,7 +102,7 @@ export function PublishListingButton({ listingId, status, isDirty }: Props) {
     // the consent dialog and surface the actual publish error on the main
     // action, rather than looping back into the dialog again.
     setShowConsent(false);
-    setPublishError(PUBLISH_LISTING_ERROR_MESSAGES[publishResult.code]);
+    setPublishError({ message: PUBLISH_LISTING_ERROR_MESSAGES[publishResult.code], restriction: publishResult.restriction });
   }
 
   function handleCancelConsent() {
@@ -110,7 +114,19 @@ export function PublishListingButton({ listingId, status, isDirty }: Props) {
   return (
     <div>
       {isDirty && <p className="mb-2 text-xs text-ink-muted">Save your Draft changes before publishing.</p>}
-      {publishError && <p className="mb-2 text-sm text-danger">{publishError}</p>}
+      {publishError && (
+        <div className="mb-2">
+          <p className="text-sm text-danger">{publishError.message}</p>
+          {publishError.restriction && (
+            <p className="mt-1 text-sm text-danger">
+              {publishError.restriction.message}{" "}
+              <Link href={publishError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {publishError.restriction.ctaLabel}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
