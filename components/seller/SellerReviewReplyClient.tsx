@@ -2,9 +2,15 @@
 
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { upsertReviewReply, UPSERT_REVIEW_REPLY_ERROR_MESSAGES } from "@/lib/reviews/review-reply-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
 const REPLY_MAX_LENGTH = 1000;
+
+/** Carries an optional restriction presentation whenever a genuine
+ * upsertReviewReply() failure returns one. */
+type ReplyError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   reviewId: string;
@@ -23,7 +29,7 @@ export function SellerReviewReplyClient({ reviewId, initialReplyBody, canWriteRe
   const errorId = useId();
   const [isEditing, setIsEditing] = useState(false);
   const [body, setBody] = useState(initialReplyBody ?? "");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReplyError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasReply = initialReplyBody !== null;
@@ -35,7 +41,7 @@ export function SellerReviewReplyClient({ reviewId, initialReplyBody, canWriteRe
 
     const trimmed = body.trim();
     if (trimmed.length === 0) {
-      setError("Please write a reply before submitting.");
+      setError({ message: "Please write a reply before submitting." });
       return;
     }
     if (bodyTooLong) return;
@@ -45,7 +51,7 @@ export function SellerReviewReplyClient({ reviewId, initialReplyBody, canWriteRe
     setIsSubmitting(false);
 
     if (!result.ok) {
-      setError(UPSERT_REVIEW_REPLY_ERROR_MESSAGES[result.code]);
+      setError({ message: UPSERT_REVIEW_REPLY_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return;
     }
 
@@ -95,7 +101,21 @@ export function SellerReviewReplyClient({ reviewId, initialReplyBody, canWriteRe
       <p id={errorId} className={`text-xs ${bodyTooLong ? "text-danger" : "text-ink-muted"}`}>
         {bodyTooLong ? `Please shorten your reply to ${REPLY_MAX_LENGTH} characters or fewer.` : `${body.length}/${REPLY_MAX_LENGTH}`}
       </p>
-      {error && <p className="text-sm text-danger">{error}</p>}
+      {error && (
+        <>
+          <p className="text-sm text-danger">{error.message}</p>
+          {error.restriction && (
+            <>
+              <p className="mt-1 text-sm text-danger">{error.restriction.message}</p>
+              <p className="mt-1 text-sm text-danger">
+                <Link href={error.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                  {error.restriction.ctaLabel}
+                </Link>
+              </p>
+            </>
+          )}
+        </>
+      )}
       <div className="flex gap-2">
         <button
           type="submit"
