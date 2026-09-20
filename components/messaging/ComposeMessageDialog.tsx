@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { X } from "lucide-react";
 import { handleComposerKeyDown } from "@/lib/messaging/composer-keydown";
 
@@ -10,6 +11,17 @@ type Props = {
   title: string;
   isPending: boolean;
   errorMessage?: string | null;
+  /** Optional, purely generic second line of detail rendered below
+   * errorMessage -- ComposeMessageDialog has no opinion on what it says;
+   * the caller (e.g. ListingActions/ShopMessageAction, for a restriction-
+   * aware failure) supplies the exact text. Independent of errorLink:
+   * either, both, or neither may be supplied. Every existing consumer
+   * that omits both new props renders and behaves exactly as before. */
+  errorDetail?: string;
+  /** Optional, purely generic link rendered after errorMessage/errorDetail
+   * -- ComposeMessageDialog has no opinion on what it links to or why;
+   * the caller supplies the label/href data. */
+  errorLink?: { label: string; href: string };
   onSend: (body: string) => void;
   onClose: () => void;
 };
@@ -29,7 +41,7 @@ type Props = {
  * conversation) or a later one (reuses the existing thread), since that
  * find-or-create logic lives entirely in the RPC itself.
  */
-export function ComposeMessageDialog({ title, isPending, errorMessage, onSend, onClose }: Props) {
+export function ComposeMessageDialog({ title, isPending, errorMessage, errorDetail, errorLink, onSend, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [body, setBody] = useState("");
 
@@ -43,8 +55,13 @@ export function ComposeMessageDialog({ title, isPending, errorMessage, onSend, o
       }
       if (event.key !== "Tab" || !panelRef.current) return;
 
+      // :not([disabled]) on every control that supports the disabled
+      // attribute -- a disabled button/input/etc. is not really part of
+      // the tab sequence (browsers skip it), so the wrap boundaries below
+      // must be computed only from what the caller can actually reach.
+      // [href] links have no disabled semantics, so they're left as-is.
       const focusable = panelRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -119,6 +136,14 @@ export function ComposeMessageDialog({ title, isPending, errorMessage, onSend, o
           </div>
 
           {errorMessage && <p className="mt-3 text-sm text-danger">{errorMessage}</p>}
+          {errorDetail && <p className={errorMessage ? "mt-1 text-sm text-danger" : "mt-3 text-sm text-danger"}>{errorDetail}</p>}
+          {errorLink && (
+            <p className={errorMessage || errorDetail ? "mt-1 text-sm text-danger" : "mt-3 text-sm text-danger"}>
+              <Link href={errorLink.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {errorLink.label}
+              </Link>
+            </p>
+          )}
 
           <div className="mt-5 flex flex-col gap-2.5">
             <button

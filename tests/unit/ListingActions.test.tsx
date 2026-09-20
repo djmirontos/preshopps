@@ -565,3 +565,132 @@ describe("ListingActions -- mobile CTA fix touched styling only, never messaging
     }
   });
 });
+
+describe("ListingActions -- restriction-aware INTERACTION_BLOCKED error on Message Seller (A2.2.2f.1)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "start_conversation") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  async function openComposeAndSend(body = "hi") {
+    fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: body } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  }
+
+  it("a buyer_restricted failure shows the generic message, the specific buying-access message, and a 'View account status' link", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+
+    expect(await screen.findByText("You can't message this seller right now.")).toBeInTheDocument();
+    expect(screen.getByText("Your buying access is currently restricted.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("an account_suspended failure shows the specific account-suspended message and link", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("a generic blocked result (no confirmed restriction) shows only the existing generic message, with no detail and no link", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+
+    expect(await screen.findByText("You can't message this seller right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a non-INTERACTION_BLOCKED failure (e.g. LISTING_NOT_MESSAGEABLE) shows its own message with no restriction link", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "invalid", details: "LISTING_NOT_MESSAGEABLE" } });
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+
+    expect(await screen.findByText("This listing is no longer available to message about.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("retrying after a restriction failure replaces the stale presentation with the new attempt's result", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+    expect(await screen.findByText("Your buying access is currently restricted.")).toBeInTheDocument();
+
+    rpcMock.mockResolvedValue({ data: null, error: { message: "invalid", details: "LISTING_NOT_MESSAGEABLE" } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "hi again" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("This listing is no longer available to message about.")).toBeInTheDocument();
+    expect(screen.queryByText("Your buying access is currently restricted.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a successful retry after a restriction failure clears the error and link entirely", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+    expect(await screen.findByText("Your buying access is currently restricted.")).toBeInTheDocument();
+
+    rpcMock.mockResolvedValue({
+      data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
+      error: null,
+    });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "hi again" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByText("Your buying access is currently restricted.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("closing the dialog after a restriction failure and reopening it never shows the stale message, detail, or link", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+    renderActions({ isAuthenticated: true });
+
+    await openComposeAndSend();
+    expect(await screen.findByText("Your buying access is currently restricted.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Seller" }));
+    expect(screen.queryByText("You can't message this seller right now.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Your buying access is currently restricted.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("desktop/mobile post-success navigation is unaffected by the new restriction-aware wiring", async () => {
+    rpcMock.mockResolvedValue({
+      data: [{ conversation_id: "conv-1", message_id: "msg-1", message_created_at: "2026-01-05T00:00:00.000Z", conversation_created: true }],
+      error: null,
+    });
+    setViewportWidth(DESKTOP_WIDTH);
+    renderActions({ isAuthenticated: true, shopId: "shop-1", listingId: "listing-1" });
+
+    await openComposeAndSend("Still available?");
+
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-1"));
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+});

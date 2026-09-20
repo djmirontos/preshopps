@@ -7,6 +7,7 @@ import { AuthGate } from "@/components/auth/AuthGate";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
 import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import { isDesktopViewport } from "@/lib/ui/viewport";
 
 type Props = {
@@ -15,6 +16,10 @@ type Props = {
   isAuthenticated: boolean;
   isOwnShop: boolean;
 };
+
+/** Carries an optional restriction presentation whenever a genuine
+ * startConversation() failure returns one. */
+type SendError = { message: string; restriction?: InteractionBlockedPresentation };
 
 /**
  * Restrained "Message Seller" action for the shop page (PRD 25.1's general
@@ -29,7 +34,7 @@ export function ShopMessageAction({ shopId, shopSlug, isAuthenticated, isOwnShop
   const [isMessageGateOpen, setIsMessageGateOpen] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<SendError | null>(null);
 
   if (isOwnShop) return null;
 
@@ -41,7 +46,7 @@ export function ShopMessageAction({ shopId, shopSlug, isAuthenticated, isOwnShop
     setIsSending(false);
 
     if (!result.ok) {
-      setSendError(START_CONVERSATION_ERROR_MESSAGES[result.code]);
+      setSendError({ message: START_CONVERSATION_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return;
     }
 
@@ -81,9 +86,17 @@ export function ShopMessageAction({ shopId, shopSlug, isAuthenticated, isOwnShop
         <ComposeMessageDialog
           title="Message Seller"
           isPending={isSending}
-          errorMessage={sendError}
+          errorMessage={sendError?.message}
+          errorDetail={sendError?.restriction?.message}
+          errorLink={sendError?.restriction ? { label: sendError.restriction.ctaLabel, href: sendError.restriction.href } : undefined}
           onSend={handleSend}
-          onClose={() => setIsComposeOpen(false)}
+          onClose={() => {
+            setIsComposeOpen(false);
+            // Closing (Cancel/X/Escape/backdrop) always discards whatever
+            // error this attempt produced -- reopening must never show a
+            // stale restriction message/link from a previous attempt.
+            setSendError(null);
+          }}
         />
       )}
     </>

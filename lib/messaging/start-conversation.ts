@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
 /**
  * Thin client wrapper around the existing public.start_conversation RPC
@@ -12,6 +14,17 @@ import { createClient } from "@/lib/supabase/client";
  * client-supplied initiator/sender id -- auth.uid() is the sole identity
  * source inside the RPC.
  */
+
+/** The caller of start_conversation is always the buyer/initiator role --
+ * confirmed directly against the RPC's own live definition (0040): its own
+ * restriction check (account_suspended/buyer_restricted on auth.uid()
+ * itself) fires before the separate, never-surfaced check against the
+ * shop owner (seller_suspended/account_suspended) -- so a confirmed match
+ * here is always the true cause, never a misattributed guess. seller_
+ * suspended is deliberately excluded: it describes the seller (the other
+ * participant), never the caller, and must never be looked up or shown
+ * to a buyer regardless of what restriction the buyer happens to have. */
+const BUYER_START_CONVERSATION_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
 
 type ErrorMap<Code extends string> = Record<Code | "UNKNOWN", string>;
 
@@ -53,7 +66,18 @@ export const START_CONVERSATION_ERROR_MESSAGES: ErrorMap<StartConversationErrorC
 
 export type StartConversationResult =
   | { ok: true; conversationId: string; conversationCreated: boolean }
-  | { ok: false; code: StartConversationErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: StartConversationErrorCode | "UNKNOWN";
+      /** Populated only when code is INTERACTION_BLOCKED and the caller's
+       * own current restriction state confirms account_suspended or
+       * buyer_restricted -- see interpretInteractionBlocked. Absent for
+       * every other code, for an unrelated seller-restriction/deleted-
+       * seller/block collision, or when the lookup itself fails; the
+       * existing generic START_CONVERSATION_ERROR_MESSAGES copy is the
+       * fallback in all of those cases. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type StartConversationRpcRow = {
   conversation_id: string;
@@ -74,7 +98,9 @@ export async function startConversation(shopId: string, body: string, listingId?
 
     if (error) {
       console.error("start_conversation RPC failed:", error.message);
-      return { ok: false, code: toErrorCode((error as { details?: string }).details) };
+      const code = toErrorCode((error as { details?: string }).details);
+      const restriction = await interpretInteractionBlocked(code, BUYER_START_CONVERSATION_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as StartConversationRpcRow[])[0];

@@ -9,6 +9,7 @@ import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialo
 import { ReportButton } from "@/components/moderation/ReportButton";
 import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import { isDesktopViewport } from "@/lib/ui/viewport";
 import { cn } from "@/lib/cn";
 import type { ListingStatus } from "@/lib/marketplace/listing-detail";
@@ -43,6 +44,10 @@ const UNAVAILABLE_NOTES: Partial<Record<ListingStatus, string>> = {
   archived: "This listing is archived and no longer available.",
 };
 
+/** Carries an optional restriction presentation whenever a genuine
+ * startConversation() failure returns one. */
+type SendError = { message: string; restriction?: InteractionBlockedPresentation };
+
 /**
  * Add to Cart is real (set_cart_item_quantity / local guest cart, see
  * components/cart/AddToCartButton.tsx) -- a guest adds directly, no auth
@@ -71,7 +76,7 @@ export function ListingActions({
   const [isMessageGateOpen, setIsMessageGateOpen] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<SendError | null>(null);
   const [isBuyNowGateOpen, setIsBuyNowGateOpen] = useState(false);
   const [isBuyNowOpen, setIsBuyNowOpen] = useState(false);
 
@@ -101,7 +106,7 @@ export function ListingActions({
     setIsSending(false);
 
     if (!result.ok) {
-      setSendError(START_CONVERSATION_ERROR_MESSAGES[result.code]);
+      setSendError({ message: START_CONVERSATION_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return;
     }
 
@@ -184,9 +189,17 @@ export function ListingActions({
         <ComposeMessageDialog
           title="Message Seller"
           isPending={isSending}
-          errorMessage={sendError}
+          errorMessage={sendError?.message}
+          errorDetail={sendError?.restriction?.message}
+          errorLink={sendError?.restriction ? { label: sendError.restriction.ctaLabel, href: sendError.restriction.href } : undefined}
           onSend={handleSend}
-          onClose={() => setIsComposeOpen(false)}
+          onClose={() => {
+            setIsComposeOpen(false);
+            // Closing (Cancel/X/Escape/backdrop) always discards whatever
+            // error this attempt produced -- reopening must never show a
+            // stale restriction message/link from a previous attempt.
+            setSendError(null);
+          }}
         />
       )}
 
