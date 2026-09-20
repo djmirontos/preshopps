@@ -15,6 +15,7 @@ import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerPr
 import { isDesktopViewport } from "@/lib/ui/viewport";
 import { getConversationForShopOrder } from "@/lib/messaging/get-conversation-for-shop-order";
 import { startConversationFromOrder, START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES } from "@/lib/messaging/start-conversation-from-order";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import { FULFILLMENT_LABELS } from "@/lib/marketplace/search-params";
 import {
   getSellerOrderStatusGuidance,
@@ -44,6 +45,10 @@ type Props = {
 
 type DialogKind = "decline" | "cancel_accepted" | "resolve_approve" | "resolve_reject" | "mark_ready" | "mark_handed_over_or_shipped" | null;
 
+/** Carries an optional restriction presentation whenever a genuine
+ * startConversationFromOrder() failure returns one. */
+type ComposeError = { message: string; restriction?: InteractionBlockedPresentation };
+
 /**
  * All lifecycle mutation is driven by the centralized
  * getAllowedSellerActions model (lib/orders/order-status-copy.ts) -- this
@@ -72,7 +77,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isMessageBuyerComposeOpen, setIsMessageBuyerComposeOpen] = useState(false);
   const [isSendingFirstMessage, setIsSendingFirstMessage] = useState(false);
-  const [composeError, setComposeError] = useState<string | null>(null);
+  const [composeError, setComposeError] = useState<ComposeError | null>(null);
 
   if (initialOrder !== prevInitialOrder) {
     setPrevInitialOrder(initialOrder);
@@ -230,7 +235,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     setIsSendingFirstMessage(false);
 
     if (!result.ok) {
-      setComposeError(START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES[result.code]);
+      setComposeError({ message: START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return;
     }
 
@@ -548,7 +553,9 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
         <ComposeMessageDialog
           title="Message Buyer"
           isPending={isSendingFirstMessage}
-          errorMessage={composeError}
+          errorMessage={composeError?.message}
+          errorDetail={composeError?.restriction?.message}
+          errorLink={composeError?.restriction ? { label: composeError.restriction.ctaLabel, href: composeError.restriction.href } : undefined}
           onSend={handleSendFirstMessage}
           onClose={() => {
             setIsMessageBuyerComposeOpen(false);

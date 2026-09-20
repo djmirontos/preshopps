@@ -907,6 +907,122 @@ describe("SellerOrderDetailClient -- persistent Message Buyer action", () => {
   });
 });
 
+describe("SellerOrderDetailClient -- restriction-aware INTERACTION_BLOCKED error on Message Buyer (A2.2.2f.2)", () => {
+  async function openComposeAndSend(body = "hi") {
+    getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: null });
+    render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: body } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    return dialog;
+  }
+
+  it("a seller_suspended failure shows the generic message, the specific selling-access message, and a 'View account status' link", async () => {
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    const dialog = await openComposeAndSend();
+
+    expect(await within(dialog).findByText("You can't message this buyer right now.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("an account_suspended failure shows the specific account-suspended message and link", async () => {
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    const dialog = await openComposeAndSend();
+
+    expect(await within(dialog).findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("a generic blocked result (no confirmed restriction) shows only the existing generic message, with no detail and no link", async () => {
+    startConversationFromOrderMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+
+    const dialog = await openComposeAndSend();
+
+    expect(await within(dialog).findByText("You can't message this buyer right now.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("retrying after a restriction failure replaces the stale presentation with the new attempt's result", async () => {
+    startConversationFromOrderMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    const dialog = await openComposeAndSend();
+    expect(await within(dialog).findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    startConversationFromOrderMock.mockResolvedValueOnce({ ok: false, code: "MESSAGE_TOO_LONG" });
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "hi again" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    expect(await within(dialog).findByText("Messages can be up to 4000 characters.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a successful retry after a restriction failure clears the error and link entirely, and navigation proceeds as normal", async () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    startConversationFromOrderMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    const dialog = await openComposeAndSend();
+    expect(await within(dialog).findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    startConversationFromOrderMock.mockResolvedValueOnce({
+      ok: true,
+      conversationId: "conv-2",
+      messageId: "msg-1",
+      createdAt: "2026-01-05T00:00:00.000Z",
+      conversationCreated: true,
+    });
+    fireEvent.change(within(dialog).getByLabelText("Message"), { target: { value: "hi again" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(openConversationMock).toHaveBeenCalledWith("conv-2"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("closing the dialog after a restriction failure and reopening it never shows the stale message, detail, or link", async () => {
+    startConversationFromOrderMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    const dialog = await openComposeAndSend();
+    expect(await within(dialog).findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+    const reopened = await screen.findByRole("dialog");
+    expect(within(reopened).queryByText("You can't message this buyer right now.")).not.toBeInTheDocument();
+    expect(within(reopened).queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(within(reopened).queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+});
+
 /** Exact-token class check (not substring) -- a substring check like
  * `className.toContain("h-12")` would false-positive on `min-h-12` (which
  * legitimately contains "h-12" as a trailing substring), so this splits on
