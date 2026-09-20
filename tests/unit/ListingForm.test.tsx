@@ -1342,7 +1342,73 @@ describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2b, d
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 
-  it("edit mode never renders an Account-status link for an INTERACTION_BLOCKED update_listing failure -- UpdateListingResult carries no restriction field", async () => {
+});
+
+describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2c, live update_listing paths)", () => {
+  it("true edit mode: shows the selling-access message and link when update_listing returns a seller_suspended restriction", async () => {
+    updateListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    expect(createListingMock).not.toHaveBeenCalled();
+  });
+
+  it("true edit mode: shows the account-suspended message and link when update_listing returns an account_suspended restriction", async () => {
+    updateListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("orchestrated create-flow draft update (existingDraftId/ensureListingId already resolved) renders the same restriction message and link", async () => {
+    updateListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderForm({ existingDraftId: "listing-99" });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    expect(createListingMock).not.toHaveBeenCalled();
+  });
+
+  it("orchestrated create-flow draft update via a freshly-resolved ensureListingId also renders the restriction message and link", async () => {
+    updateListingMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    const ensureListingId = vi.fn().mockResolvedValue("listing-99");
+    renderForm({ ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("edit mode: shows only the existing generic error, with no link, when update_listing returns INTERACTION_BLOCKED with no restriction presentation", async () => {
     updateListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
     renderEditForm();
 
@@ -1351,19 +1417,58 @@ describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2b, d
 
     expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
-    expect(createListingMock).not.toHaveBeenCalled();
   });
 
-  it("an orchestrated create-mode form (existingDraftId/ensureListingId provided) never shows the link for an update_listing failure either -- only the dormant standalone create branch ever carries a restriction", async () => {
-    updateListingMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
-    const ensureListingId = vi.fn().mockResolvedValue("listing-99");
-    renderForm({ existingDraftId: "listing-99", ensureListingId });
+  it("edit mode: shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure (regression: LISTING_NOT_DRAFT)", async () => {
+    updateListingMock.mockResolvedValue({ ok: false, code: "LISTING_NOT_DRAFT" });
+    renderEditForm();
 
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
-    expect(createListingMock).not.toHaveBeenCalled();
+  });
+
+  it("a stale restriction presentation from a prior failed attempt is cleared once the next attempt succeeds", async () => {
+    updateListingMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    updateListingMock.mockResolvedValueOnce({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Draft saved")).toBeInTheDocument();
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a stale restriction presentation from a prior failed attempt is replaced (not merged) by a later, different failure", async () => {
+    updateListingMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditForm();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    updateListingMock.mockResolvedValueOnce({ ok: false, code: "LISTING_NOT_DRAFT" });
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 });

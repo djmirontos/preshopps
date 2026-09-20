@@ -4,12 +4,15 @@ import type { ListingCondition } from "@/components/marketplace/ListingCard";
 import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
-/** Shared by createListing and publishListing's own INTERACTION_BLOCKED
- * interpretation -- account_suspended first, seller_suspended second.
- * Both RPCs check exactly these two restriction types (confirmed live in
- * 0082_harden_anonymized_account_mutations.sql: `restriction_type in
+/** Shared by createListing, updateListing, replaceListingImages, and
+ * publishListing's own INTERACTION_BLOCKED interpretation -- account_suspended
+ * first, seller_suspended second. All four RPCs check exactly these two
+ * restriction types (confirmed live in their own current migrations --
+ * 0090_fix_update_listing_listing_id_ambiguity.sql and
+ * 0085_fix_replace_listing_images_ambiguity.sql are the latest redefinitions
+ * for update_listing/replace_listing_images: `restriction_type in
  * ('seller_suspended', 'account_suspended')`) -- buyer_restricted is never
- * checked by either, so it is deliberately excluded here. */
+ * checked by any of them, so it is deliberately excluded here. */
 const LISTING_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "seller_suspended"];
 
 /**
@@ -344,7 +347,14 @@ export const UPDATE_LISTING_ERROR_MESSAGES: ErrorMap<UpdateListingErrorCode> = {
 
 export type UpdateListingResult =
   | { ok: true; listingId: string; publicCode: string; slug: string; status: string; updatedAt: string }
-  | { ok: false; code: UpdateListingErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: UpdateListingErrorCode | "UNKNOWN";
+      /** Same contract as CreateListingResult's own `restriction` field --
+       * populated only when code is INTERACTION_BLOCKED and an edit-relevant
+       * restriction (account_suspended/seller_suspended) is confirmed. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type UpdateListingRpcRow = { listing_id: string; public_code: string; slug: string; status: string; updated_at: string };
 
@@ -359,7 +369,9 @@ export async function updateListing(listingId: string, patch: UpdateListingPatch
 
     if (error) {
       console.error("update_listing RPC failed:", error.message);
-      return { ok: false, code: toErrorCode<UpdateListingErrorCode>((error as { details?: string }).details, UPDATE_LISTING_ERROR_CODES) };
+      const code = toErrorCode<UpdateListingErrorCode>((error as { details?: string }).details, UPDATE_LISTING_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, LISTING_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as UpdateListingRpcRow[])[0];
@@ -428,7 +440,14 @@ export const REPLACE_LISTING_IMAGES_ERROR_MESSAGES: ErrorMap<ReplaceListingImage
 
 export type ReplaceListingImagesResult =
   | { ok: true; listingId: string; imageCount: number; coverImageId: string | null }
-  | { ok: false; code: ReplaceListingImagesErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: ReplaceListingImagesErrorCode | "UNKNOWN";
+      /** Same contract as CreateListingResult's own `restriction` field --
+       * populated only when code is INTERACTION_BLOCKED and an edit-relevant
+       * restriction (account_suspended/seller_suspended) is confirmed. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type ReplaceListingImagesRpcRow = { listing_id: string; image_count: number; cover_image_id: string | null };
 
@@ -448,10 +467,9 @@ export async function replaceListingImages(
 
     if (error) {
       console.error("replace_listing_images RPC failed:", error.message);
-      return {
-        ok: false,
-        code: toErrorCode<ReplaceListingImagesErrorCode>((error as { details?: string }).details, REPLACE_LISTING_IMAGES_ERROR_CODES),
-      };
+      const code = toErrorCode<ReplaceListingImagesErrorCode>((error as { details?: string }).details, REPLACE_LISTING_IMAGES_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, LISTING_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as ReplaceListingImagesRpcRow[])[0];

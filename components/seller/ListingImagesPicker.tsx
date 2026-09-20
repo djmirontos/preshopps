@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowLeft, ArrowRight, ImagePlus, Loader2, RotateCcw, X } from "lucide-react";
 import { uploadImage, deleteUploadedImage, UPLOAD_IMAGE_ERROR_MESSAGES, type UploadImageErrorCode } from "@/lib/image-processing/upload-image";
 import { replaceListingImages, REPLACE_LISTING_IMAGES_ERROR_MESSAGES } from "@/lib/seller/listing-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import type { ListingTypeFilter } from "@/lib/marketplace/search-params";
 
 const MAX_IMAGES = 8;
+
+/** Carries an optional restriction presentation whenever a genuine
+ * replace_listing_images() failure returns one -- the ensureListingId-null
+ * fallback (below, in startUpload) never populates it, since that lookup
+ * discards the real upstream cause. */
+type SubmitError = { message: string; restriction?: InteractionBlockedPresentation };
 
 /** Same shape as MyListingImage (lib/seller/get-my-listing.ts) plus a
  * pre-resolved display `url` -- resolving storage_path -> a public URL is
@@ -167,7 +175,7 @@ export function ListingImagesPicker({
   const slotsRef = useRef<Slot[]>(slots);
   const [committedPaths, setCommittedPaths] = useState<string[]>(() => initialImages.map((image) => image.storagePath));
   const [isPersisting, setIsPersisting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<SubmitError | null>(null);
   // Own local cache of the resolved id, separate from the `listingId` prop:
   // once ensureListingId() resolves (or the edit page's own non-null prop
   // seeds it immediately via this initializer), every later action keeps
@@ -244,7 +252,7 @@ export function ListingImagesPicker({
     setIsPersisting(false);
 
     if (!result.ok) {
-      setSubmitError(REPLACE_LISTING_IMAGES_ERROR_MESSAGES[result.code]);
+      setSubmitError({ message: REPLACE_LISTING_IMAGES_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return false;
     }
 
@@ -283,7 +291,7 @@ export function ListingImagesPicker({
   async function startUpload(localId: string, file: File) {
     const id = await resolveListingId();
     if (!id) {
-      setSubmitError("Couldn't start your listing. Please try again.");
+      setSubmitError({ message: "Couldn't start your listing. Please try again." });
       // No genuine UploadImageErrorCode applies here -- uploadImage() was
       // never called -- so this slot gets its own "draft_error" status
       // rather than borrowing "error"/UPLOAD_FAILED, which would falsely
@@ -514,7 +522,19 @@ export function ListingImagesPicker({
       {firstUploadError && (
         <p className="mt-2 text-xs text-danger">{UPLOAD_IMAGE_ERROR_MESSAGES[firstUploadError.errorCode as UploadImageErrorCode]}</p>
       )}
-      {submitError && <p className="mt-2 text-xs text-danger">{submitError}</p>}
+      {submitError && (
+        <div className="mt-2">
+          <p className="text-xs text-danger">{submitError.message}</p>
+          {submitError.restriction && (
+            <p className="mt-1 text-xs text-danger">
+              {submitError.restriction.message}{" "}
+              <Link href={submitError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {submitError.restriction.ctaLabel}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

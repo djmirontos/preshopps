@@ -648,3 +648,95 @@ describe("ListingImagesPicker -- onPhotosReadyChange (live publish-completeness 
     expect(() => renderPicker({ initialImages: [] })).not.toThrow();
   });
 });
+
+describe("ListingImagesPicker -- restriction-aware INTERACTION_BLOCKED error (A2.2.2c)", () => {
+  it("shows the selling-access message and a 'View account status' link when replace_listing_images returns a seller_suspended restriction", async () => {
+    replaceListingImagesMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderPicker({ initialImages: [image({ id: "img-1", position: 0 })] });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the account-suspended message and link when replace_listing_images returns an account_suspended restriction", async () => {
+    replaceListingImagesMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderPicker({ initialImages: [image({ id: "img-1", position: 0 })] });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic error, with no link, when replace_listing_images returns INTERACTION_BLOCKED with no restriction presentation", async () => {
+    replaceListingImagesMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    renderPicker({ initialImages: [image({ id: "img-1", position: 0 })] });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows only the existing generic error, with no link, for a non-INTERACTION_BLOCKED failure (regression: TOO_MANY_LISTING_IMAGES)", async () => {
+    replaceListingImagesMock.mockResolvedValue({ ok: false, code: "TOO_MANY_LISTING_IMAGES" });
+    renderPicker({ initialImages: [image({ id: "img-1", position: 0 })] });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+
+    expect(await screen.findByText("A listing may have at most 8 photos.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a stale restriction presentation from a prior failed replace is cleared once the next attempt succeeds", async () => {
+    replaceListingImagesMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderPicker({
+      initialImages: [image({ id: "img-1", position: 0 }), image({ id: "img-2", storagePath: "listing-images/owner-1/listing-1/b.jpg", position: 1 })],
+    });
+
+    fireEvent.click(screen.getByLabelText("Remove image 1"));
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    replaceListingImagesMock.mockResolvedValueOnce(SUCCESS_RESULT);
+    fireEvent.click(screen.getByLabelText("Move image 1 right"));
+
+    await waitFor(() => expect(replaceListingImagesMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("draft-creation failures (draft_error) still never show 'Upload failed', unaffected by the new restriction-aware replace_listing_images wiring", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue(null);
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    expect(await screen.findByText("Couldn't start your listing. Please try again.")).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed. Please try again.")).not.toBeInTheDocument();
+    expect(replaceListingImagesMock).not.toHaveBeenCalled();
+  });
+
+  it("a genuine uploadImage() UPLOAD_FAILED still shows 'Upload failed', unaffected by the new restriction-aware replace_listing_images wiring", async () => {
+    uploadImageMock.mockResolvedValue({ ok: false, code: "UPLOAD_FAILED" });
+    renderPicker();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    expect(await screen.findByText("Upload failed. Please try again.")).toBeInTheDocument();
+    expect(replaceListingImagesMock).not.toHaveBeenCalled();
+  });
+});

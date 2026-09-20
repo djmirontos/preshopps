@@ -175,12 +175,12 @@ type FieldErrors = {
   stockQuantity?: string;
 };
 
-/** Carries an optional restriction presentation only when this submit went
- * through the standalone create_listing branch below and it returned one
- * -- the update_listing branch (true edit mode, or an orchestrated
- * create-mode form that already has a draft) never populates `restriction`
- * at all, since UpdateListingResult itself carries no such field; this
- * type only needs to be wide enough to hold it when present. */
+/** Carries an optional restriction presentation whenever either the
+ * standalone create_listing branch or the update_listing branch (true edit
+ * mode, or an orchestrated create-mode form that already has a draft)
+ * returns one -- both CreateListingResult and UpdateListingResult carry the
+ * same optional `restriction` field, populated only for a confirmed
+ * account_suspended/seller_suspended INTERACTION_BLOCKED. */
 type SubmitError = { message: string; restriction?: InteractionBlockedPresentation };
 
 function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): boolean {
@@ -537,11 +537,12 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
     setIsSubmitting(false);
 
     if (!result.ok) {
-      // update_listing's own result never carries a restriction
-      // presentation (out of scope for this task -- see UpdateListingResult)
-      // -- this branch always shows the existing generic message only,
-      // for both true edit mode and an orchestrated create-mode form.
-      setSubmitError({ message: UPDATE_LISTING_ERROR_MESSAGES[result.code] });
+      // Covers both true edit mode and an orchestrated create-mode form
+      // (Save Draft against an already-existing auto-draft) -- both go
+      // through update_listing, and both now surface a restriction-aware
+      // Account-status link when result.restriction is confirmed, exactly
+      // like the standalone createListing branch above.
+      setSubmitError({ message: UPDATE_LISTING_ERROR_MESSAGES[result.code], restriction: result.restriction });
       return { ok: false };
     }
 
