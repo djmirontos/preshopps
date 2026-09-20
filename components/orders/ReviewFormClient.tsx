@@ -2,12 +2,19 @@
 
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { StarRatingInput } from "@/components/reviews/StarRatingInput";
 import { ReviewImagePicker } from "@/components/orders/ReviewImagePicker";
 import { createReview, updateReview, CREATE_REVIEW_ERROR_MESSAGES, UPDATE_REVIEW_ERROR_MESSAGES } from "@/lib/reviews/review-actions";
 import { deleteUploadedImage } from "@/lib/image-processing/upload-image";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
 const BODY_MAX_LENGTH = 1000;
+
+/** Carries an optional restriction presentation whenever a genuine
+ * createReview() failure returns one -- edit mode (updateReview) never
+ * populates this, since UpdateReviewResult has no restriction field. */
+type SubmitError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   mode: "create" | "edit";
@@ -73,7 +80,7 @@ export function ReviewFormClient({
   const [imagePaths, setImagePaths] = useState<string[]>(initialImagePaths);
   const [imagesUploading, setImagesUploading] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<SubmitError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const bodyTooLong = body.length > BODY_MAX_LENGTH;
@@ -110,7 +117,7 @@ export function ReviewFormClient({
       const result = await createReview(orderId, rating, bodyToSend, imagePaths);
       setIsSubmitting(false);
       if (!result.ok) {
-        setSubmitError(CREATE_REVIEW_ERROR_MESSAGES[result.code]);
+        setSubmitError({ message: CREATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
         await cleanUpNewlyUploadedImages(imagePaths);
         return;
       }
@@ -118,7 +125,7 @@ export function ReviewFormClient({
       const result = await updateReview(reviewId as string, rating, bodyToSend, imagePaths);
       setIsSubmitting(false);
       if (!result.ok) {
-        setSubmitError(UPDATE_REVIEW_ERROR_MESSAGES[result.code]);
+        setSubmitError({ message: UPDATE_REVIEW_ERROR_MESSAGES[result.code] });
         await cleanUpNewlyUploadedImages(imagePaths);
         return;
       }
@@ -185,7 +192,21 @@ export function ReviewFormClient({
         onUploadingChange={setImagesUploading}
       />
 
-      {submitError && <p className="text-sm text-danger">{submitError}</p>}
+      {submitError && (
+        <>
+          <p className="text-sm text-danger">{submitError.message}</p>
+          {submitError.restriction && (
+            <>
+              <p className="mt-1 text-sm text-danger">{submitError.restriction.message}</p>
+              <p className="mt-1 text-sm text-danger">
+                <Link href={submitError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                  {submitError.restriction.ctaLabel}
+                </Link>
+              </p>
+            </>
+          )}
+        </>
+      )}
 
       <button
         type="submit"

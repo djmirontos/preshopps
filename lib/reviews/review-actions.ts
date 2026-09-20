@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
 /**
  * Thin client wrappers around the existing buyer review RPCs (create_review,
@@ -8,6 +10,21 @@ import { createClient } from "@/lib/supabase/client";
  * source) to safe, non-technical copy. Buyer identity is always derived by
  * the RPC from auth.uid(); no buyer/shop id is ever sent from the client.
  */
+
+/** create_review's own live definition (0065) checks mutual block (both
+ * directions) BEFORE the caller's own restriction check -- so when a block
+ * and a caller restriction both exist, the block can be the actual
+ * proximate cause of this specific INTERACTION_BLOCKED even though the
+ * post-error self-lookup below still confirms a real, currently-active
+ * restriction on the caller. The confirmed restriction is always a true
+ * fact about the caller's own current status; it is never treated as proof
+ * of which check inside the RPC actually fired for this attempt. Copy
+ * derived from this array must stay self-facing and non-causal for exactly
+ * that reason. seller_suspended is deliberately excluded: create_review
+ * never checks the seller's own restriction at all (a locked, buyer-only
+ * check per the RPC's own comment), so it is never relevant here and must
+ * never be looked up or shown to a buyer. */
+const BUYER_CREATE_REVIEW_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
 
 type ErrorMap<Code extends string> = Record<Code | "UNKNOWN", string>;
 
@@ -60,7 +77,20 @@ export const CREATE_REVIEW_ERROR_MESSAGES: ErrorMap<CreateReviewErrorCode> = {
 
 export type CreateReviewResult =
   | { ok: true; reviewId: string; createdAt: string }
-  | { ok: false; code: CreateReviewErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: CreateReviewErrorCode | "UNKNOWN";
+      /** Populated only when code is INTERACTION_BLOCKED and the caller's
+       * own current restriction state confirms account_suspended or
+       * buyer_restricted -- see interpretInteractionBlocked and this
+       * module's own header comment on BUYER_CREATE_REVIEW_RELEVANT_
+       * RESTRICTIONS for why this is a true self-status fact, never proof
+       * of causation. Absent for every other code, for a mutual-block-only
+       * collision, or when the lookup itself fails; the existing generic
+       * CREATE_REVIEW_ERROR_MESSAGES copy is the fallback in all of those
+       * cases. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type CreateReviewRpcRow = { review_id: string; created_at: string };
 
@@ -82,7 +112,9 @@ export async function createReview(
 
     if (error) {
       console.error("create_review RPC failed:", error.message);
-      return { ok: false, code: toErrorCode<CreateReviewErrorCode>((error as { details?: string }).details, CREATE_REVIEW_ERROR_CODES) };
+      const code = toErrorCode<CreateReviewErrorCode>((error as { details?: string }).details, CREATE_REVIEW_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, BUYER_CREATE_REVIEW_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as CreateReviewRpcRow[])[0];
