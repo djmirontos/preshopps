@@ -27,7 +27,12 @@ type NewSlot = {
   localId: string;
   file: File;
   previewUrl: string;
-  status: "compressing" | "uploading" | "uploaded" | "error";
+  /** "draft_error" is distinct from "error": it means resolveListingId()
+   * itself failed (no draft id could be obtained), so uploadImage() was
+   * never even attempted -- there is no genuine UploadImageErrorCode to
+   * report. "error" remains reserved for a real uploadImage() failure.
+   * Kept separate so the slot never falsely claims "Upload failed." */
+  status: "compressing" | "uploading" | "uploaded" | "error" | "draft_error";
   path?: string;
   errorCode?: UploadImageErrorCode;
   isReferenceImage: boolean;
@@ -279,9 +284,13 @@ export function ListingImagesPicker({
     const id = await resolveListingId();
     if (!id) {
       setSubmitError("Couldn't start your listing. Please try again.");
+      // No genuine UploadImageErrorCode applies here -- uploadImage() was
+      // never called -- so this slot gets its own "draft_error" status
+      // rather than borrowing "error"/UPLOAD_FAILED, which would falsely
+      // claim the upload itself failed.
       setSlots(
         slotsRef.current.map((slot) =>
-          slot.kind === "new" && slot.localId === localId ? { ...slot, status: "error", errorCode: "UPLOAD_FAILED" } : slot,
+          slot.kind === "new" && slot.localId === localId ? { ...slot, status: "draft_error", errorCode: undefined } : slot,
         ),
       );
       return;
@@ -388,7 +397,10 @@ export function ListingImagesPicker({
         {slots.map((slot, index) => {
           const previewUrl = slot.kind === "existing" ? slot.url : slot.previewUrl;
           const busySlot = isUploading(slot);
-          const isError = slot.kind === "new" && slot.status === "error";
+          // "draft_error" is retryable exactly like a genuine "error" tile
+          // -- only the adjacent firstUploadError message (below) treats
+          // them differently.
+          const isError = slot.kind === "new" && (slot.status === "error" || slot.status === "draft_error");
           const isCover = index === 0;
           const key = slot.kind === "existing" ? slot.id : slot.localId;
 

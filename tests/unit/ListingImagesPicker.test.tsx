@@ -480,6 +480,57 @@ describe("ListingImagesPicker -- null listingId + ensureListingId (initial Creat
     expect(() => selectFile(screen.getByLabelText("Add a listing photo"))).not.toThrow();
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
+
+  it("a pre-upload draft-creation failure (ensureListingId resolves null) never claims 'Upload failed' -- only the picker's own message shows, alongside a working Retry", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue(null);
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    expect(await screen.findByText("Couldn't start your listing. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText("Upload failed. Please try again.")).not.toBeInTheDocument();
+    expect(uploadImageMock).not.toHaveBeenCalled();
+    expect(replaceListingImagesMock).not.toHaveBeenCalled();
+  });
+
+  it("Retry after a pre-upload draft-creation failure re-attempts ensureListingId (a transient recovery), and only proceeds to uploadImage once a real id is resolved", async () => {
+    const ensureListingId = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce("new-listing-1");
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/new-listing-1/new.jpg" });
+    renderPicker({ listingId: null, ensureListingId, initialImages: [] });
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+    await screen.findByText("Couldn't start your listing. Please try again.");
+    expect(uploadImageMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await waitFor(() => expect(ensureListingId).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(uploadImageMock).toHaveBeenCalledWith("listing-images", "owner-1", "new-listing-1", expect.any(File), expect.any(Function)),
+    );
+    await waitFor(() =>
+      expect(replaceListingImagesMock).toHaveBeenCalledWith("new-listing-1", ["listing-images/owner-1/new-listing-1/new.jpg"], [false]),
+    );
+  });
+
+  it("a genuine uploadImage() failure (real listing id already known) still shows 'Upload failed' and keeps its own Retry behavior unchanged", async () => {
+    uploadImageMock.mockResolvedValue({ ok: false, code: "UPLOAD_FAILED" });
+    renderPicker();
+
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    expect(await screen.findByText("Upload failed. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(replaceListingImagesMock).not.toHaveBeenCalled();
+
+    uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/owner-1/listing-1/retry.jpg" });
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await waitFor(() =>
+      expect(replaceListingImagesMock).toHaveBeenCalledWith("listing-1", ["listing-images/owner-1/listing-1/retry.jpg"], [false]),
+    );
+  });
 });
 
 describe("ListingImagesPicker -- scope / accessibility", () => {
