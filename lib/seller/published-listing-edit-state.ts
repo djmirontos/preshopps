@@ -1,6 +1,28 @@
 import type { ListingTypeFilter, FulfillmentMethod } from "@/lib/marketplace/search-params";
 import type { ListingCondition } from "@/components/marketplace/ListingCard";
 import type { MyListingStatus, MyListingImage, MyListingVehicleDetails, MyListingRentalDetails } from "@/lib/seller/get-my-listing";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/select-interaction-blocked-presentation";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
+
+/** Shared by both getPublishedListingEditState wrappers (server and
+ * browser) and by updatePublishedListing's own INTERACTION_BLOCKED
+ * interpretation -- account_suspended first, seller_suspended second.
+ * Both get_published_listing_edit_state and update_published_listing
+ * (0094_published_listing_editing.sql) check exactly these two
+ * restriction types (`restriction_type in ('seller_suspended',
+ * 'account_suspended')`) -- buyer_restricted is never checked by either,
+ * so it is deliberately excluded here.
+ *
+ * Deliberately its own constant, not imported from lib/seller/listing-
+ * actions.ts's own identically-valued LISTING_RELEVANT_RESTRICTIONS: that
+ * module imports the browser Supabase client, and this module must stay
+ * import-free of either Supabase client (see this file's own header and
+ * published-listing-edit-state-boundary-architecture.test.ts) so the
+ * server-safe loader can keep depending on it without ever pulling in
+ * browser-client code. The two values must be kept in sync by hand if
+ * either ever changes -- both are extremely unlikely to change (they
+ * mirror what four other listing RPCs already check identically). */
+export const PUBLISHED_LISTING_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "seller_suspended"];
 
 /**
  * The get_published_listing_edit_state / update_published_listing response
@@ -195,7 +217,19 @@ export type GetPublishedListingEditStateResult =
   | { status: "not_found" }
   | { status: "not_editable" }
   | { status: "not_authenticated" }
-  | { status: "interaction_blocked" }
+  | {
+      status: "interaction_blocked";
+      /** Populated only by each context-appropriate wrapper (server or
+       * browser), after this pure mapper has already returned -- never
+       * set here, since attaching it would require a restriction-lookup
+       * RPC call this module must never make (see this file's own header:
+       * no Supabase client, no side effects). Absent for an unrelated
+       * deleted-account collision or a failed lookup; the generic
+       * "Unable to load this listing right now." copy is the fallback in
+       * both of those cases, same as every other INTERACTION_BLOCKED
+       * surface in this codebase. */
+      restriction?: InteractionBlockedPresentation;
+    }
   | { status: "error" };
 
 /**

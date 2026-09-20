@@ -560,7 +560,7 @@ describe("SellListingEditPage", () => {
       expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
     });
 
-    it("shows the generic unable-to-load message for interaction_blocked from the published loader", async () => {
+    it("shows the generic unable-to-load message for interaction_blocked from the published loader when no restriction is confirmed (e.g. a deleted/unavailable-account collision or a failed lookup)", async () => {
       getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
       getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
       getPublishedListingEditStateMock.mockResolvedValue({ status: "interaction_blocked" });
@@ -568,6 +568,73 @@ describe("SellListingEditPage", () => {
       render(await SellListingEditPage({ params: params("listing-1") }));
 
       expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    });
+
+    it("shows the specific selling-access message and a 'View account status' link alongside the generic copy when seller_suspended is confirmed", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({
+        status: "interaction_blocked",
+        restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText(/unable to load this listing/i)).toBeInTheDocument();
+      expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    });
+
+    it("shows the specific account-suspended message and link when account_suspended is confirmed", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "paused" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({
+        status: "interaction_blocked",
+        restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByText("Your account is currently suspended.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    });
+
+    it("never renders PublishedListingEditor when the initial load is blocked, restriction confirmed or not", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({
+        status: "interaction_blocked",
+        restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+      });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /save changes/i })).not.toBeInTheDocument();
+    });
+
+    it("LISTING_NOT_EDITABLE remains its own distinct read-only state, never restriction guidance, even though both outcomes can follow the same INTERACTION_BLOCKED-adjacent check server-side", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "not_editable" });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByRole("heading", { level: 1, name: /isn.t editable right now/i })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/unable to load this listing/i)).not.toBeInTheDocument();
+    });
+
+    it("still renders the full editor for a found result, unaffected by the new restriction-aware wiring", async () => {
+      getAuthUserMock.mockResolvedValue({ id: "u1", email: "seller@example.com" });
+      getMyListingMock.mockResolvedValue({ status: "found", listing: sampleListing({ status: "available" }) });
+      getPublishedListingEditStateMock.mockResolvedValue({ status: "found", listing: samplePublishedListing() });
+
+      render(await SellListingEditPage({ params: params("listing-1") }));
+
+      expect(screen.getByLabelText("Title")).toHaveValue("Nike Air Max 270");
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
     });
 
     it("shows the generic unable-to-load message, without crashing, for an unexpected published-loader failure", async () => {

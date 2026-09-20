@@ -1,5 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { mapGetPublishedListingEditStateResponse, type GetPublishedListingEditStateResult } from "@/lib/seller/published-listing-edit-state";
+import { interpretInteractionBlockedServer } from "@/lib/moderation/interpret-interaction-blocked-server";
+import {
+  mapGetPublishedListingEditStateResponse,
+  PUBLISHED_LISTING_RELEVANT_RESTRICTIONS,
+  type GetPublishedListingEditStateResult,
+} from "@/lib/seller/published-listing-edit-state";
 
 export type { GetPublishedListingEditStateResult, PublishedListingEditState } from "@/lib/seller/published-listing-edit-state";
 
@@ -40,5 +45,13 @@ export async function getPublishedListingEditState(listingId: string): Promise<G
     return { status: "error" };
   }
 
-  return mapGetPublishedListingEditStateResponse(data, error);
+  const result = mapGetPublishedListingEditStateResponse(data, error);
+  if (result.status !== "interaction_blocked") return result;
+
+  // Server-safe interpretation only -- interpretInteractionBlockedServer
+  // uses getMyActiveRestrictions (cookie-aware), never the browser client,
+  // matching the exact same boundary reasoning as this file's own RPC call
+  // above. Never runs for any other result status.
+  const restriction = await interpretInteractionBlockedServer("INTERACTION_BLOCKED", PUBLISHED_LISTING_RELEVANT_RESTRICTIONS);
+  return restriction ? { status: "interaction_blocked", restriction } : result;
 }

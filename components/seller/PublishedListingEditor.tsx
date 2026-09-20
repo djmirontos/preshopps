@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ArrowLeft, ArrowRight, ImagePlus, Loader2, RotateCcw, Star, X } from "lucide-react";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
 import {
@@ -12,6 +13,7 @@ import {
   type PublishedListingPatch,
   type PublishedListingImages,
 } from "@/lib/seller/published-listing-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/select-interaction-blocked-presentation";
 import { parsePesosToCents, centsToPesosInput } from "@/lib/seller/price-cents";
 import { LISTING_TYPE_LABELS, CONDITION_LABELS, FULFILLMENT_LABELS, type FulfillmentMethod } from "@/lib/marketplace/search-params";
 import type { CategoryRef, LocationRef } from "@/lib/marketplace/reference-data";
@@ -51,6 +53,12 @@ type FieldErrors = {
   quantity?: string;
   gallery?: string;
 };
+
+/** `code` distinguishes LISTING_NOT_EDITABLE (its own Reload-page branch)
+ * from every other failure without a second piece of state; `restriction`
+ * carries an optional presentation, populated only for a confirmed
+ * account_suspended/seller_suspended INTERACTION_BLOCKED failure. */
+type SaveError = { message: string; code?: string; restriction?: InteractionBlockedPresentation };
 
 function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): boolean {
   return a.length === b.length && a.every((method) => b.includes(method));
@@ -265,8 +273,7 @@ export function PublishedListingEditor({
   const [rentalErrors, setRentalErrors] = useState<ReturnType<typeof validateRentalValues>>({});
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveErrorCode, setSaveErrorCode] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<SaveError | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [staleConflict, setStaleConflict] = useState(false);
   const [isReloading, setIsReloading] = useState(false);
@@ -491,7 +498,6 @@ export function PublishedListingEditor({
 
   async function handleSave() {
     setSaveError(null);
-    setSaveErrorCode(null);
     setSaveStatus("idle");
 
     const errors: FieldErrors = {};
@@ -570,8 +576,7 @@ export function PublishedListingEditor({
     }
 
     if (result.outcome === "failed") {
-      setSaveErrorCode(result.code);
-      setSaveError(UPDATE_PUBLISHED_LISTING_ERROR_MESSAGES[result.code]);
+      setSaveError({ message: UPDATE_PUBLISHED_LISTING_ERROR_MESSAGES[result.code], code: result.code, restriction: result.restriction });
       return;
     }
 
@@ -588,7 +593,6 @@ export function PublishedListingEditor({
       applyServerState(result.listing);
       setStaleConflict(false);
       setSaveError(null);
-      setSaveErrorCode(null);
       setSaveStatus("idle");
       return;
     }
@@ -1012,9 +1016,9 @@ export function PublishedListingEditor({
           {fieldErrors.gallery && <p className="mt-2 text-xs text-danger">{fieldErrors.gallery}</p>}
         </section>
 
-        {saveErrorCode === "LISTING_NOT_EDITABLE" ? (
+        {saveError?.code === "LISTING_NOT_EDITABLE" ? (
           <div>
-            <p className="text-sm text-danger">{saveError}</p>
+            <p className="text-sm text-danger">{saveError.message}</p>
             <button
               type="button"
               onClick={() => router.refresh()}
@@ -1024,7 +1028,19 @@ export function PublishedListingEditor({
             </button>
           </div>
         ) : (
-          saveError && <p className="text-sm text-danger">{saveError}</p>
+          saveError && (
+            <div>
+              <p className="text-sm text-danger">{saveError.message}</p>
+              {saveError.restriction && (
+                <p className="mt-1 text-sm text-danger">
+                  {saveError.restriction.message}{" "}
+                  <Link href={saveError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                    {saveError.restriction.ctaLabel}
+                  </Link>
+                </p>
+              )}
+            </div>
+          )
         )}
         {saveStatus === "saved" && <p className="text-sm text-success">Saved</p>}
         {saveStatus === "no_changes" && <p className="text-sm text-ink-muted">No changes to save</p>}

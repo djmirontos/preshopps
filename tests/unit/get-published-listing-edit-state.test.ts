@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { rpcMock, fromMock, createClientMock } = vi.hoisted(() => ({
+const { rpcMock, fromMock, createClientMock, getMyActiveRestrictionsMock } = vi.hoisted(() => ({
   rpcMock: vi.fn(),
   // Throws if ever called -- this loader must only ever call
   // supabase.rpc(...), never read/write a table directly.
@@ -8,6 +8,7 @@ const { rpcMock, fromMock, createClientMock } = vi.hoisted(() => ({
     throw new Error("must not access .from() directly -- use the RPC only");
   }),
   createClientMock: vi.fn(),
+  getMyActiveRestrictionsMock: vi.fn(),
 }));
 
 // The cookie-aware SERVER client (@supabase/ssr's createServerClient via
@@ -19,6 +20,15 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: createClientMock,
 }));
 
+// interpretInteractionBlockedServer's own dependency -- already covered by
+// its own dedicated test file (interpret-interaction-blocked-server.test.ts),
+// so mocked here at this boundary rather than reaching through it into
+// getAuthUser + a second RPC name. This loader's own job is only to prove
+// it calls the server interpreter correctly and attaches/omits the result.
+vi.mock("@/lib/moderation/get-my-active-restrictions", () => ({
+  getMyActiveRestrictions: getMyActiveRestrictionsMock,
+}));
+
 createClientMock.mockResolvedValue({ rpc: rpcMock, from: fromMock });
 
 import { getPublishedListingEditState } from "@/lib/seller/get-published-listing-edit-state";
@@ -28,6 +38,7 @@ beforeEach(() => {
   fromMock.mockClear();
   createClientMock.mockClear();
   createClientMock.mockResolvedValue({ rpc: rpcMock, from: fromMock });
+  getMyActiveRestrictionsMock.mockReset();
 });
 
 const HUGE_REVISION = "9007199254740993";
@@ -194,5 +205,96 @@ describe("getPublishedListingEditState (server-safe loader)", () => {
     rpcMock.mockResolvedValue({ data: null, error: null });
     const result = await getPublishedListingEditState("listing-1");
     expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("getPublishedListingEditState (server-safe loader) -- INTERACTION_BLOCKED restriction-aware presentation (A2.2.2e)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+    getMyActiveRestrictionsMock.mockResolvedValue({
+      restrictions: restrictions.map((r, i) => ({ restrictionId: `r${i}`, restrictionType: r.restriction_type, reason: "x", createdAt: "2026-01-01T00:00:00.000Z" })),
+      hadError: false,
+    });
+  }
+
+  it("attaches the selling-access message and link when seller_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({
+      status: "interaction_blocked",
+      restriction: {
+        message: "Your selling access is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({
+      status: "interaction_blocked",
+      restriction: {
+        message: "Your account is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("account_suspended wins when both account_suspended and seller_suspended are active", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }, { restriction_type: "account_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when only buyer_restricted (unrelated) exists -- generic result preserved", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic result preserved (also covers a deleted/unavailable-account collision)", async () => {
+    mockBlocked([]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+    getMyActiveRestrictionsMock.mockResolvedValue({ restrictions: [], hadError: true });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("never calls the restriction lookup for a non-INTERACTION_BLOCKED result", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "not editable", details: "LISTING_NOT_EDITABLE" } });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "not_editable" });
+    expect(getMyActiveRestrictionsMock).not.toHaveBeenCalled();
+  });
+
+  it("never calls the restriction lookup on a successful load", async () => {
+    rpcMock.mockResolvedValue({ data: sampleRow(), error: null });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result.status).toBe("found");
+    expect(getMyActiveRestrictionsMock).not.toHaveBeenCalled();
   });
 });

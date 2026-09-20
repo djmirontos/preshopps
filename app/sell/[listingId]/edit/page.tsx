@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyListing, type MyListingStatus } from "@/lib/seller/get-my-listing";
 import { getPublishedListingEditState } from "@/lib/seller/get-published-listing-edit-state";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/select-interaction-blocked-presentation";
 import { getCategories, getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { type ListingFieldValues } from "@/components/seller/ListingForm";
 import { ListingFormWithPublish } from "@/components/seller/ListingFormWithPublish";
@@ -37,11 +38,23 @@ function canViewPublicly(status: MyListingStatus): boolean {
 /** Shared "couldn't load, nothing else to say" state -- reused wherever a
  * loader outcome must stay privacy-safe (no existence/ownership signal, no
  * raw backend message) and there is no more specific, still-safe thing to
- * show instead. */
-function UnableToLoad() {
+ * show instead. The optional `restriction` param is used only for the
+ * published-edit loader's own interaction_blocked outcome: when a
+ * restriction is confirmed, the existing generic copy stays (never
+ * replaced) and the specific message + Account-status link render below
+ * it; every other caller omits it and renders exactly as before. */
+function UnableToLoad({ restriction }: { restriction?: InteractionBlockedPresentation } = {}) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6 lg:px-8">
       <p className="text-sm text-ink-secondary">Unable to load this listing right now.</p>
+      {restriction && (
+        <p className="mt-2 text-sm text-danger">
+          {restriction.message}{" "}
+          <Link href={restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+            {restriction.ctaLabel}
+          </Link>
+        </p>
+      )}
     </div>
   );
 }
@@ -161,6 +174,16 @@ export default async function SellListingEditPage({ params }: PageProps) {
       // this falls back to the same read-only state a genuinely
       // Reserved/Sold/Archived listing gets, never a generic load error.
       return <NotEditable title={listing.title} status={listing.status} publicCode={listing.publicCode} />;
+    }
+
+    if (publishedResult.status === "interaction_blocked") {
+      // A confirmed restriction renders alongside the same generic copy
+      // every other unresolvable load outcome shows -- an unrelated
+      // deleted-account collision or a failed restriction lookup falls
+      // back to that generic copy alone, with no link, exactly like
+      // "not_found"/"not_authenticated"/"error" below. The editor is
+      // never rendered in either case.
+      return <UnableToLoad restriction={publishedResult.restriction} />;
     }
 
     if (publishedResult.status !== "found") {

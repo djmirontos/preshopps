@@ -66,4 +66,66 @@ describe("published-listing-edit-state server/browser boundary", () => {
     const source = readFile("lib/seller/published-listing-edit-state.ts");
     expect(source).not.toMatch(/from\s*"@\/lib\/supabase\/(client|server)"/);
   });
+
+  it("the pure selectInteractionBlockedPresentation module imports neither Supabase client, nor either interpreter", () => {
+    const source = readFile("lib/moderation/select-interaction-blocked-presentation.ts");
+    expect(source).not.toMatch(/from\s*"@\/lib\/supabase\/(client|server)"/);
+    expect(source).not.toMatch(/interpret-interaction-blocked/);
+  });
+
+  it("the server-safe loader imports the server interpreter (interpretInteractionBlockedServer), never the browser interpreter", () => {
+    const source = readFile("lib/seller/get-published-listing-edit-state.ts");
+    expect(source).toMatch(/import\s*\{\s*interpretInteractionBlockedServer\s*\}\s*from\s*"@\/lib\/moderation\/interpret-interaction-blocked-server"/);
+    expect(source).not.toMatch(/from\s*"@\/lib\/moderation\/interpret-interaction-blocked"/);
+  });
+
+  it("the browser wrapper module imports the browser interpreter (interpretInteractionBlocked), never the server interpreter", () => {
+    const source = readFile("lib/seller/published-listing-actions.ts");
+    expect(source).toMatch(/import\s*\{\s*interpretInteractionBlocked\s*,/);
+    expect(source).toMatch(/from\s*"@\/lib\/moderation\/interpret-interaction-blocked"/);
+    expect(source).not.toMatch(/interpret-interaction-blocked-server/);
+  });
+
+  it("the server interpreter module imports the server-safe restriction lookup (getMyActiveRestrictions), never the browser client", () => {
+    const source = readFile("lib/moderation/interpret-interaction-blocked-server.ts");
+    expect(source).toMatch(/import\s*\{\s*getMyActiveRestrictions\s*\}\s*from\s*"@\/lib\/moderation\/get-my-active-restrictions"/);
+    expect(source).not.toMatch(/from\s*"@\/lib\/supabase\/(client|server)"/);
+    expect(source).not.toMatch(/get-my-active-restrictions-client/);
+  });
+
+  it("the browser interpreter module still imports the browser restriction lookup (getMyActiveRestrictionsClient), never the server function of the same family", () => {
+    const source = readFile("lib/moderation/interpret-interaction-blocked.ts");
+    expect(source).toMatch(/import\s*\{\s*getMyActiveRestrictionsClient\s*\}\s*from\s*"@\/lib\/moderation\/get-my-active-restrictions-client"/);
+    expect(source).not.toMatch(/from\s*"@\/lib\/supabase\/(client|server)"/);
+    // A type-only import of RestrictionType from the server-safe module
+    // (get-my-active-restrictions.ts) is fine and expected -- types are
+    // erased at compile time, so only the runtime function name itself
+    // (getMyActiveRestrictions, without the -Client suffix) would signal
+    // an actual boundary violation here.
+    expect(source).not.toMatch(/import\s*\{\s*getMyActiveRestrictions\s*[,}]/);
+  });
+
+  it("PublishedListingEditor (a client component) never imports the server interpreter", () => {
+    const source = readFile("components/seller/PublishedListingEditor.tsx");
+    expect(source).not.toMatch(/interpret-interaction-blocked-server/);
+  });
+
+  it("no module in this feature imports both Supabase clients at once", () => {
+    const files = [
+      "lib/seller/published-listing-edit-state.ts",
+      "lib/seller/get-published-listing-edit-state.ts",
+      "lib/seller/published-listing-actions.ts",
+      "lib/moderation/select-interaction-blocked-presentation.ts",
+      "lib/moderation/interpret-interaction-blocked.ts",
+      "lib/moderation/interpret-interaction-blocked-server.ts",
+      "components/seller/PublishedListingEditor.tsx",
+      "app/sell/[listingId]/edit/page.tsx",
+    ];
+    for (const path of files) {
+      const source = readFile(path);
+      const hasBrowserClient = /from\s*"@\/lib\/supabase\/client"/.test(source);
+      const hasServerClient = /from\s*"@\/lib\/supabase\/server"/.test(source);
+      expect(hasBrowserClient && hasServerClient).toBe(false);
+    }
+  });
 });

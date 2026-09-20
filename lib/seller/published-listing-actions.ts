@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/client";
 import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import {
   mapPublishedListingEditStateRow,
   mapGetPublishedListingEditStateResponse,
+  PUBLISHED_LISTING_RELEVANT_RESTRICTIONS,
   type PublishedListingEditState,
   type PublishedListingEditStateRow,
   type GetPublishedListingEditStateResult,
@@ -90,7 +92,11 @@ export async function getPublishedListingEditState(listingId: string): Promise<G
     return { status: "error" };
   }
 
-  return mapGetPublishedListingEditStateResponse(data, error);
+  const result = mapGetPublishedListingEditStateResponse(data, error);
+  if (result.status !== "interaction_blocked") return result;
+
+  const restriction = await interpretInteractionBlocked("INTERACTION_BLOCKED", PUBLISHED_LISTING_RELEVANT_RESTRICTIONS);
+  return restriction ? { status: "interaction_blocked", restriction } : result;
 }
 
 // ============================================================
@@ -196,7 +202,15 @@ export const UPDATE_PUBLISHED_LISTING_ERROR_MESSAGES: ErrorMap<UpdatePublishedLi
 export type UpdatePublishedListingResult =
   | { outcome: "saved"; listing: PublishedListingEditState; changed: boolean }
   | { outcome: "stale_revision" }
-  | { outcome: "failed"; code: UpdatePublishedListingErrorCode | "UNKNOWN" };
+  | {
+      outcome: "failed";
+      code: UpdatePublishedListingErrorCode | "UNKNOWN";
+      /** Same contract as every other listing action's own `restriction`
+       * field -- populated only when code is INTERACTION_BLOCKED and an
+       * edit-relevant restriction (account_suspended/seller_suspended) is
+       * confirmed. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type UpdatePublishedListingRpcRow = PublishedListingEditStateRow & { changed: boolean };
 
@@ -231,10 +245,9 @@ export async function updatePublishedListing(
     }
 
     console.error("update_published_listing RPC failed:", error.message);
-    return {
-      outcome: "failed",
-      code: toErrorCode<UpdatePublishedListingErrorCode>(detail, UPDATE_PUBLISHED_LISTING_ERROR_CODES),
-    };
+    const code = toErrorCode<UpdatePublishedListingErrorCode>(detail, UPDATE_PUBLISHED_LISTING_ERROR_CODES);
+    const restriction = await interpretInteractionBlocked(code, PUBLISHED_LISTING_RELEVANT_RESTRICTIONS);
+    return restriction ? { outcome: "failed", code, restriction } : { outcome: "failed", code };
   }
 
   // Scalar jsonb return -- `data` is the object itself, never a row array.

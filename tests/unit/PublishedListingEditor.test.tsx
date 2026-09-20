@@ -415,6 +415,105 @@ describe("PublishedListingEditor -- expected save failures", () => {
   });
 });
 
+describe("PublishedListingEditor -- restriction-aware INTERACTION_BLOCKED error (A2.2.2e)", () => {
+  it("shows the generic edit message, the specific selling-access message, and a 'View account status' link when seller_suspended is confirmed", async () => {
+    updatePublishedListingMock.mockResolvedValue({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows the specific account-suspended message and link when account_suspended is confirmed", async () => {
+    updatePublishedListingMock.mockResolvedValue({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("shows only the existing generic message, with no link, for a generic INTERACTION_BLOCKED failure with no confirmed restriction", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "failed", code: "INTERACTION_BLOCKED" });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("You are not able to edit listings right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("shows no Account-status link for a non-INTERACTION_BLOCKED failure (regression: LISTING_NOT_EDITABLE keeps its own Reload-page behavior, never restriction guidance)", async () => {
+    updatePublishedListingMock.mockResolvedValue({ outcome: "failed", code: "LISTING_NOT_EDITABLE" });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("This listing can't be edited right now.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload page" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a stale restriction presentation from a prior failed save is cleared once the next attempt succeeds", async () => {
+    updatePublishedListingMock.mockResolvedValueOnce({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    updatePublishedListingMock.mockResolvedValueOnce({ outcome: "saved", listing: sampleState({ title: "Newer Title" }), changed: true });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Newer Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("a stale restriction presentation from a prior failed save is replaced (not merged) by a later, different failure", async () => {
+    updatePublishedListingMock.mockResolvedValueOnce({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your selling access is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+    updatePublishedListingMock.mockResolvedValueOnce({ outcome: "failed", code: "INVALID_PUBLISHED_LISTING" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Another Title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Please check the listing information.")).toBeInTheDocument();
+    expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+});
+
 describe("PublishedListingEditor -- vehicle/rental extensions", () => {
   it("renders vehicle fields for a Cars-category listing and includes vehicle_details in the patch when changed", async () => {
     updatePublishedListingMock.mockResolvedValue({ outcome: "saved", listing: sampleState({ categoryId: 2 }), changed: true });

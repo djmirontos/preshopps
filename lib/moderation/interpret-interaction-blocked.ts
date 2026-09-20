@@ -1,27 +1,12 @@
 import { getMyActiveRestrictionsClient } from "@/lib/moderation/get-my-active-restrictions-client";
+import { selectInteractionBlockedPresentation, type InteractionBlockedPresentation } from "@/lib/moderation/select-interaction-blocked-presentation";
 import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
-export type InteractionBlockedPresentation = {
-  message: string;
-  ctaLabel: string;
-  href: string;
-};
-
-const ACCOUNT_STATUS_HREF = "/account#account-status";
-const CTA_LABEL = "View account status";
-
-/**
- * Copy for every restriction_type_enum value, so this helper stays
- * reusable by future INTERACTION_BLOCKED call sites (A2.2.2) without a
- * rewrite -- callers scope which of these actually apply to their own
- * action via `relevantTypesInPrecedenceOrder`, so an irrelevant type (e.g.
- * seller_suspended for a buyer-facing checkout) can never surface here.
- */
-const RESTRICTION_MESSAGES: Record<RestrictionType, string> = {
-  seller_suspended: "Your selling access is currently suspended.",
-  buyer_restricted: "Your buying access is currently restricted.",
-  account_suspended: "Your account is currently suspended.",
-};
+// Re-exported so every existing importer of this module keeps working
+// unchanged -- the canonical definition now lives in the pure,
+// dependency-free selector module, shared with the server interpreter
+// (interpret-interaction-blocked-server.ts) as well.
+export type { InteractionBlockedPresentation };
 
 /**
  * Turns a generic INTERACTION_BLOCKED failure into a restriction-aware
@@ -44,6 +29,14 @@ const RESTRICTION_MESSAGES: Record<RestrictionType, string> = {
  * The backend remains the sole enforcement authority: this only
  * interprets a denial that has already happened server-side, and its
  * result can never cause an action to proceed.
+ *
+ * Browser-only: uses getMyActiveRestrictionsClient (the browser Supabase
+ * client). Server Component callers must use the separate server-safe
+ * interpretInteractionBlockedServer (interpret-interaction-blocked-server.ts)
+ * instead -- see that module's own header for why. Both delegate the
+ * actual precedence-matching decision to the same pure
+ * selectInteractionBlockedPresentation, so they can never diverge in
+ * copy or precedence; only the restriction-fetching client differs.
  */
 export async function interpretInteractionBlocked(
   errorCode: string,
@@ -55,15 +48,8 @@ export async function interpretInteractionBlocked(
     const result = await getMyActiveRestrictionsClient();
     if (!result.ok) return null;
 
-    const activeTypes = new Set(result.restrictions.map((restriction) => restriction.restrictionType));
-
-    for (const type of relevantTypesInPrecedenceOrder) {
-      if (activeTypes.has(type)) {
-        return { message: RESTRICTION_MESSAGES[type], ctaLabel: CTA_LABEL, href: ACCOUNT_STATUS_HREF };
-      }
-    }
-
-    return null;
+    const activeTypes = result.restrictions.map((restriction) => restriction.restrictionType);
+    return selectInteractionBlockedPresentation(activeTypes, relevantTypesInPrecedenceOrder);
   } catch (err) {
     // getMyActiveRestrictionsClient is documented to fail open and never
     // throw, but this helper preserves the generic error unconditionally

@@ -193,6 +193,111 @@ describe("getPublishedListingEditState", () => {
   });
 });
 
+describe("getPublishedListingEditState -- INTERACTION_BLOCKED restriction-aware presentation (A2.2.2e)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "get_published_listing_edit_state") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  it("attaches the selling-access message and link when seller_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({
+      status: "interaction_blocked",
+      restriction: {
+        message: "Your selling access is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({
+      status: "interaction_blocked",
+      restriction: {
+        message: "Your account is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("account_suspended wins when both account_suspended and seller_suspended are active", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }, { restriction_type: "account_suspended" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when only buyer_restricted (unrelated) exists -- generic result preserved", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic result preserved (also covers a deleted/unavailable-account collision)", async () => {
+    mockBlocked([]);
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "get_published_listing_edit_state") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({ data: null, error: { message: "lookup failed" } });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "interaction_blocked" });
+  });
+
+  it("never calls get_my_active_restrictions for a non-INTERACTION_BLOCKED result", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "not editable", details: "LISTING_NOT_EDITABLE" } });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result).toEqual({ status: "not_editable" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+
+  it("never calls get_my_active_restrictions on a successful load", async () => {
+    rpcMock.mockResolvedValue({ data: sampleRow(), error: null });
+
+    const result = await getPublishedListingEditState("listing-1");
+
+    expect(result.status).toBe("found");
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+});
+
 describe("updatePublishedListing", () => {
   it("calls update_published_listing with the listing id, revision, patch, and images", async () => {
     rpcMock.mockResolvedValue({ data: { ...sampleRow(), changed: true }, error: null });
@@ -331,5 +436,121 @@ describe("updatePublishedListing", () => {
     rpcMock.mockResolvedValue({ data: null, error: null });
     const result = await updatePublishedListing("listing-1", "1", { title: "x" });
     expect(result).toEqual({ outcome: "failed", code: "UNKNOWN" });
+  });
+});
+
+describe("updatePublishedListing -- INTERACTION_BLOCKED restriction-aware presentation (A2.2.2e)", () => {
+  function mockBlocked(restrictions: { restriction_type: string }[]) {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "update_published_listing") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({
+          data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+          error: null,
+        });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+  }
+
+  it("attaches the selling-access message and link when seller_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }]);
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: {
+        message: "Your selling access is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlocked([{ restriction_type: "account_suspended" }]);
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "INTERACTION_BLOCKED",
+      restriction: {
+        message: "Your account is currently suspended.",
+        ctaLabel: "View account status",
+        href: "/account#account-status",
+      },
+    });
+  });
+
+  it("account_suspended wins when both account_suspended and seller_suspended are active", async () => {
+    mockBlocked([{ restriction_type: "seller_suspended" }, { restriction_type: "account_suspended" }]);
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when only buyer_restricted (unrelated) exists -- generic outcome preserved", async () => {
+    mockBlocked([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({ outcome: "failed", code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic outcome preserved (also covers a deleted/unavailable-account collision)", async () => {
+    mockBlocked([]);
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({ outcome: "failed", code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "update_published_listing") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({ data: null, error: { message: "lookup failed" } });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({ outcome: "failed", code: "INTERACTION_BLOCKED" });
+  });
+
+  it("never calls get_my_active_restrictions for a non-INTERACTION_BLOCKED failure", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "not editable", details: "LISTING_NOT_EDITABLE" } });
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({ outcome: "failed", code: "LISTING_NOT_EDITABLE" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+
+  it("never calls get_my_active_restrictions on a successful save", async () => {
+    rpcMock.mockResolvedValue({ data: { ...sampleRow(), changed: true }, error: null });
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result.outcome).toBe("saved");
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
+  });
+
+  it("never calls get_my_active_restrictions for a stale-revision conflict", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "changed", details: "STALE_LISTING_REVISION" } });
+
+    const result = await updatePublishedListing("listing-1", "1", { title: "x" });
+
+    expect(result).toEqual({ outcome: "stale_revision" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions");
   });
 });
