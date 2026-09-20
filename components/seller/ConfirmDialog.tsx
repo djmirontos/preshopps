@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { X } from "lucide-react";
 
 type Props = {
@@ -14,6 +15,20 @@ type Props = {
   noteLabel?: string;
   isPending: boolean;
   errorMessage?: string | null;
+  /** Optional, purely generic second line of detail rendered below
+   * errorMessage -- ConfirmDialog has no opinion on what it says; the
+   * caller (e.g. SellerListingsListClient, for a restriction-aware
+   * failure) supplies the exact text. Independent of errorLink: either,
+   * both, or neither may be supplied. Every other consumer of this dialog
+   * is unaffected: omitting this prop leaves rendered output identical to
+   * before. */
+  errorDetail?: string;
+  /** Optional, purely generic link rendered after errorMessage/errorDetail
+   * -- ConfirmDialog has no opinion on what it links to or why; the caller
+   * supplies the label/href data. Every other consumer of this dialog is
+   * unaffected: omitting this prop leaves rendered output identical to
+   * before. */
+  errorLink?: { label: string; href: string };
   onConfirm: (note: string) => void;
   onClose: () => void;
 };
@@ -34,6 +49,8 @@ export function ConfirmDialog({
   noteLabel,
   isPending,
   errorMessage,
+  errorDetail,
+  errorLink,
   onConfirm,
   onClose,
 }: Props) {
@@ -50,8 +67,13 @@ export function ConfirmDialog({
       }
       if (event.key !== "Tab" || !panelRef.current) return;
 
+      // :not([disabled]) on every control that supports the disabled
+      // attribute -- a disabled button/input/etc. is not really part of
+      // the tab sequence (browsers skip it), so the wrap boundaries below
+      // must be computed only from what a seller can actually reach.
+      // [href] links have no disabled semantics, so they're left as-is.
       const focusable = panelRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -124,6 +146,14 @@ export function ConfirmDialog({
           )}
 
           {errorMessage && <p className="mt-3 text-sm text-danger">{errorMessage}</p>}
+          {errorDetail && <p className={errorMessage ? "mt-1 text-sm text-danger" : "mt-3 text-sm text-danger"}>{errorDetail}</p>}
+          {errorLink && (
+            <p className={errorMessage || errorDetail ? "mt-1 text-sm text-danger" : "mt-3 text-sm text-danger"}>
+              <Link href={errorLink.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                {errorLink.label}
+              </Link>
+            </p>
+          )}
 
           <div className="mt-5 flex flex-col gap-2.5">
             <button

@@ -284,6 +284,207 @@ describe("SellerListingsListClient -- Load more", () => {
   });
 });
 
+describe("SellerListingsListClient -- restriction-aware INTERACTION_BLOCKED error (A2.2.2d)", () => {
+  const RESTRICTION = {
+    message: "Your selling access is currently suspended.",
+    ctaLabel: "View account status",
+    href: "/account#account-status",
+  };
+  const ACCOUNT_RESTRICTION = {
+    message: "Your account is currently suspended.",
+    ctaLabel: "View account status",
+    href: "/account#account-status",
+  };
+
+  describe("Pause/Resume (immediate, no dialog)", () => {
+    it("shows the selling-access message and a 'View account status' link in the row when Pause returns a seller_suspended restriction", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      expect(await screen.findByText("You are not able to manage listings right now.")).toBeInTheDocument();
+      expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    });
+
+    it("a generic (non-restriction) Pause failure shows no Account-status link", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "LISTING_HAS_ACTIVE_RESERVATION" });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      expect(await screen.findByText(/active order reservation/i)).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    });
+
+    it("retrying after a restriction failure replaces the stale presentation with the new attempt's result", async () => {
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "LISTING_HAS_ACTIVE_RESERVATION" });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      expect(await screen.findByText(/active order reservation/i)).toBeInTheDocument();
+      expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    });
+
+    it("a successful retry after a restriction failure clears the error and link entirely", async () => {
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+      updateListingStatusMock.mockResolvedValueOnce({ ok: true, listingId: "listing-1", status: "paused", wasAlreadyInStatus: false, updatedAt: "now" });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+      expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
+      expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
+      expect(screen.queryByText("You are not able to manage listings right now.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Mark Sold/Archive (confirmation dialog)", () => {
+    it("a Mark Sold restriction failure shows the generic message, specific restriction message, and Account-status link inside the open dialog", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark Sold" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" }));
+
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(within(dialog).getByText("You are not able to manage listings right now.")).toBeInTheDocument());
+      expect(within(dialog).getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+      // The row underneath still carries the same presentation too (per item 6 -- row-level
+      // behavior is unchanged), so both occurrences coexist in the DOM at once.
+      expect(screen.getAllByText("Your selling access is currently suspended.")).toHaveLength(2);
+    });
+
+    it("an Archive restriction failure shows the same generic message, specific restriction message, and Account-status link inside the open dialog", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED", restriction: ACCOUNT_RESTRICTION });
+      renderList({ initialListings: [listing({ status: "sold" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
+
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(within(dialog).getByText("You are not able to manage listings right now.")).toBeInTheDocument());
+      expect(within(dialog).getByText("Your account is currently suspended.")).toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    });
+
+    it("the restriction link inside the dialog is keyboard-accessible (a real, focusable anchor with the expected href)", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark Sold" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" }));
+
+      const link = await within(await screen.findByRole("dialog")).findByRole("link", { name: "View account status" });
+      expect(link).toHaveAttribute("href", "/account#account-status");
+      link.focus();
+      expect(link).toHaveFocus();
+    });
+
+    it("a generic confirmation failure shows neither a restriction detail nor an Account-status link, inside or outside the dialog", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INVALID_STATUS_TRANSITION" });
+      renderList({ initialListings: [listing({ status: "sold" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
+
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(within(dialog).getByText(/isn't allowed from the listing's current status/i)).toBeInTheDocument());
+      expect(within(dialog).queryByText(/suspended/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+    });
+
+    it("row-level restriction presentation remains correctly associated with the same listing after the dialog closes", async () => {
+      updateListingStatusMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({ initialListings: [listing({ status: "available", listingId: "listing-1", title: "Nike Air Max 270" })] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark Sold" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" }));
+      await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
+      expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    });
+  });
+
+  describe("multiple listings -- no cross-row leakage", () => {
+    it("a restriction error for listing A never appears on listing B's row", async () => {
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({
+        initialListings: [
+          listing({ listingId: "listing-1", title: "Listing A", status: "available" }),
+          listing({ listingId: "listing-2", title: "Listing B", status: "available" }),
+        ],
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Pause" })[0]);
+
+      expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+      // Only one link should exist -- attached to listing A's row, not listing B's.
+      expect(screen.getAllByRole("link", { name: "View account status" })).toHaveLength(1);
+    });
+
+    it("opening listing B's Mark Sold dialog after listing A's restriction failure never receives listing A's errorDetail or errorLink", async () => {
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      renderList({
+        initialListings: [
+          listing({ listingId: "listing-1", title: "Listing A", status: "available" }),
+          listing({ listingId: "listing-2", title: "Listing B", status: "available" }),
+        ],
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Mark Sold" })[0]);
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" }));
+      await waitFor(() =>
+        expect(within(screen.getByRole("dialog")).getByText("You are not able to manage listings right now.")).toBeInTheDocument(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Mark Sold" })[1]);
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(within(screen.getByRole("dialog")).queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+      expect(within(screen.getByRole("dialog")).queryByText(/suspended/i)).not.toBeInTheDocument();
+    });
+
+    it("account_suspended and seller_suspended presentations never cross between two listings' independent failures", async () => {
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: RESTRICTION });
+      updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "INTERACTION_BLOCKED", restriction: ACCOUNT_RESTRICTION });
+      renderList({
+        initialListings: [
+          listing({ listingId: "listing-1", title: "Listing A", status: "available" }),
+          listing({ listingId: "listing-2", title: "Listing B", status: "available" }),
+        ],
+      });
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Pause" })[0]);
+      expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Pause" })[1]);
+      expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+      // Listing A's message must still be the seller_suspended one, unaffected by listing B's own failure.
+      expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    });
+  });
+});
+
 describe("SellerListingsListClient -- price/quantity/category display", () => {
   it("shows the formatted price when set", () => {
     renderList({ initialListings: [listing({ priceCents: 199900 })] });

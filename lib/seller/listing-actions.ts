@@ -4,15 +4,17 @@ import type { ListingCondition } from "@/components/marketplace/ListingCard";
 import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
 
-/** Shared by createListing, updateListing, replaceListingImages, and
- * publishListing's own INTERACTION_BLOCKED interpretation -- account_suspended
- * first, seller_suspended second. All four RPCs check exactly these two
- * restriction types (confirmed live in their own current migrations --
- * 0090_fix_update_listing_listing_id_ambiguity.sql and
- * 0085_fix_replace_listing_images_ambiguity.sql are the latest redefinitions
- * for update_listing/replace_listing_images: `restriction_type in
- * ('seller_suspended', 'account_suspended')`) -- buyer_restricted is never
- * checked by any of them, so it is deliberately excluded here. */
+/** Shared by createListing, updateListing, replaceListingImages,
+ * updateListingStatus, and publishListing's own INTERACTION_BLOCKED
+ * interpretation -- account_suspended first, seller_suspended second. All
+ * five RPCs check exactly these two restriction types (confirmed live in
+ * their own current migrations -- 0090_fix_update_listing_listing_id_
+ * ambiguity.sql, 0085_fix_replace_listing_images_ambiguity.sql, and
+ * 0094_published_listing_editing.sql are the latest redefinitions for
+ * update_listing/replace_listing_images/update_listing_status:
+ * `restriction_type in ('seller_suspended', 'account_suspended')`) --
+ * buyer_restricted is never checked by any of them, so it is deliberately
+ * excluded here. */
 const LISTING_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "seller_suspended"];
 
 /**
@@ -725,7 +727,15 @@ export const UPDATE_LISTING_STATUS_ERROR_MESSAGES: ErrorMap<UpdateListingStatusE
 
 export type UpdateListingStatusResult =
   | { ok: true; listingId: string; status: SellerListingStatus; wasAlreadyInStatus: boolean; updatedAt: string }
-  | { ok: false; code: UpdateListingStatusErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: UpdateListingStatusErrorCode | "UNKNOWN";
+      /** Same contract as CreateListingResult's own `restriction` field --
+       * populated only when code is INTERACTION_BLOCKED and a
+       * status-management-relevant restriction (account_suspended/
+       * seller_suspended) is confirmed. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type UpdateListingStatusRpcRow = { listing_id: string; status: SellerListingStatus; was_already_in_status: boolean; updated_at: string };
 
@@ -740,10 +750,9 @@ export async function updateListingStatus(listingId: string, status: SellerListi
 
     if (error) {
       console.error("update_listing_status RPC failed:", error.message);
-      return {
-        ok: false,
-        code: toErrorCode<UpdateListingStatusErrorCode>((error as { details?: string }).details, UPDATE_LISTING_STATUS_ERROR_CODES),
-      };
+      const code = toErrorCode<UpdateListingStatusErrorCode>((error as { details?: string }).details, UPDATE_LISTING_STATUS_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, LISTING_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as UpdateListingStatusRpcRow[])[0];

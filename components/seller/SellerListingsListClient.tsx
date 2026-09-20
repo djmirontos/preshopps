@@ -15,6 +15,7 @@ import {
   UPDATE_LISTING_STATUS_ERROR_MESSAGES,
   type SellerListingStatus,
 } from "@/lib/seller/listing-actions";
+import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 import type { MyShopListingSummary, MyShopListingsCursor } from "@/lib/seller/get-my-shop-listings";
 import type { MyListingStatus } from "@/lib/seller/get-my-listing";
 import type { CategoryRef } from "@/lib/marketplace/reference-data";
@@ -49,6 +50,12 @@ const STATUS_LABELS: Record<MyListingStatus, string> = {
 };
 
 type ActionKind = "pause" | "resume" | "mark_sold" | "archive";
+
+/** Carries an optional restriction presentation whenever a genuine
+ * updateListingStatus() failure returns one -- keyed per listing in
+ * `rowErrors` below, so a restriction for one row can never surface on
+ * another. */
+type RowError = { message: string; restriction?: InteractionBlockedPresentation };
 
 const ACTION_TARGET: Record<ActionKind, SellerListingStatus> = {
   pause: "paused",
@@ -117,7 +124,7 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
   const [isPending, startTransition] = useTransition();
 
   const [pendingListingId, setPendingListingId] = useState<string | null>(null);
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [rowErrors, setRowErrors] = useState<Record<string, RowError | null>>({});
   const [confirmState, setConfirmState] = useState<{ listingId: string; action: "mark_sold" | "archive" } | null>(null);
 
   if (initialHadError) {
@@ -153,13 +160,16 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
 
   async function applyStatusChange(listingId: string, action: ActionKind): Promise<boolean> {
     setPendingListingId(listingId);
-    setRowErrors((prev) => ({ ...prev, [listingId]: "" }));
+    setRowErrors((prev) => ({ ...prev, [listingId]: null }));
 
     const result = await updateListingStatus(listingId, ACTION_TARGET[action]);
     setPendingListingId(null);
 
     if (!result.ok) {
-      setRowErrors((prev) => ({ ...prev, [listingId]: UPDATE_LISTING_STATUS_ERROR_MESSAGES[result.code] }));
+      setRowErrors((prev) => ({
+        ...prev,
+        [listingId]: { message: UPDATE_LISTING_STATUS_ERROR_MESSAGES[result.code], restriction: result.restriction },
+      }));
       return false;
     }
 
@@ -187,6 +197,15 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
     const success = await applyStatusChange(confirmState.listingId, confirmState.action);
     if (success) setConfirmState(null);
   }
+
+  // Derived once for whichever listing the dialog is currently open for --
+  // never a different listing's, since rowErrors is keyed per listing id
+  // and confirmState.listingId always names the listing this dialog
+  // belongs to. Computed here (rather than three separate lookups plus
+  // non-null assertions inline below) so both the confirmed restriction
+  // and the plain row error are read exactly once.
+  const confirmRowError = confirmState ? rowErrors[confirmState.listingId] : null;
+  const confirmRestriction = confirmRowError?.restriction;
 
   return (
     <div>
@@ -247,7 +266,19 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
                 <p className="mt-2 text-xs text-ink-muted">Reserved by an active order -- no status actions available.</p>
               )}
 
-              {rowError && <p className="mt-2 text-xs text-danger">{rowError}</p>}
+              {rowError && (
+                <div className="mt-2">
+                  <p className="text-xs text-danger">{rowError.message}</p>
+                  {rowError.restriction && (
+                    <p className="mt-1 text-xs text-danger">
+                      {rowError.restriction.message}{" "}
+                      <Link href={rowError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                        {rowError.restriction.ctaLabel}
+                      </Link>
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="mt-3 flex flex-wrap gap-2">
                 {canEditListing(listing.status) && (
@@ -305,7 +336,9 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
           description={CONFIRM_COPY[confirmState.action].description}
           confirmLabel={ACTION_LABEL[confirmState.action]}
           isPending={pendingListingId === confirmState.listingId}
-          errorMessage={rowErrors[confirmState.listingId] || null}
+          errorMessage={confirmRowError?.message ?? null}
+          errorDetail={confirmRestriction?.message}
+          errorLink={confirmRestriction ? { label: confirmRestriction.ctaLabel, href: confirmRestriction.href } : undefined}
           onConfirm={() => void handleConfirmAction()}
           onClose={() => setConfirmState(null)}
         />
