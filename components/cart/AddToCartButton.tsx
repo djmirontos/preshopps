@@ -2,12 +2,33 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
 import { useIsAuthenticated } from "@/lib/auth/use-is-authenticated";
 import { useCart } from "@/components/cart/CartProvider";
 import { AddToCartSuccessModal } from "@/components/cart/AddToCartSuccessModal";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
+
+/** set_cart_item_quantity's own live definition (0038) checks the caller's
+ * own restriction BEFORE the mutual-block check -- unlike create_review/
+ * upsert_review_reply, there is no earlier, invisible check that could have
+ * fired first, so a confirmed match here is the guaranteed, sole cause of
+ * this specific INTERACTION_BLOCKED. get_my_active_restrictions() returns
+ * every one of the caller's own active restrictions, so it CAN return a
+ * seller_suspended row too (e.g. a buyer who also runs a suspended shop) --
+ * selectInteractionBlockedPresentation still ignores it by selection, since
+ * seller_suspended is simply absent from this array. A seller's own
+ * restriction is separately folded into the listing-side LISTING_NOT_
+ * CARTABLE code instead, never into INTERACTION_BLOCKED, so it can never
+ * reach this lookup as the cause of a buyer's own cart failure. */
+const CART_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
+
+/** Carries the existing generic Add-to-Cart message plus an optional
+ * confirmed restriction presentation. */
+type AddToCartError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
   listingId: string;
@@ -51,7 +72,7 @@ export function AddToCartButton({ listingId, publicCode, availableQuantity, list
   const { getQuantity, setQuantity } = useCart();
   const currentQuantity = getQuantity(listingId);
   const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AddToCartError | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const atStockLimit = currentQuantity >= availableQuantity;
@@ -81,9 +102,15 @@ export function AddToCartButton({ listingId, publicCode, availableQuantity, list
 
     if (rpcError) {
       console.error("set_cart_item_quantity failed:", rpcError.message);
-      // Roll back the shared quantity map to the pre-click value.
+      // Roll back the shared quantity map to the pre-click value -- happens
+      // unconditionally here, before the restriction lookup, so a slow or
+      // failed lookup can never delay or skip the rollback.
       setQuantity(listingId, publicCode, currentQuantity);
-      setError("Couldn't add this item to your cart. Please try again.");
+      const restriction = await interpretInteractionBlocked(
+        (rpcError as { details?: string }).details ?? "",
+        CART_RELEVANT_RESTRICTIONS,
+      );
+      setError({ message: "Couldn't add this item to your cart. Please try again.", restriction: restriction ?? undefined });
     } else {
       setShowSuccessModal(true);
     }
@@ -109,9 +136,21 @@ export function AddToCartButton({ listingId, publicCode, availableQuantity, list
       </button>
 
       {error && (
-        <p role="alert" className="mt-1.5 text-xs text-danger">
-          {error}
-        </p>
+        <>
+          <p role="alert" className="mt-1.5 text-xs text-danger">
+            {error.message}
+          </p>
+          {error.restriction && (
+            <>
+              <p className="mt-1 text-xs text-danger">{error.restriction.message}</p>
+              <p className="mt-1 text-xs text-danger">
+                <Link href={error.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                  {error.restriction.ctaLabel}
+                </Link>
+              </p>
+            </>
+          )}
+        </>
       )}
 
       {showSuccessModal && (

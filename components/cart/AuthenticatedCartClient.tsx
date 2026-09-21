@@ -9,11 +9,27 @@ import { OrderReviewSubmit } from "@/components/cart/OrderReviewSubmit";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 import { labelForUnavailableReason } from "@/lib/cart/unavailable-labels";
 import type { CartLineDisplay } from "@/lib/cart/get-my-cart";
+import { interpretInteractionBlocked, type InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
+import type { RestrictionType } from "@/lib/moderation/get-my-active-restrictions";
+
+/** set_cart_item_quantity's own live definition (0038) checks the caller's
+ * own restriction BEFORE the mutual-block check -- so a confirmed match here
+ * is the guaranteed, sole cause of this specific INTERACTION_BLOCKED (see
+ * AddToCartButton.tsx's own header comment for the full reasoning, shared
+ * verbatim here since both call the same RPC in the same caller role).
+ * remove_cart_item has no restriction check of any kind, so this array is
+ * never used for handleRemove -- removal stays restriction-blind. */
+const CART_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended", "buyer_restricted"];
 
 type Props = {
   initialLines: CartLineDisplay[];
   hadError: boolean;
 };
+
+/** Carries the existing generic per-row message plus an optional confirmed
+ * restriction presentation -- populated only from set_cart_item_quantity
+ * failures (applyQuantity), never from remove_cart_item failures. */
+type RowError = { listingId: string; message: string; restriction?: InteractionBlockedPresentation };
 
 type ShopGroup = {
   shopId: string;
@@ -63,7 +79,7 @@ export function AuthenticatedCartClient({ initialLines, hadError }: Props) {
   const { setQuantity: setSharedQuantity, removeItem: removeSharedItem } = useCart();
   const [lines, setLines] = useState(initialLines);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ listingId: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<RowError | null>(null);
 
   if (hadError) {
     return <p className="text-sm text-ink-secondary">Unable to load your cart right now.</p>;
@@ -85,9 +101,12 @@ export function AuthenticatedCartClient({ initialLines, hadError }: Props) {
 
     if (error) {
       console.error("set_cart_item_quantity failed:", error.message);
+      // Rollback happens unconditionally here, before the restriction
+      // lookup, so a slow/failed/rejected lookup can never delay or skip it.
       setLines((prev) => prev.map((l) => (l.listingId === line.listingId ? { ...l, quantity: previousQuantity } : l)));
       setSharedQuantity(line.listingId, line.publicCode, previousQuantity);
-      setRowError({ listingId: line.listingId, message: "Couldn't update quantity. Please try again." });
+      const restriction = await interpretInteractionBlocked((error as { details?: string }).details ?? "", CART_RELEVANT_RESTRICTIONS);
+      setRowError({ listingId: line.listingId, message: "Couldn't update quantity. Please try again.", restriction: restriction ?? undefined });
     }
     setBusyId(null);
   }
@@ -161,9 +180,21 @@ export function AuthenticatedCartClient({ initialLines, hadError }: Props) {
                         onRemove={() => handleRemove(row)}
                       />
                       {rowError?.listingId === row.listingId && (
-                        <p role="alert" className="pb-2 text-xs text-danger">
-                          {rowError.message}
-                        </p>
+                        <>
+                          <p role="alert" className={`text-xs text-danger ${rowError.restriction ? "pb-1" : "pb-2"}`}>
+                            {rowError.message}
+                          </p>
+                          {rowError.restriction && (
+                            <>
+                              <p className="pb-1 text-xs text-danger">{rowError.restriction.message}</p>
+                              <p className="pb-2 text-xs text-danger">
+                                <Link href={rowError.restriction.href} className="font-semibold underline underline-offset-2 hover:no-underline">
+                                  {rowError.restriction.ctaLabel}
+                                </Link>
+                              </p>
+                            </>
+                          )}
+                        </>
                       )}
                     </div>
                   );
