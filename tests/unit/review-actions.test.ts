@@ -248,3 +248,123 @@ describe("updateReview", () => {
     expect(result).toEqual({ ok: false, code: "UNKNOWN" });
   });
 });
+
+/** Dispatches by RPC name for update_review, throwing on any unrecognized
+ * name so a stray/unexpected RPC call fails the test loudly rather than
+ * silently. */
+function mockBlockedUpdate(restrictions: { restriction_type: string }[]) {
+  rpcMock.mockImplementation((fn: string) => {
+    if (fn === "update_review") {
+      return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+    }
+    if (fn === "get_my_active_restrictions") {
+      return Promise.resolve({
+        data: restrictions.map((r, i) => ({ restriction_id: `r${i}`, restriction_type: r.restriction_type, reason: "x", created_at: "2026-01-01T00:00:00.000Z" })),
+        error: null,
+      });
+    }
+    throw new Error(`unexpected rpc ${fn}`);
+  });
+}
+
+describe("updateReview -- INTERACTION_BLOCKED restriction-aware presentation (A2.2 CORRECTION 1)", () => {
+  it("attaches the account-suspended message and link when account_suspended is confirmed", async () => {
+    mockBlockedUpdate([{ restriction_type: "account_suspended" }]);
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+  });
+
+  it("does not attach a restriction when only buyer_restricted is confirmed -- update_review deliberately never blocks editing for buyer_restricted alone, and the single-element relevant array excludes it", async () => {
+    mockBlockedUpdate([{ restriction_type: "buyer_restricted" }]);
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+    expect(result).not.toHaveProperty("restriction");
+  });
+
+  it("does not attach a restriction when only seller_suspended is confirmed -- update_review never checks a seller's restriction at all", async () => {
+    mockBlockedUpdate([{ restriction_type: "seller_suspended" }]);
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("account_suspended wins when returned alongside unrelated buyer_restricted and seller_suspended", async () => {
+    mockBlockedUpdate([
+      { restriction_type: "buyer_restricted" },
+      { restriction_type: "seller_suspended" },
+      { restriction_type: "account_suspended" },
+    ]);
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect((result as { restriction?: { message: string } }).restriction?.message).toBe("Your account is currently suspended.");
+  });
+
+  it("does not attach a restriction when the restriction result is empty -- generic result preserved (also covers a deleted-caller collision)", async () => {
+    mockBlockedUpdate([]);
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+    expect(result).not.toHaveProperty("restriction");
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself fails", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "update_review") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.resolve({ data: null, error: { message: "lookup failed" } });
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("does not attach a restriction and does not throw when the restriction lookup itself rejects", async () => {
+    rpcMock.mockImplementation((fn: string) => {
+      if (fn === "update_review") {
+        return Promise.resolve({ data: null, error: { message: "blocked", details: "INTERACTION_BLOCKED" } });
+      }
+      if (fn === "get_my_active_restrictions") {
+        return Promise.reject(new Error("network down"));
+      }
+      throw new Error(`unexpected rpc ${fn}`);
+    });
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "INTERACTION_BLOCKED" });
+  });
+
+  it("never calls get_my_active_restrictions for a non-INTERACTION_BLOCKED failure", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "denied", details: "REVIEW_EDIT_WINDOW_CLOSED" } });
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result).toEqual({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions", expect.anything());
+  });
+
+  it("never calls get_my_active_restrictions on a successful update", async () => {
+    rpcMock.mockResolvedValue({ data: [{ review_id: "review-1", updated_at: "2026-01-02T00:00:00.000Z" }], error: null });
+
+    const result = await updateReview("review-1", 3, null, []);
+
+    expect(result.ok).toBe(true);
+    expect(rpcMock).not.toHaveBeenCalledWith("get_my_active_restrictions", expect.anything());
+  });
+});

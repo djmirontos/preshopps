@@ -438,7 +438,7 @@ describe("ReviewFormClient -- edit mode", () => {
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
   });
 
-  it("regression: an INTERACTION_BLOCKED edit failure remains restriction-blind -- updateReview() never carries a restriction field, so no Account Status link can ever render here", async () => {
+  it("a generic INTERACTION_BLOCKED edit failure with no confirmed restriction (e.g. a deleted-account or buyer_restricted-alone collision) shows only the existing generic message, with no detail and no link", async () => {
     updateReviewMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
     render(
       <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
@@ -448,5 +448,171 @@ describe("ReviewFormClient -- edit mode", () => {
 
     expect(await screen.findByText("You can't edit this review right now.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewFormClient -- edit mode, restriction-aware INTERACTION_BLOCKED error (A2.2 CORRECTION 1)", () => {
+  it("an account_suspended failure shows the generic edit message, the specific account-suspended message, and a 'View account status' link", async () => {
+    updateReviewMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("You can't edit this review right now.")).toBeInTheDocument();
+    expect(screen.getByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+  });
+
+  it("a buyer-only restriction (update_review deliberately never blocks editing for buyer_restricted alone) produces the generic edit error with no detail/link", async () => {
+    updateReviewMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("You can't edit this review right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("an ordinary non-blocked failure (REVIEW_EDIT_WINDOW_CLOSED) produces no Account Status guidance", async () => {
+    updateReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("The 7-day edit window for this review has closed.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("retrying after a restriction failure replaces the stale presentation with the new attempt's result", async () => {
+    updateReviewMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+
+    updateReviewMock.mockResolvedValueOnce({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(screen.getByText("The 7-day edit window for this review has closed.")).toBeInTheDocument());
+    expect(screen.queryByText("Your account is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("best-effort deletes a newly-uploaded photo when a restricted edit fails with a confirmed account-suspension presentation", async () => {
+    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/edit-orphaned.jpg" });
+    updateReviewMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        purchasedItemTitles={[]}
+      />,
+    );
+    selectFile(screen.getByLabelText(/add a review photo/i));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/edit-orphaned.jpg"));
+  });
+
+  it("a failed restricted edit never navigates and never replaces the persisted review", async () => {
+    updateReviewMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        initialBody="Original text"
+        purchasedItemTitles={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Original text")).toBeInTheDocument();
+  });
+
+  it("a successful retry after a restriction failure clears the detail/link and preserves existing cleanup, navigation, and refresh behavior", async () => {
+    updateReviewMock.mockResolvedValueOnce({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        initialImagePaths={["review-images/buyer-1/order-1/keep.jpg"]}
+        initialImageUrls={["https://example.supabase.co/x/keep.jpg"]}
+        purchasedItemTitles={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Your account is currently suspended.")).toBeInTheDocument();
+
+    updateReviewMock.mockResolvedValueOnce({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+    expect(refreshMock).toHaveBeenCalled();
+    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("Your account is currently suspended.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+  });
+
+  it("create-mode restriction behavior remains unchanged after this correction", async () => {
+    createReviewMock.mockResolvedValue({
+      ok: false,
+      code: "INTERACTION_BLOCKED",
+      restriction: { message: "Your buying access is currently restricted.", ctaLabel: "View account status", href: "/account#account-status" },
+    });
+    render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+
+    expect(await screen.findByText("Your buying access is currently restricted.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
   });
 });

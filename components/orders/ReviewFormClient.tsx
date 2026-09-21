@@ -12,8 +12,11 @@ import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-
 const BODY_MAX_LENGTH = 1000;
 
 /** Carries an optional restriction presentation whenever a genuine
- * createReview() failure returns one -- edit mode (updateReview) never
- * populates this, since UpdateReviewResult has no restriction field. */
+ * createReview() or updateReview() failure returns one -- create mode can
+ * confirm account_suspended or buyer_restricted; edit mode can confirm only
+ * account_suspended (update_review deliberately never blocks editing for
+ * buyer_restricted alone). Both branches propagate result.restriction
+ * unchanged; only the wrapped RPC/array differs. */
 type SubmitError = { message: string; restriction?: InteractionBlockedPresentation };
 
 type Props = {
@@ -125,7 +128,7 @@ export function ReviewFormClient({
       const result = await updateReview(reviewId as string, rating, bodyToSend, imagePaths);
       setIsSubmitting(false);
       if (!result.ok) {
-        setSubmitError({ message: UPDATE_REVIEW_ERROR_MESSAGES[result.code] });
+        setSubmitError({ message: UPDATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
         await cleanUpNewlyUploadedImages(imagePaths);
         return;
       }

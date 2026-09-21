@@ -169,9 +169,31 @@ export const UPDATE_REVIEW_ERROR_MESSAGES: ErrorMap<UpdateReviewErrorCode> = {
   UNKNOWN: "Something went wrong. Please try again.",
 };
 
+/** update_review's own live definition (0065) checks ONLY account_suspended
+ * on the caller -- its own comment states this explicitly: "account_suspended
+ * blocks editing; buyer_restricted alone does not." This is a deliberate
+ * product policy (a buyer_restricted-only buyer may still edit an existing
+ * review) and this array must never be widened to include buyer_restricted,
+ * which would misrepresent the RPC's own actual enforcement. seller_suspended
+ * is irrelevant for the same reason as create_review: update_review never
+ * checks the seller's own restriction at all. */
+const UPDATE_REVIEW_RELEVANT_RESTRICTIONS: RestrictionType[] = ["account_suspended"];
+
 export type UpdateReviewResult =
   | { ok: true; reviewId: string; updatedAt: string }
-  | { ok: false; code: UpdateReviewErrorCode | "UNKNOWN" };
+  | {
+      ok: false;
+      code: UpdateReviewErrorCode | "UNKNOWN";
+      /** Populated only when code is INTERACTION_BLOCKED and the caller's
+       * own current restriction state confirms account_suspended -- see
+       * interpretInteractionBlocked and this module's own header comment on
+       * UPDATE_REVIEW_RELEVANT_RESTRICTIONS. Absent for every other code,
+       * for a buyer_restricted-only caller (deliberately ignored -- it never
+       * blocks editing), or when the lookup itself fails; the existing
+       * generic UPDATE_REVIEW_ERROR_MESSAGES copy is the fallback in all of
+       * those cases. */
+      restriction?: InteractionBlockedPresentation;
+    };
 
 type UpdateReviewRpcRow = { review_id: string; updated_at: string };
 
@@ -193,7 +215,9 @@ export async function updateReview(
 
     if (error) {
       console.error("update_review RPC failed:", error.message);
-      return { ok: false, code: toErrorCode<UpdateReviewErrorCode>((error as { details?: string }).details, UPDATE_REVIEW_ERROR_CODES) };
+      const code = toErrorCode<UpdateReviewErrorCode>((error as { details?: string }).details, UPDATE_REVIEW_ERROR_CODES);
+      const restriction = await interpretInteractionBlocked(code, UPDATE_REVIEW_RELEVANT_RESTRICTIONS);
+      return restriction ? { ok: false, code, restriction } : { ok: false, code };
     }
 
     const row = ((data ?? []) as UpdateReviewRpcRow[])[0];
