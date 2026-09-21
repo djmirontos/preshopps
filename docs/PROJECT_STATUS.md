@@ -44,14 +44,15 @@ These hashes identify historical milestones, not the repository's current HEAD.
 
 ## Database state
 
-- **Latest verified live migration:** `0099_schedule_pending_order_expiry.sql`. Applied to live production Supabase (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`). See "Pending Order Auto-Expiration — COMPLETE" under Completed major modules for the full deployment record.
+- **Latest verified live migration:** `0100_allow_incomplete_fair_condition_draft.sql`. Applied to the Preshopps pre-launch Supabase project (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`) as migration version `20260921131835`. See "LAUNCH UX S1.1 — COMPLETE" under Completed major modules for the full deployment record.
   - `0095_restriction_visibility_notifications.sql` — added the two new `notification_type_enum` values (`moderation_restriction_applied`, `moderation_restriction_lifted`) as its own, separately-committed migration, required ahead of `0096` by Postgres's enum-value-cannot-be-referenced-in-the-same-transaction-it-was-added-in rule.
   - `0096_restriction_visibility_notifications.sql` — added `notifications.restriction_id` (nullable FK to `user_restrictions(id)`, `on delete cascade`), the new self-read RPC `get_my_active_restrictions()`, and in-app restriction-applied/restriction-lifted notification creation inside `apply_user_restriction` / `lift_user_restriction` (alongside their pre-existing email/audit/trusted-seller logic, otherwise reproduced verbatim).
   - `0097_fix_apply_user_restriction_output_collision.sql` — fixed a pre-existing PL/pgSQL output-column collision in `apply_user_restriction`: its `RETURNS TABLE`'s `created_at` OUT parameter collided with a bare, unqualified `returning id, created_at` on the function's own fresh-insert branch, raising Postgres `42702` on every first-time (non-idempotent) restriction application. Fixed via table-aliased, column-qualified `RETURNING ur.id, ur.created_at`, matching the schema's own established fix convention from `0079_fix_plpgsql_output_column_collisions.sql`.
   - `0098_fix_submit_report_output_collision.sql` — fixed the identical collision class in `submit_report` (bare `returning id, created_at` colliding with its own `created_at` OUT parameter). Unlike `apply_user_restriction`, `submit_report` has no idempotent early-return branch, so this bug blocked **every** real report submission in production prior to this fix. Fixed the same way, via `RETURNING r.id, r.created_at`.
   - `0099_schedule_pending_order_expiry.sql` — schedules the existing, already-correct `expire_pending_orders()` RPC (`0024`, notification added in `0040`) via a new `pg_cron` job (`expire-pending-orders-every-15-min`, `*/15 * * * *`, direct SQL call — no HTTP, no Edge Function, no secret). No function redefinition, no schema change. See "Pending Order Auto-Expiration — COMPLETE" below.
+  - `0100_allow_incomplete_fair_condition_draft.sql` — corrected a genuine seller-flow contradiction found during the LAUNCH UX S1 seller-listing-journey audit: `create_listing`/`update_listing` rejected a Fair-condition Draft immediately for blank Known Flaws, even though a Draft requires only a title and full publish-readiness (including Known Flaws for Fair) is canonically enforced only at publish time. Replaced the status-blind `listings_fair_requires_known_flaws_check` CHECK constraint with a status-aware equivalent (`status = 'draft' OR condition <> 'fair' OR (known_flaws IS NOT NULL AND btrim(known_flaws) <> '')`) and removed the now-redundant premature guard from both RPCs. Publish-time enforcement (`validate_published_listing`, and everything that calls it) was not touched. See "LAUNCH UX S1.1 — COMPLETE" below.
 - **`0086`:** intentionally and permanently skipped — no migration with this number exists or should ever be created. This is enforced by an existing automated test; do not backfill it under any circumstances.
-- **Next unused migration number:** `0100`.
+- **Next unused migration number:** `0101`.
 
 Keep this section current — it is the reason a new agent doesn't need to run `ls supabase/migrations` and guess.
 
@@ -151,15 +152,37 @@ The following are implemented and merged as of the product implementation milest
 
 **Moderation Completion Step A2.2 — COMPLETE.**
 
+- LAUNCH UX S1.1 (seller-flow contradiction fix): the LAUNCH UX S1 seller-listing-journey launch-readiness audit found one genuine, launch-blocking contradiction — selecting Condition = Fair required nonblank Known Flaws text immediately, even while saving an otherwise-incomplete Draft. This directly conflicted with the canonical rule that a Draft requires only a title, and that full publish-readiness (including Known Flaws for Fair) is enforced only at the Draft → Available transition, not during Draft creation or editing.
+  - **Root cause:** `create_listing` and `update_listing` each carried a status-blind "Fair requires Known Flaws" guard that fired unconditionally, duplicating a check that already existed correctly — and status-appropriately — inside the shared `validate_published_listing` validator used by every real publish/republish path.
+  - **Fix:** migration `0100_allow_incomplete_fair_condition_draft.sql` replaced the table's `listings_fair_requires_known_flaws_check` CHECK constraint with a status-aware equivalent that exempts Draft rows, and removed the now-redundant premature guard from `create_listing` and `update_listing`. `validate_published_listing` (and therefore `publish_listing`, `update_listing_status`'s paused → available resume transition, and `update_published_listing`'s per-save re-validation) was not touched — publishing a Fair listing without Known Flaws still fails with `KNOWN_FLAWS_REQUIRED`, and an already-published Fair listing still cannot have its Known Flaws cleared. No RLS policy, Storage policy, table, enum, index, or unrelated RPC behavior changed.
+  - **Implementation-time automated validation:** full suite 288 files / 4818 tests passed; lint, typecheck, production build, and `git diff --check` all passed.
+  - **Pre-deployment review:** confirmed the live database was still at migration `0099`, that the expected pre-`0100` constraint and RPC definitions were present exactly as designed against, and — since the new constraint predicate is a strict relaxation of the old one, exempting only Draft rows — that no existing-row data cleanup was required before validating the new constraint.
+  - **Deployment:** migration `0100` applied successfully to the Preshopps pre-launch Supabase project (project `preshopps`, ref `ylhfbqcyxjmxrbpkxtgu`) as migration version `20260921131835`. Implementation commit `55e5fdc` (`fix(listings): allow incomplete fair drafts`).
+  - **Post-deployment verification:** direct PostgreSQL catalog inspection confirmed the new constraint's exact validated definition, the updated `create_listing`/`update_listing` bodies, unchanged publish-time enforcement in `validate_published_listing`/`publish_listing`/`update_listing_status`/`update_published_listing`, and unchanged `SECURITY DEFINER`/`search_path`/authenticated-only execution grants on both redefined functions. Supabase security and performance advisors were re-run post-deployment and showed no new finding attributable to `0100` — every finding matched the pre-deployment baseline exactly.
+  - **Hosted synthetic SQL smoke harness:** two attempts at an additional, optional rollback-only SQL smoke test (exercising Draft/publish behavior directly via synthetic fixtures) did not complete, due to test-scaffolding issues unrelated to the migration itself: the first attempt's synthetic signup fixture omitted the `policies_accepted` flag the live `handle_new_user()` trigger requires; after correcting that, the second attempt's temp results-table lost write access after the script switched simulated role to `authenticated` mid-transaction. Both attempts rolled back completely — zero fixture residue, database aggregate counts unchanged before and after each attempt. Migration `0100` was deployed successfully and verified through post-deployment catalog checks plus owner end-to-end QA on the Netlify-hosted application. The optional hosted synthetic SQL smoke harness remained incomplete because of fixture-scaffolding issues; both attempts rolled back with zero residue and did not indicate a migration or product defect.
+  - **Owner hands-on QA** on the Netlify-hosted Preshopps site at commit `55e5fdc` passed the complete end-to-end workflow: save an incomplete Fair Draft; reopen and update that incomplete Fair Draft; publish rejected without Known Flaws; publish succeeds after adding Known Flaws; clearing Known Flaws from a published Fair listing is rejected; non-Fair listing behavior confirmed unaffected.
+
+**LAUNCH UX S1.1 — COMPLETE.**
+
 ---
 
 ## Current next major module
 
-**End-to-end seller/buyer UI/UX launch-readiness audit.**
+**Action-feedback and notification UX audit.**
 
 Moderation Completion Steps A1, A2.1, and A2.2 are all complete, committed, and pushed. **A2.3** (a formal suspension/restriction appeal flow, building on the existing `support_tickets` architecture) is explicitly **deferred until after launch** — this is an implementation-sequencing decision, not a removal of the canonical appeal requirement described for later moderation work. Initial launch is owner-administered, and moderation restrictions are not expected to be actively used during it, so no interim appeal feature is required before launch. Existing support-ticket access remains available to any restricted user today (per A1/A2.1), but this must not be described as a completed formal appeal system — that remains A2.3's own future scope.
 
-The current top-priority module is the end-to-end seller/buyer UI/UX launch-readiness audit (see "Current backlog ordering" below for the full sequence). The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
+The end-to-end seller/buyer UI/UX launch-readiness audit's first bounded slice — the seller listing journey (LAUNCH UX S1), including its one confirmed launch-blocking correction (LAUNCH UX S1.1, migration `0100`) — is complete; see "LAUNCH UX S1.1 — COMPLETE" above. The next bounded launch-readiness activity is an **action-feedback and notification UX audit**: a read-only inventory of every seller and buyer mutation surface (Save, Publish, Update, Confirm, Remove, Cancel, status changes, cart/order actions, messaging/review actions) and a UX policy recommendation distinguishing:
+
+- toasts for completed, non-blocking actions;
+- inline messages for validation and field-specific errors;
+- confirmation dialogs for destructive/irreversible actions;
+- persistent banners or inline guidance for states requiring continued attention;
+- navigation/result pages where an additional toast would be redundant.
+
+**No toast/notification implementation has begun.** The first step is the read-only inventory and policy recommendation described above, not an implementation. The resulting recommendation should explicitly avoid blanket "toast everything" behavior, duplicate feedback (e.g. a toast repeating text already shown inline), and conflicting simultaneous announcements. Only after that audit and recommendation are reviewed should any implementation slice begin.
+
+See "Current backlog ordering" below for the full sequence. The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
 
 ---
 
@@ -193,6 +216,8 @@ High-level order, not a committed schedule:
 8. A2.3 formal appeals after launch
 
 Marketplace transactional email production verification (formerly item 2 here) is complete — see "Transactional Email Recovery — COMPLETE" above.
+
+Item 1's first bounded slice (the seller listing journey audit, LAUNCH UX S1, including its one confirmed launch-blocking correction, LAUNCH UX S1.1 / migration `0100`) is complete — see "LAUNCH UX S1.1 — COMPLETE" above. Item 1's next bounded slice is the action-feedback and notification UX audit — a read-only inventory and UX policy recommendation only; see "Current next major module" above — before any toast/notification implementation begins.
 
 The following are folded into item 3 above once that work begins, not currently scheduled or in progress:
 
