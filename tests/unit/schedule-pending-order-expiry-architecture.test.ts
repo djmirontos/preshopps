@@ -45,7 +45,10 @@ describe("0099: migration-list snapshot includes the new scheduler migration", (
     const migrationFiles = readdirSync(path.join(process.cwd(), "supabase/migrations")).filter((f) => f.endsWith(".sql"));
     expect(migrationFiles).toContain("0099_schedule_pending_order_expiry.sql");
     const newerThan0098 = migrationFiles.filter((f) => f > "0098_fix_submit_report_output_collision.sql");
-    expect(newerThan0098).toEqual(["0099_schedule_pending_order_expiry.sql"]);
+    expect(newerThan0098).toEqual([
+      "0099_schedule_pending_order_expiry.sql",
+      "0100_allow_incomplete_fair_condition_draft.sql",
+    ]);
   });
 });
 

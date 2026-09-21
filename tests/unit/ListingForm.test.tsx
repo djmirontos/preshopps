@@ -268,7 +268,7 @@ describe("ListingForm -- create mode", () => {
     );
   });
 
-  it("Fair condition does NOT require known flaws to Save Draft -- title remains the only required field", async () => {
+  it("Fair condition does NOT require known flaws to Save Draft -- title remains the only required field (UI/mock boundary only; the real create_listing/update_listing contract, fixed in migration 0100, is proven by tests/database/known-flaws-draft-fix.mjs, not this mocked test)", async () => {
     createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
     renderForm();
 
