@@ -140,13 +140,26 @@ The following are implemented and merged as of the product implementation milest
   - **Archive remains the only removal/hide behavior — no Delete Listing feature was added or is planned.**
   - Implementation commit: `cece503` (`fix: expose edit action for published listings`).
 
+- Moderation Completion — Step A2.2 (restriction-aware blocked-action UX): replaced every generic, type-blind `INTERACTION_BLOCKED` dead-end across every action whose live RPC checks the caller's own `user_restrictions` with role-scoped, self-facing guidance (the exact confirmed restriction, e.g. "Your selling access is currently suspended.") plus a "View account status" link into A2.1's own Account status section. **Implemented, committed, and pushed** — this is frontend/presentation work only; nothing here was deployed as a database migration.
+  - **Covered flows:** buyer review creation and editing, seller review replies, buyer listing/shop conversation start, seller order-conversation start, existing-thread messaging (buyer and seller roles), cart quantity changes (Add to Cart, increase/decrease), cart checkout, Buy Now, listing draft creation/editing/image replacement, listing publish, listing status management (pause/resume/sold/archive), and published-listing edit load/save.
+  - **Security/privacy:** every presentation call reads only the caller's own restrictions — `interpretInteractionBlocked` (browser) or `interpretInteractionBlockedServer` (the one genuinely server-rendered path, published-listing edit load) — both delegating to the same pure, environment-independent selector. No listing/seller-side code (`LISTING_NOT_CARTABLE`, `LISTING_NOT_FAVORITABLE`, etc.) is ever interpreted as the caller's own restriction; no other participant's restriction is ever queried or shown.
+  - **Final verification identified one previously-missed path:** `update_review` had a live `account_suspended` check that was never wired to the interpreter. Commit `6213067` corrected it as a bounded follow-up before closeout.
+  - **Deliberately out of scope / deferred, not defects:** `merge_guest_cart`'s silent best-effort background merge keeps its existing, documented "never fails caller" contract unchanged (the equivalent interactive cart surfaces are now restriction-aware, so a restricted buyer still gets the explanation the next time they act directly); `create_shop`/`update_shop`/`accept_seller_policies` check no restrictions at all — a backend enforcement-policy question, not a presentation gap; `update_my_profile`'s narrow public-identity-field lock uses its own distinct, already-descriptive `PUBLIC_PROFILE_LOCKED` code, structurally outside this pattern by design. None of these represent an A2.2 defect.
+  - **No migration or RPC change was required or made.** Latest live migration remains `0099`; migration `0100` remains unused.
+  - **Automated validation** passed throughout the bounded implementation slices; the final correction run completed 287 files / 4794 tests, with lint, typecheck, build, and `git diff --check` passing.
+  - Implementation commits (14): `acee03f` through `6213067`.
+
+**Moderation Completion Step A2.2 — COMPLETE.**
+
 ---
 
 ## Current next major module
 
-**Moderation completion — Step A2.2 (restriction-aware blocked-action UX).**
+**End-to-end seller/buyer UI/UX launch-readiness audit.**
 
-Moderation Completion Steps A1 (backend) and A2.1 (self-facing restriction visibility) are both complete and live in production/committed. **A2.2 is not started** — its goal is to replace the current dead-end, type-blind generic `INTERACTION_BLOCKED` error experience (e.g. cart submission, listing publish) with clearer user-facing guidance and a path into the Account status section built in A2.1. After A2.2, **A2.3** (a basic suspension/restriction appeal or support flow, building on the existing `support_tickets` architecture) remains the next planned moderation work — neither A2.2 nor A2.3 is implemented yet. Per the current backlog ordering below, Moderation completion remains the current top-priority module until A2.2/A2.3 are done. The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
+Moderation Completion Steps A1, A2.1, and A2.2 are all complete, committed, and pushed. **A2.3** (a formal suspension/restriction appeal flow, building on the existing `support_tickets` architecture) is explicitly **deferred until after launch** — this is an implementation-sequencing decision, not a removal of the canonical appeal requirement described for later moderation work. Initial launch is owner-administered, and moderation restrictions are not expected to be actively used during it, so no interim appeal feature is required before launch. Existing support-ticket access remains available to any restricted user today (per A1/A2.1), but this must not be described as a completed formal appeal system — that remains A2.3's own future scope.
+
+The current top-priority module is the end-to-end seller/buyer UI/UX launch-readiness audit (see "Current backlog ordering" below for the full sequence). The product and technical rules remain in `docs/PRD.md` and `docs/ARCHITECTURE.md`.
 
 ---
 
@@ -170,15 +183,18 @@ Moderation Completion Steps A1 (backend) and A2.1 (self-facing restriction visib
 
 High-level order, not a committed schedule:
 
-1. Moderation completion
-2. Duplicate-listing enforcement audit
-3. Remaining P2 discovery/UI work
-4. Technical SEO work
-5. Full pre-launch hardening / launch audit
+1. End-to-end seller/buyer UI and UX launch-readiness audit
+2. Launch-blocking UX corrections
+3. Media upload/delivery and Storage hardening
+4. Duplicate-listing enforcement audit
+5. Launch-critical notifications/email gaps
+6. Technical SEO
+7. Full pre-launch hardening and launch audit
+8. A2.3 formal appeals after launch
 
 Marketplace transactional email production verification (formerly item 2 here) is complete — see "Transactional Email Recovery — COMPLETE" above.
 
-The following are deferred media/performance work, not currently scheduled or in progress:
+The following are folded into item 3 above once that work begins, not currently scheduled or in progress:
 
 - Custom Preshopps category illustration system
 - Category media optimization
@@ -186,6 +202,9 @@ The following are deferred media/performance work, not currently scheduled or in
 - WebP-first optimized listing uploads/delivery
 - Responsive image variants/thumbnails
 - Investigate AVIF delivery where it materially improves performance
+- Orphaned Storage cleanup, Draft and published-listing galleries (see "Known accepted Phase B limitations" above)
+
+Messaging email summary (see "Known accepted Messaging limitations" above) is folded into item 5 above once that work begins.
 
 ---
 
