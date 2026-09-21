@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { refreshMock, createShopMock, updateShopMock, uploadImageMock, deleteUploadedImageMock } = vi.hoisted(() => ({
+const { refreshMock, createShopMock, updateShopMock, uploadImageMock, deleteUploadedImageMock, notifySuccessMock } = vi.hoisted(() => ({
   refreshMock: vi.fn(),
   createShopMock: vi.fn(),
   updateShopMock: vi.fn(),
   uploadImageMock: vi.fn(),
   deleteUploadedImageMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock }),
+}));
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
 }));
 
 vi.mock("@/lib/seller/shop-actions", async () => {
@@ -70,6 +75,7 @@ describe("ShopForm -- create mode", () => {
     expect(await screen.findByText("Please choose a province.")).toBeInTheDocument();
     expect(await screen.findByText("Please choose a city or municipality.")).toBeInTheDocument();
     expect(createShopMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("submits create_shop with the entered fields once required fields are filled", async () => {
@@ -109,6 +115,7 @@ describe("ShopForm -- create mode", () => {
       ),
     );
     expect(refreshMock).toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("shows a duplicate-shop error safely and does not refresh on failure", async () => {
@@ -336,6 +343,8 @@ describe("ShopForm -- edit mode", () => {
         "away",
       ),
     );
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop updated");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
   it("only Active and Away are selectable -- no admin/suspended option exists", () => {
@@ -383,6 +392,18 @@ describe("ShopForm -- edit mode", () => {
 
     await waitFor(() => expect(updateShopMock).toHaveBeenCalled());
     expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("does not notify on a required-field validation failure -- update_shop is never called", async () => {
+    render(<ShopForm {...editProps} />);
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText("Please enter a shop name.")).toBeInTheDocument();
+    expect(updateShopMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("a cleanup failure after a successful save still refreshes as a success (never surfaced as an error)", async () => {
@@ -397,5 +418,6 @@ describe("ShopForm -- edit mode", () => {
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop updated");
   });
 });

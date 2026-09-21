@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
@@ -88,6 +89,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   <ConditionalFooter />
                   <MobileBottomNav user={user} hasShop={Boolean(myShop)} />
                   <FloatingChatPanel isAuthenticated={Boolean(user)} />
+                  {/* Root-level, sibling to {children} like FloatingChatPanel
+                      above -- survives client navigation and router.refresh()
+                      since the layout itself never unmounts on a route
+                      change. The only global toaster instance; call sites
+                      trigger it via lib/notifications/toast.ts. */}
+                  <Toaster position="top-center" closeButton={false} />
                 </FloatingMessengerProvider>
               </NotificationsProvider>
             </CartProvider>

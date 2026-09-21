@@ -13,6 +13,7 @@ import {
   type ShopFormInput,
 } from "@/lib/seller/shop-actions";
 import { deleteUploadedImage } from "@/lib/image-processing/upload-image";
+import { notifySuccess } from "@/lib/notifications/toast";
 import { slugify } from "@/lib/seller/slugify";
 import type { LocationRef } from "@/lib/marketplace/reference-data";
 import type { ShopStatus } from "@/lib/seller/get-my-shop-profile";
@@ -162,6 +163,7 @@ export function ShopForm({
         }
         return;
       }
+      notifySuccess("Shop updated");
     }
 
     // Best-effort only, after confirmed success -- never lets a cleanup
