@@ -428,6 +428,7 @@ describe("Realtime bug fix: no migration/RLS/publication change", () => {
       "0098_fix_submit_report_output_collision.sql",
       "0099_schedule_pending_order_expiry.sql",
       "0100_allow_incomplete_fair_condition_draft.sql",
+      "0101_auto_assign_brand_new_condition.sql",
     ]);
   });
 });
@@ -1082,6 +1083,7 @@ describe("ConversationThread Realtime -- reconnect reconciliation", () => {
       "0098_fix_submit_report_output_collision.sql",
       "0099_schedule_pending_order_expiry.sql",
       "0100_allow_incomplete_fair_condition_draft.sql",
+      "0101_auto_assign_brand_new_condition.sql",
     ]);
   });
 

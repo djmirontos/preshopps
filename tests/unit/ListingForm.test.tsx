@@ -240,14 +240,14 @@ describe("ListingForm -- create mode", () => {
     expect(screen.getByLabelText(/meetup note/i)).toBeInTheDocument();
   });
 
-  it("does not force a condition value when listing type is Brand New -- the condition select is replaced with an explanatory note, not an auto-filled value", () => {
+  it("automatically assigns Brand New condition when listing type is Brand New -- the condition select is replaced with an explanatory note, not left for the seller to choose", () => {
     renderForm();
     fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "brand_new" } });
     expect(screen.queryByLabelText(/^condition/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/set automatically when you publish/i)).toBeInTheDocument();
+    expect(screen.getByText(/automatically use Brand New condition/i)).toBeInTheDocument();
   });
 
-  it("saves a Draft with listing type Brand New and condition left null (backend permits this pairing)", async () => {
+  it("saves a Draft with listing type Brand New and condition automatically assigned to brand_new", async () => {
     createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
     renderForm();
 
@@ -256,11 +256,11 @@ describe("ListingForm -- create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() =>
-      expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ listingType: "brand_new", condition: null })),
+      expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ listingType: "brand_new", condition: "brand_new" })),
     );
   });
 
-  it("clears an existing preloved condition when switching listing type to Brand New, avoiding a doomed mismatched pair -- without setting any new value", async () => {
+  it("replaces an existing preloved condition with Brand New's own condition when switching listing type to Brand New", async () => {
     createListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", createdAt: "now" });
     renderForm();
 
@@ -271,7 +271,7 @@ describe("ListingForm -- create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() =>
-      expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ listingType: "brand_new", condition: null })),
+      expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ listingType: "brand_new", condition: "brand_new" })),
     );
   });
 
@@ -703,7 +703,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() =>
-      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "brand_new", condition: null }),
+      expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "brand_new", condition: "brand_new" }),
     );
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
   });
@@ -761,6 +761,19 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     await waitFor(() =>
       expect(updateListingMock).toHaveBeenCalledWith("listing-1", { listing_type: "preloved", condition: null }),
     );
+  });
+
+  it("normalizes a legacy Brand New Draft's NULL condition on load -- shows the explanatory note, not a condition select, and a Save Draft with no other edits sends no condition change (already matches the normalized baseline)", async () => {
+    updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, listingType: "brand_new", condition: null } });
+
+    expect(screen.queryByLabelText(/^condition/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/automatically use Brand New condition/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { brand: "Nike" }));
   });
 });
 
@@ -964,6 +977,12 @@ describe("ListingForm -- onDirtyChange (unsaved-changes signal for a sibling Pub
   it("reports not dirty right after mount, matching the just-loaded baseline", () => {
     const onDirtyChange = vi.fn();
     renderEditForm({ onDirtyChange });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reports not dirty right after mount for a legacy Brand New Draft with a NULL condition -- the auto-normalization corrects baseline and live state together, so Publish is never spuriously blocked", () => {
+    const onDirtyChange = vi.fn();
+    renderEditForm({ initialValues: { ...EMPTY_VALUES, listingType: "brand_new", condition: null }, onDirtyChange });
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 

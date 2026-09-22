@@ -111,6 +111,7 @@ describe("Realtime Slice 3 -- the only backend change is migration 0088's two ad
       "0098_fix_submit_report_output_collision.sql",
       "0099_schedule_pending_order_expiry.sql",
       "0100_allow_incomplete_fair_condition_draft.sql",
+      "0101_auto_assign_brand_new_condition.sql",
     ]);
     expect(migrationFiles).toContain("0088_exact_unread_badge_counts.sql");
   });

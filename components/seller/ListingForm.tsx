@@ -191,16 +191,24 @@ function fulfillmentSetsEqual(a: FulfillmentMethod[], b: FulfillmentMethod[]): b
 /**
  * Shared Create/Edit listing form. Draft rule mirrors create_listing/
  * update_listing's own canon exactly: TITLE is the only required field to
- * Save Draft -- every other field, including known_flaws and condition,
- * may remain incomplete, and this form must never block Save Draft on any
- * of them. The only client-side guard kept for Save Draft is avoiding a
- * combination the RPCs reject unconditionally (not just at publish): their
- * cross-validation fires whenever BOTH listing_type and condition are
- * supplied and mismatched (LISTING_TYPE_CONDITION_MISMATCH), so switching
- * listing type clears a condition that would now conflict -- it never
- * forces a condition value into place. Confirmed live in both
- * create_listing and update_listing (0062): the check is skipped entirely
- * whenever either side is null, and the table's own
+ * Save Draft -- every other field, including known_flaws, may remain
+ * incomplete, and this form must never block Save Draft on any of them.
+ * Condition is the one field this form does actively assign rather than
+ * merely accept: Brand New's condition is not a seller choice (PRD/
+ * ARCHITECTURE/ARCHITECTURE_ESSENTIALS all require it always be
+ * "brand_new"), so selecting Brand New sets it immediately and switching
+ * away clears it, mirroring the same NULL-condition derivation
+ * create_listing/update_listing/publish_listing now also perform
+ * server-side (0101) -- this form's own assignment is a convenience/
+ * consistency measure, not the authoritative source. A remaining
+ * client-side guard covers a combination the RPCs still reject
+ * unconditionally (not just at publish): their cross-validation fires
+ * whenever BOTH listing_type and condition are supplied and explicitly
+ * mismatched (LISTING_TYPE_CONDITION_MISMATCH) -- e.g. Pre-loved with an
+ * explicit "brand_new" condition, which this form never produces but a
+ * loaded baseline could theoretically carry. Confirmed live in
+ * create_listing/update_listing (0062, unchanged by 0101): the check is
+ * skipped entirely whenever either side is null, and the table's own
  * listings_type_condition_check CHECK constraint (0008) evaluates to NULL
  * (satisfied) under the same three-valued logic when condition is null.
  *
@@ -244,7 +252,20 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
   const originalPriceErrorId = useId();
   const stockErrorId = useId();
 
-  const baselineValues = initialValues ?? CREATE_DEFAULTS;
+  // A legacy Brand New Draft saved before condition auto-assignment existed
+  // (or any Brand New Draft loaded straight from the server without an
+  // intervening edit) can still carry a NULL condition. Normalize it here,
+  // once, before it seeds either `baseline` or the live `condition` state
+  // below -- normalizing only one of the two would make the form spuriously
+  // dirty on load purely from this correction, which would block Publish
+  // via its own isDirty gate (see PublishListingButton's own comment).
+  // CREATE_DEFAULTS itself is never affected: it always starts with
+  // listingType null.
+  const rawBaselineValues = initialValues ?? CREATE_DEFAULTS;
+  const baselineValues: ListingFieldValues =
+    rawBaselineValues.listingType === "brand_new" && rawBaselineValues.condition === null
+      ? { ...rawBaselineValues, condition: "brand_new" }
+      : rawBaselineValues;
 
   const [baseline, setBaseline] = useState<ListingFieldValues>(baselineValues);
   const [baselineLocation, setBaselineLocation] = useState<ShopLocationValue>(initialLocation);
@@ -312,17 +333,17 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
   function handleListingTypeChange(rawValue: string) {
     const next = rawValue === "" ? null : (rawValue as ListingTypeFilter);
     setListingType(next);
-    // Never auto-fill a condition -- only clear one that would now conflict
-    // with the new type (both RPCs reject a mismatched pair outright
-    // whenever both are supplied, Draft included; a null condition never
-    // triggers that check, so leaving it null is always safe here). Edit
-    // mode can load a listing whose saved condition is already "brand_new"
-    // (a fully valid prior state), so both directions need guarding here,
-    // unlike a fresh create-mode form where "brand_new" can never appear
-    // in state except via this same guard.
-    if (next === "brand_new" && condition !== null && condition !== "brand_new") {
-      setCondition(null);
-    } else if (next !== "brand_new" && condition === "brand_new") {
+    // Brand New's condition is not a seller choice -- canon (PRD/ARCHITECTURE/
+    // ARCHITECTURE_ESSENTIALS) requires it always be "brand_new", and the
+    // Condition control is hidden below precisely because of this. Selecting
+    // Brand New here assigns it immediately, matching what create_listing/
+    // update_listing/publish_listing now also derive server-side for any
+    // NULL condition against a brand_new listing type. Switching away from
+    // Brand New clears it back to null (an explicit Pre-loved condition is
+    // always the seller's own choice, never auto-filled).
+    if (next === "brand_new") {
+      setCondition("brand_new");
+    } else if (condition === "brand_new") {
       setCondition(null);
     }
 
@@ -777,7 +798,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
             </label>
             {listingType === "brand_new" ? (
               <p className="mt-1.5 text-sm text-ink-secondary">
-                Brand New listings use Brand New condition -- this is set automatically when you publish, no need to choose it now.
+                Brand New listings automatically use Brand New condition — no need to choose it.
               </p>
             ) : (
               <select

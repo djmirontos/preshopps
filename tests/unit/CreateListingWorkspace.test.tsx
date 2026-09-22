@@ -248,6 +248,34 @@ describe("CreateListingWorkspace -- Publish is visible and independently enabled
   });
 });
 
+describe("CreateListingWorkspace -- Brand New condition auto-assignment (0101)", () => {
+  it("Brand New reaches full Publish readiness with no Condition field ever shown, and publishes with condition sent as brand_new", async () => {
+    publishListingMock.mockResolvedValue({ ok: true, listingId: "listing-99", publicCode: "PSL-NEW", slug: "x", status: "available", publishedAt: "now" });
+    renderWorkspace();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Nike Air Max 270" } });
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "Sealed, unopened box." } });
+    fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "brand_new" } });
+    expect(screen.queryByLabelText(/^condition/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500" } });
+    fireEvent.click(screen.getByLabelText("Meetup"));
+    selectFile(screen.getByLabelText("Add a listing photo"));
+
+    const publishButton = await screen.findByRole("button", { name: "Publish Listing" });
+    await waitFor(() => expect(publishButton).toBeEnabled());
+
+    fireEvent.click(publishButton);
+
+    await waitFor(() => expect(publishListingMock).toHaveBeenCalledWith("listing-99"));
+    expect(updateListingMock).toHaveBeenCalledWith(
+      "listing-99",
+      expect.objectContaining({ listing_type: "brand_new", condition: "brand_new" }),
+    );
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-NEW"));
+  });
+});
+
 describe("CreateListingWorkspace -- direct Publish flow (Flow C: no draft/listing exists yet)", () => {
   it("clicking Publish with no existing draft creates exactly one listing, persists the full current form, then publishes that same id", async () => {
     publishListingMock.mockResolvedValue({ ok: true, listingId: "listing-99", publicCode: "PSL-NEW", slug: "x", status: "available", publishedAt: "now" });
