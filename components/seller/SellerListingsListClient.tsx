@@ -10,6 +10,7 @@ import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import { getListingImageUrl } from "@/lib/marketplace/listing-image-url";
 import { CONDITION_LABELS } from "@/lib/marketplace/search-params";
+import { notifySuccess } from "@/lib/notifications/toast";
 import {
   updateListingStatus,
   UPDATE_LISTING_STATUS_ERROR_MESSAGES,
@@ -69,6 +70,13 @@ const ACTION_LABEL: Record<ActionKind, string> = {
   resume: "Resume",
   mark_sold: "Mark Sold",
   archive: "Archive",
+};
+
+const ACTION_SUCCESS_COPY: Record<ActionKind, string> = {
+  pause: "Listing paused",
+  resume: "Listing resumed",
+  mark_sold: "Marked as sold",
+  archive: "Listing archived",
 };
 
 /** Every transition this list can ever offer -- must stay a subset of what
@@ -172,6 +180,8 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
       }));
       return false;
     }
+
+    notifySuccess(ACTION_SUCCESS_COPY[action]);
 
     if (activeStatus !== null && activeStatus !== result.status) {
       setListings((prev) => prev.filter((listing) => listing.listingId !== listingId));
@@ -335,6 +345,7 @@ export function SellerListingsListClient({ initialListings, initialHadError, ini
           title={CONFIRM_COPY[confirmState.action].title}
           description={CONFIRM_COPY[confirmState.action].description}
           confirmLabel={ACTION_LABEL[confirmState.action]}
+          destructive
           isPending={pendingListingId === confirmState.listingId}
           errorMessage={confirmRowError?.message ?? null}
           errorDetail={confirmRestriction?.message}

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-const { updateListingStatusMock } = vi.hoisted(() => ({
+const { updateListingStatusMock, notifySuccessMock } = vi.hoisted(() => ({
   updateListingStatusMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("@/lib/seller/listing-actions", async () => {
@@ -12,6 +13,10 @@ vi.mock("@/lib/seller/listing-actions", async () => {
     updateListingStatus: updateListingStatusMock,
   };
 });
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
+}));
 
 import { SellerListingsListClient } from "@/components/seller/SellerListingsListClient";
 import type { MyShopListingSummary } from "@/lib/seller/get-my-shop-listings";
@@ -198,6 +203,56 @@ describe("SellerListingsListClient -- immediate (non-confirmed) actions: Pause/R
     expect(await screen.findByText(/active order reservation/i)).toBeInTheDocument();
     expect(screen.getByText("Nike Air Max 270")).toBeInTheDocument();
   });
+
+  it("a successful Pause calls notifySuccess('Listing paused') exactly once", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: true, listingId: "listing-1", status: "paused", wasAlreadyInStatus: false, updatedAt: "now" });
+    renderList({ initialListings: [listing({ status: "available" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Listing paused"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rejected Pause never calls notifySuccess", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: false, code: "LISTING_HAS_ACTIVE_RESERVATION" });
+    renderList({ initialListings: [listing({ status: "available" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+    await screen.findByText(/active order reservation/i);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("Resume calls update_listing_status immediately, no confirmation dialog", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: true, listingId: "listing-1", status: "available", wasAlreadyInStatus: false, updatedAt: "now" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(updateListingStatusMock).toHaveBeenCalledWith("listing-1", "available"));
+  });
+
+  it("a successful Resume calls notifySuccess('Listing resumed') exactly once", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: true, listingId: "listing-1", status: "available", wasAlreadyInStatus: false, updatedAt: "now" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Listing resumed"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rejected Resume never calls notifySuccess", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: false, code: "INVALID_STATUS_TRANSITION" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await screen.findByText(/isn't allowed from the listing's current status/i);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("SellerListingsListClient -- confirmed actions: Mark Sold/Archive", () => {
@@ -229,13 +284,51 @@ describe("SellerListingsListClient -- confirmed actions: Mark Sold/Archive", () 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  it("a confirmed Mark Sold success calls notifySuccess('Marked as sold') exactly once", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: true, listingId: "listing-1", status: "sold", wasAlreadyInStatus: false, updatedAt: "now" });
+    renderList({ initialListings: [listing({ status: "available" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark Sold" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" }));
+
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Marked as sold"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Mark Sold confirmation button uses destructive/danger styling", () => {
+    renderList({ initialListings: [listing({ status: "available" })] });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Sold" }));
+
+    const confirmButton = within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Sold" });
+    expect(confirmButton.className).toMatch(/bg-danger/);
+  });
+
   it("Archive opens a confirmation dialog too", () => {
     renderList({ initialListings: [listing({ status: "paused" })] });
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("if the confirmed action fails, the dialog stays open and shows the error", async () => {
+  it("a confirmed Archive success calls notifySuccess('Listing archived') exactly once", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: true, listingId: "listing-1", status: "archived", wasAlreadyInStatus: false, updatedAt: "now" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Listing archived"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Archive confirmation button uses destructive/danger styling", () => {
+    renderList({ initialListings: [listing({ status: "paused" })] });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    const confirmButton = within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" });
+    expect(confirmButton.className).toMatch(/bg-danger/);
+  });
+
+  it("if the confirmed action fails, the dialog stays open and shows the error, and notifySuccess is never called", async () => {
     updateListingStatusMock.mockResolvedValue({ ok: false, code: "INVALID_STATUS_TRANSITION" });
     renderList({ initialListings: [listing({ status: "sold" })] });
 
@@ -246,6 +339,7 @@ describe("SellerListingsListClient -- confirmed actions: Mark Sold/Archive", () 
       expect(within(screen.getByRole("dialog")).getByText(/isn't allowed from the listing's current status/i)).toBeInTheDocument(),
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 });
 
@@ -306,6 +400,7 @@ describe("SellerListingsListClient -- restriction-aware INTERACTION_BLOCKED erro
       expect(await screen.findByText("You are not able to manage listings right now.")).toBeInTheDocument();
       expect(screen.getByText("Your selling access is currently suspended.")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+      expect(notifySuccessMock).not.toHaveBeenCalled();
     });
 
     it("a generic (non-restriction) Pause failure shows no Account-status link", async () => {
@@ -347,6 +442,10 @@ describe("SellerListingsListClient -- restriction-aware INTERACTION_BLOCKED erro
       expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
       expect(screen.queryByText("You are not able to manage listings right now.")).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
+      // The failed first attempt must never have notified -- exactly one
+      // success notification total, from the successful retry alone.
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+      expect(notifySuccessMock).toHaveBeenCalledWith("Listing paused");
     });
   });
 
@@ -365,6 +464,7 @@ describe("SellerListingsListClient -- restriction-aware INTERACTION_BLOCKED erro
       // The row underneath still carries the same presentation too (per item 6 -- row-level
       // behavior is unchanged), so both occurrences coexist in the DOM at once.
       expect(screen.getAllByText("Your selling access is currently suspended.")).toHaveLength(2);
+      expect(notifySuccessMock).not.toHaveBeenCalled();
     });
 
     it("an Archive restriction failure shows the same generic message, specific restriction message, and Account-status link inside the open dialog", async () => {
