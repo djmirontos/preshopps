@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useId, useImperativeHandle, useState } from "rea
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
+import { notifySuccess } from "@/lib/notifications/toast";
 import {
   createListing,
   updateListing,
@@ -266,7 +267,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
   const [meetupNote, setMeetupNote] = useState(baselineValues.meetupNote ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<SubmitError | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "no_changes">("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [vehicleBaseline, setVehicleBaseline] = useState<VehicleFieldValues>(initialVehicleDetails ?? EMPTY_VEHICLE_VALUES);
@@ -341,8 +342,11 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
    * a real form submit event (handleSubmit above) or imperatively by an
    * orchestrating parent's direct-publish flow via the ref handle below --
    * both paths run the exact same validation and patch-diff logic and end
-   * up at the exact same create_listing/update_listing calls. */
-  async function persistCurrentState(): Promise<{ ok: true; listingId: string } | { ok: false }> {
+   * up at the exact same create_listing/update_listing calls. `silent`
+   * is true only for the imperative pre-publish path (see the ref handle
+   * below): a "Draft saved" toast firing during a Publish attempt would be
+   * confusing and is explicitly out of scope for Publish's own feedback. */
+  async function persistCurrentState(silent = false): Promise<{ ok: true; listingId: string } | { ok: false }> {
     setSubmitError(null);
     setSaveStatus("idle");
 
@@ -451,6 +455,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
         return { ok: false };
       }
 
+      if (!silent) notifySuccess("Draft saved");
       router.push(`/sell/${result.listingId}/edit`);
       return { ok: true, listingId: result.listingId };
     }
@@ -552,7 +557,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
     setBaselineLocation(location);
     setVehicleBaseline(vehicleValues);
     setRentalBaseline(rentalValues);
-    setSaveStatus("saved");
+    if (!silent) notifySuccess("Draft saved");
 
     // Re-fetch the page's own server data (get_my_listing) so sibling
     // Server Components on this same route -- specifically
@@ -571,7 +576,11 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
     return { ok: true, listingId: resolvedListingId };
   }
 
-  useImperativeHandle(ref, () => ({ persistCurrentState }));
+  // The imperative handle always persists silently: it exists so a Publish
+  // action can save current unsaved values before publishing, never to
+  // trigger a "Draft saved" toast of its own -- see persistCurrentState's
+  // own `silent` parameter comment above.
+  useImperativeHandle(ref, () => ({ persistCurrentState: () => persistCurrentState(true) }));
 
   // ===== dirty-state signal for a sibling Publish action (see onDirtyChange's own comment) =====
   // Deliberately mirrors handleSubmit's own patch-diff predicates exactly,
@@ -977,7 +986,6 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
           )}
         </div>
       )}
-      {saveStatus === "saved" && <p className="text-sm text-success">Draft saved</p>}
       {saveStatus === "no_changes" && <p className="text-sm text-ink-muted">No changes to save</p>}
 
       <div className="flex items-center gap-3">

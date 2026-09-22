@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, refreshMock, createListingMock, updateListingMock } = vi.hoisted(() => ({
+const { pushMock, refreshMock, createListingMock, updateListingMock, notifySuccessMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
   createListingMock: vi.fn(),
   updateListingMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -20,6 +21,10 @@ vi.mock("@/lib/seller/listing-actions", async () => {
     updateListing: updateListingMock,
   };
 });
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
+}));
 
 import { createRef } from "react";
 import { ListingForm, type ListingFieldValues, type ListingFormHandle } from "@/components/seller/ListingForm";
@@ -128,7 +133,7 @@ describe("ListingForm -- create mode", () => {
     );
   });
 
-  it("redirects to /sell/{listingId}/edit on successful save", async () => {
+  it("redirects to /sell/{listingId}/edit on successful save, and notifies 'Draft saved' exactly once", async () => {
     createListingMock.mockResolvedValue({ ok: true, listingId: "listing-42", publicCode: "PSL-XYZ", slug: "my-item", status: "draft", createdAt: "2026-01-01T00:00:00.000Z" });
     renderForm();
 
@@ -136,6 +141,8 @@ describe("ListingForm -- create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sell/listing-42/edit"));
+    expect(notifySuccessMock).toHaveBeenCalledWith("Draft saved");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
   it("converts pesos to integer cents without floating-point drift", async () => {
@@ -446,6 +453,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updateListingMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("sends only the changed field in the patch, omitting every untouched key", async () => {
@@ -636,14 +644,16 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { city_id: 20 }));
   });
 
-  it("shows 'Draft saved' after a successful save, refreshes the page, and does not redirect away", async () => {
+  it("notifies 'Draft saved' exactly once after a successful save, refreshes the page, does not redirect away, and no longer shows an inline saved label", async () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm();
 
     fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    expect(await screen.findByText("Draft saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Draft saved"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Draft saved")).not.toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
     expect(refreshMock).toHaveBeenCalledTimes(1);
     // router.refresh() re-reads server data for the route -- it must never
@@ -651,7 +661,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     expect(updateListingMock).toHaveBeenCalledTimes(1);
   });
 
-  it("resets the baseline after a successful save -- an immediate second Save with no further edits sends no patch and does not refresh again", async () => {
+  it("resets the baseline after a successful save -- an immediate second Save with no further edits sends no patch, does not refresh again, and does not notify a second time", async () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm();
 
@@ -659,12 +669,17 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updateListingMock).toHaveBeenCalledTimes(1);
     expect(refreshMock).toHaveBeenCalledTimes(1);
+    // The notification count must remain exactly what the first successful
+    // save produced -- not reset to zero, and not incremented by the
+    // second, no-op attempt.
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
   it("maps an update_listing failure to a friendly message without redirecting or refreshing", async () => {
@@ -677,6 +692,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("Pre-loved -> Brand New -> Save Draft: saves the new type/condition and refreshes so sibling server data (e.g. the images picker) picks up the change", async () => {
@@ -1023,7 +1039,7 @@ describe("ListingForm -- create mode with an orchestrated auto-draft (existingDr
     expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it("with no existingDraftId but an ensureListingId provided, Save Draft calls ensureListingId to obtain an id, then update_listing -- never create_listing directly", async () => {
+  it("with no existingDraftId but an ensureListingId provided, Save Draft calls ensureListingId to obtain an id, then update_listing -- never create_listing directly -- and notifies 'Draft saved' exactly once (the first orchestrated save)", async () => {
     const ensureListingId = vi.fn().mockResolvedValue("draft-2");
     updateListingMock.mockResolvedValue({ ok: true, listingId: "draft-2", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderForm({ ensureListingId });
@@ -1035,9 +1051,11 @@ describe("ListingForm -- create mode with an orchestrated auto-draft (existingDr
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("draft-2", { title: "Item" }));
     expect(createListingMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).toHaveBeenCalledWith("Draft saved");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a friendly error and does not call update_listing when ensureListingId resolves to null (draft creation failed)", async () => {
+  it("shows a friendly error and does not call update_listing when ensureListingId resolves to null (draft creation failed) -- no toast", async () => {
     const ensureListingId = vi.fn().mockResolvedValue(null);
     renderForm({ ensureListingId });
 
@@ -1046,6 +1064,20 @@ describe("ListingForm -- create mode with an orchestrated auto-draft (existingDr
 
     expect(await screen.findByText("Something went wrong. Please try again.")).toBeInTheDocument();
     expect(updateListingMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("Draft is created (ensureListingId succeeds) but the required update_listing patch then fails -- no success toast, since the seller's actual content was never saved", async () => {
+    const ensureListingId = vi.fn().mockResolvedValue("draft-2");
+    updateListingMock.mockResolvedValue({ ok: false, code: "LISTING_NOT_DRAFT" });
+    renderForm({ ensureListingId });
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    await waitFor(() => expect(ensureListingId).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Only Draft listings can be edited right now.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("a blank stock quantity is rejected client-side once ensureListingId is provided, even though title is the only requirement for the original standalone create path", async () => {
@@ -1190,7 +1222,7 @@ describe("ListingForm -- onPublishReadyChange (live publish-completeness signal,
 });
 
 describe("ListingForm -- persistCurrentState imperative handle (direct-publish support)", () => {
-  it("persists current unsaved values and resolves { ok: true, listingId } when validation passes", async () => {
+  it("persists current unsaved values and resolves { ok: true, listingId } when validation passes -- and never notifies, since this is Publish's silent pre-persist path, not an explicit Save Draft click", async () => {
     const ensureListingId = vi.fn().mockResolvedValue("draft-9");
     updateListingMock.mockResolvedValue({ ok: true, listingId: "draft-9", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     const ref = createRef<ListingFormHandle>();
@@ -1215,6 +1247,7 @@ describe("ListingForm -- persistCurrentState imperative handle (direct-publish s
     expect(result).toEqual({ ok: true, listingId: "draft-9" });
     expect(ensureListingId).toHaveBeenCalledTimes(1);
     expect(updateListingMock).toHaveBeenCalledWith("draft-9", { title: "Nike Air Max 270" });
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("resolves { ok: false } and never calls the RPC when a client-side field error exists (e.g. blank title)", async () => {
@@ -1359,6 +1392,7 @@ describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2c, l
     expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
     expect(createListingMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("true edit mode: shows the account-suspended message and link when update_listing returns an account_suspended restriction", async () => {
@@ -1441,12 +1475,17 @@ describe("ListingForm -- restriction-aware INTERACTION_BLOCKED error (A2.2.2c, l
     fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Nike" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
 
     updateListingMock.mockResolvedValueOnce({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     fireEvent.change(screen.getByLabelText(/brand/i), { target: { value: "Adidas" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
-    expect(await screen.findByText("Draft saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Draft saved"));
+    // Exactly one success toast total -- the earlier failed attempt must
+    // never have contributed one.
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Draft saved")).not.toBeInTheDocument();
     expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });

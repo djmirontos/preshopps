@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ImagePlus, Loader2, RotateCcw, Star, X } from "lucide-react";
 import { ShopLocationFields, type ShopLocationValue } from "@/components/seller/ShopLocationFields";
+import { notifySuccess } from "@/lib/notifications/toast";
 import {
   getPublishedListingEditState,
   updatePublishedListing,
@@ -272,7 +273,7 @@ export function PublishedListingEditor({
   const [vehicleErrors, setVehicleErrors] = useState<ReturnType<typeof validateVehicleValues>>({});
   const [rentalErrors, setRentalErrors] = useState<ReturnType<typeof validateRentalValues>>({});
 
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "no_changes">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "no_changes">("idle");
   const [saveError, setSaveError] = useState<SaveError | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [staleConflict, setStaleConflict] = useState(false);
@@ -581,7 +582,11 @@ export function PublishedListingEditor({
     }
 
     applyServerState(result.listing);
-    setSaveStatus(result.changed ? "saved" : "no_changes");
+    if (result.changed) {
+      notifySuccess("Changes saved");
+    } else {
+      setSaveStatus("no_changes");
+    }
   }
 
   async function handleReloadLatest() {
@@ -1042,7 +1047,6 @@ export function PublishedListingEditor({
             </div>
           )
         )}
-        {saveStatus === "saved" && <p className="text-sm text-success">Saved</p>}
         {saveStatus === "no_changes" && <p className="text-sm text-ink-muted">No changes to save</p>}
 
         <div className="flex items-center gap-3">

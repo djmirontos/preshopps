@@ -2,18 +2,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 
-const { pushMock, refreshMock, getPublishedListingEditStateMock, updatePublishedListingMock, uploadImageMock, deleteUploadedImageMock } =
-  vi.hoisted(() => ({
-    pushMock: vi.fn(),
-    refreshMock: vi.fn(),
-    getPublishedListingEditStateMock: vi.fn(),
-    updatePublishedListingMock: vi.fn(),
-    uploadImageMock: vi.fn(),
-    deleteUploadedImageMock: vi.fn(),
-  }));
+const {
+  pushMock,
+  refreshMock,
+  getPublishedListingEditStateMock,
+  updatePublishedListingMock,
+  uploadImageMock,
+  deleteUploadedImageMock,
+  notifySuccessMock,
+} = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  refreshMock: vi.fn(),
+  getPublishedListingEditStateMock: vi.fn(),
+  updatePublishedListingMock: vi.fn(),
+  uploadImageMock: vi.fn(),
+  deleteUploadedImageMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock, refresh: refreshMock }),
+}));
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
 }));
 
 vi.mock("@/lib/seller/published-listing-actions", async () => {
@@ -191,7 +203,7 @@ describe("PublishedListingEditor -- Available", () => {
     await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalledWith("listing-1", "9007199254740993", expect.anything(), null));
   });
 
-  it("a successful material save updates the held revision/baseline, so a second no-op save sends no further RPC call", async () => {
+  it("a successful material save updates the held revision/baseline (notifying 'Changes saved' once), so a second no-op save sends no further RPC call and does not notify again", async () => {
     updatePublishedListingMock.mockResolvedValue({
       outcome: "saved",
       listing: sampleState({ title: "New Title", revision: "2" }),
@@ -202,7 +214,9 @@ describe("PublishedListingEditor -- Available", () => {
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Changes saved"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
 
     // Same title as what was just saved -- no further edits -- Save again.
@@ -210,6 +224,10 @@ describe("PublishedListingEditor -- Available", () => {
 
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+    // The notification count must remain exactly what the first successful
+    // save produced -- not reset to zero, and not incremented by the
+    // second, no-op attempt.
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -231,7 +249,7 @@ describe("PublishedListingEditor -- Paused", () => {
     expect(screen.queryByText(/available quantity must be at least/i)).not.toBeInTheDocument();
   });
 
-  it("save works for a Paused listing", async () => {
+  it("save works for a Paused listing and notifies 'Changes saved' exactly once", async () => {
     updatePublishedListingMock.mockResolvedValue({
       outcome: "saved",
       listing: sampleState({ status: "paused", title: "New Title" }),
@@ -242,7 +260,9 @@ describe("PublishedListingEditor -- Paused", () => {
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Changes saved"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 });
 
@@ -279,13 +299,33 @@ describe("PublishedListingEditor -- Available quantity rules", () => {
 });
 
 describe("PublishedListingEditor -- no-op save", () => {
-  it("shows a neutral 'No changes to save' state and never calls the RPC when nothing changed", async () => {
+  it("shows a neutral 'No changes to save' state, never calls the RPC when nothing changed client-side, and does not notify", async () => {
     renderEditor();
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updatePublishedListingMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("shows 'No changes to save' and does not notify when the RPC itself confirms no material change (changed: false)", async () => {
+    updatePublishedListingMock.mockResolvedValue({
+      outcome: "saved",
+      listing: sampleState(),
+      changed: false,
+    });
+    renderEditor();
+
+    // A real client-side diff (quantity 5 -> 3) means the RPC is actually
+    // called -- unlike the client short-circuit test above, it is the
+    // server's own changed: false that determines the outcome here.
+    fireEvent.change(screen.getByLabelText("Available quantity"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalled());
+    expect(await screen.findByText("No changes to save")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 });
 
@@ -300,6 +340,7 @@ describe("PublishedListingEditor -- stale revision conflict", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/this listing changed elsewhere/i);
     expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
     expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("disables Save changes while a stale conflict is unresolved -- no automatic retry", async () => {
@@ -390,6 +431,7 @@ describe("PublishedListingEditor -- expected save failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("This listing can't be edited right now.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Reload page" }));
     expect(refreshMock).toHaveBeenCalled();
   });
@@ -404,7 +446,7 @@ describe("PublishedListingEditor -- expected save failures", () => {
     expect(await screen.findByText("We couldn't find this listing. Please refresh and try again.")).toBeInTheDocument();
   });
 
-  it("maps an unrecognized code to the generic UNKNOWN message", async () => {
+  it("maps an unrecognized code to the generic UNKNOWN message, and never notifies success", async () => {
     updatePublishedListingMock.mockResolvedValue({ outcome: "failed", code: "UNKNOWN" });
     renderEditor();
 
@@ -412,6 +454,7 @@ describe("PublishedListingEditor -- expected save failures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText("Something went wrong. Please try again.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 });
 
@@ -481,12 +524,17 @@ describe("PublishedListingEditor -- restriction-aware INTERACTION_BLOCKED error 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New Title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("Your selling access is currently suspended.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
 
     updatePublishedListingMock.mockResolvedValueOnce({ outcome: "saved", listing: sampleState({ title: "Newer Title" }), changed: true });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Newer Title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Changes saved"));
+    // Exactly one success toast total -- the earlier failed attempt must
+    // never have contributed one.
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     expect(screen.queryByText("Your selling access is currently suspended.")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
@@ -687,7 +735,7 @@ describe("PublishedListingEditor -- published gallery", () => {
     await waitFor(() => expect(updatePublishedListingMock).toHaveBeenCalledWith("listing-1", "1", { title: "New Title" }, null));
   });
 
-  it("a successful gallery save updates the gallery baseline, so an immediate second save with no further edits is a no-op", async () => {
+  it("a successful gallery-inclusive atomic save notifies 'Changes saved' exactly once (not once per image), and an immediate second save with no further edits is a no-op with no further notification", async () => {
     uploadImageMock.mockResolvedValue({ ok: true, path: "listing-images/u1/listing-1/new.jpg" });
     const savedImages = [image(), image({ id: "img-2", storagePath: "listing-images/u1/listing-1/new.jpg", position: 1 })];
     updatePublishedListingMock.mockResolvedValue({
@@ -701,12 +749,15 @@ describe("PublishedListingEditor -- published gallery", () => {
     await waitFor(() => expect(screen.getByText("2 of 8 photos")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Changes saved"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("No changes to save")).toBeInTheDocument();
     expect(updatePublishedListingMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
   it("enforces a maximum of 8 photos -- Add photo is unavailable at the cap", () => {
