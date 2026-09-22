@@ -27,11 +27,12 @@ describe("Notification foundation -- exactly one root toaster, no competing inst
     expect(source).not.toMatch(/<Toaster[^>]*>\s*\{children\}/);
   });
 
-  it("configured with the approved placement and no visible close button", () => {
+  it("configured with the approved placement, no visible close button, and semantic (rich) colors enabled", () => {
     const source = readFile("app/layout.tsx");
     const toasterTag = source.match(/<Toaster[^/]*\/>/)?.[0] ?? "";
     expect(toasterTag).toMatch(/position=["']top-center["']/);
     expect(toasterTag).toMatch(/closeButton=\{false\}/);
+    expect(toasterTag).toMatch(/\brichColors\b/);
   });
 
   it("no unrelated second aria-live region was added around the toaster", () => {

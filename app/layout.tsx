@@ -94,7 +94,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                       since the layout itself never unmounts on a route
                       change. The only global toaster instance; call sites
                       trigger it via lib/notifications/toast.ts. */}
-                  <Toaster position="top-center" closeButton={false} />
+                  <Toaster position="top-center" closeButton={false} richColors />
                 </FloatingMessengerProvider>
               </NotificationsProvider>
             </CartProvider>
