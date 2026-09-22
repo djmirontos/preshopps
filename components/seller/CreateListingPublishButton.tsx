@@ -9,6 +9,7 @@ import {
   PUBLISH_LISTING_ERROR_MESSAGES,
   ACCEPT_SELLER_POLICIES_ERROR_MESSAGES,
 } from "@/lib/seller/listing-actions";
+import { notifySuccess } from "@/lib/notifications/toast";
 import { SellerPolicyConsentDialog } from "@/components/seller/SellerPolicyConsentDialog";
 import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
@@ -76,6 +77,7 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
     setIsPublishing(false);
 
     if (result.ok) {
+      notifySuccess("Listing published");
       router.push(`/item/${result.publicCode}`);
       return;
     }
@@ -106,6 +108,7 @@ export function CreateListingPublishButton({ canPublish, ensureAndPersist }: Pro
 
     if (publishResult.ok) {
       setShowConsent(false);
+      notifySuccess("Listing published");
       router.push(`/item/${publishResult.publicCode}`);
       return;
     }

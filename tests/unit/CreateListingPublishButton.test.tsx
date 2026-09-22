@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, publishListingMock, acceptSellerPoliciesMock } = vi.hoisted(() => ({
+const { pushMock, publishListingMock, acceptSellerPoliciesMock, notifySuccessMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   publishListingMock: vi.fn(),
   acceptSellerPoliciesMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -19,6 +20,10 @@ vi.mock("@/lib/seller/listing-actions", async () => {
     acceptSellerPolicies: acceptSellerPoliciesMock,
   };
 });
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
+}));
 
 import { CreateListingPublishButton } from "@/components/seller/CreateListingPublishButton";
 
@@ -74,7 +79,7 @@ describe("CreateListingPublishButton -- ensure+persist before publish", () => {
     await waitFor(() => expect(publishListingMock).toHaveBeenCalledWith("draft-42"));
   });
 
-  it("shows a friendly error and never calls publish_listing when ensureAndPersist resolves to null", async () => {
+  it("shows a friendly error and never calls publish_listing when ensureAndPersist resolves to null -- no success toast from failed pre-persistence", async () => {
     const ensureAndPersist = vi.fn().mockResolvedValue(null);
     renderButton({ ensureAndPersist });
 
@@ -82,18 +87,21 @@ describe("CreateListingPublishButton -- ensure+persist before publish", () => {
 
     expect(await screen.findByText(/couldn't save your listing/i)).toBeInTheDocument();
     expect(publishListingMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
-  it("navigates to /item/{publicCode} on success", async () => {
+  it("navigates to /item/{publicCode} on success and notifies 'Listing published' exactly once, before navigating", async () => {
     publishListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC123", slug: "x", status: "available", publishedAt: "now" });
     renderButton();
 
     fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-ABC123"));
+    expect(notifySuccessMock).toHaveBeenCalledWith("Listing published");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("disables the button while publishing is pending, preventing a duplicate attempt", async () => {
+  it("disables the button while publishing is pending, preventing a duplicate attempt, and notifies only once", async () => {
     let resolvePublish: (value: unknown) => void = () => {};
     publishListingMock.mockReturnValue(new Promise((resolve) => (resolvePublish = resolve)));
     renderButton();
@@ -107,11 +115,12 @@ describe("CreateListingPublishButton -- ensure+persist before publish", () => {
 
     resolvePublish({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "available", publishedAt: "now" });
     await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("CreateListingPublishButton -- ordinary validation failures", () => {
-  it("shows a friendly message and stays on the page for a plain completeness error", async () => {
+  it("shows a friendly message and stays on the page for a plain completeness error -- no success toast", async () => {
     publishListingMock.mockResolvedValue({ ok: false, code: "PRICE_REQUIRED" });
     renderButton();
 
@@ -119,6 +128,7 @@ describe("CreateListingPublishButton -- ordinary validation failures", () => {
 
     expect(await screen.findByText("Please enter a price before publishing.")).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("never mutates listing state on an ordinary validation failure -- publish_listing is called exactly once", async () => {
@@ -133,7 +143,7 @@ describe("CreateListingPublishButton -- ordinary validation failures", () => {
 });
 
 describe("CreateListingPublishButton -- SELLER_POLICIES_NOT_ACCEPTED consent flow", () => {
-  it("opens the consent dialog reactively when publish_listing returns SELLER_POLICIES_NOT_ACCEPTED", async () => {
+  it("opens the consent dialog reactively when publish_listing returns SELLER_POLICIES_NOT_ACCEPTED -- no toast and no navigation from policy-required alone", async () => {
     publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
     renderButton();
 
@@ -142,6 +152,37 @@ describe("CreateListingPublishButton -- SELLER_POLICIES_NOT_ACCEPTED consent flo
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent(/marketplace rules/i);
     expect(dialog).toHaveTextContent(/prohibited items policy/i);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("Cancel closes the dialog without calling accept_seller_policies, and produces no success toast", async () => {
+    publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
+    renderButton();
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+    await screen.findByRole("dialog");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(acceptSellerPoliciesMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("shows an inline error inside the dialog and keeps it open if accept_seller_policies itself fails -- no success toast from acceptance alone", async () => {
+    publishListingMock.mockResolvedValue({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" });
+    acceptSellerPoliciesMock.mockResolvedValue({ ok: false, code: "PROFILE_NOT_FOUND" });
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Listing" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Accept & Publish" }));
+
+    expect(await screen.findByText(/couldn't find your profile/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(publishListingMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("calls accept_seller_policies only after explicit checkbox consent, never merely by opening the dialog", async () => {
@@ -159,7 +200,7 @@ describe("CreateListingPublishButton -- SELLER_POLICIES_NOT_ACCEPTED consent flo
     await waitFor(() => expect(acceptSellerPoliciesMock).toHaveBeenCalledTimes(1));
   });
 
-  it("automatically retries publish_listing (against the same ensured id) after a successful acceptance, and redirects on retry success", async () => {
+  it("automatically retries publish_listing (against the same ensured id) after a successful acceptance, redirects on retry success, and notifies 'Listing published' exactly once", async () => {
     const ensureAndPersist = vi.fn().mockResolvedValue("draft-7");
     publishListingMock
       .mockResolvedValueOnce({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" })
@@ -180,9 +221,13 @@ describe("CreateListingPublishButton -- SELLER_POLICIES_NOT_ACCEPTED consent flo
     expect(ensureAndPersist).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/item/PSL-XYZ"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Acceptance succeeding alone must never notify -- only the retry's own
+    // publish success does, and only once total.
+    expect(notifySuccessMock).toHaveBeenCalledWith("Listing published");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("if the retry fails for a real completeness reason, closes the dialog and shows the actual publish error", async () => {
+  it("if the retry fails for a real completeness reason, closes the dialog, shows the actual publish error, and never notifies success", async () => {
     publishListingMock
       .mockResolvedValueOnce({ ok: false, code: "SELLER_POLICIES_NOT_ACCEPTED" })
       .mockResolvedValueOnce({ ok: false, code: "IMAGE_REQUIRED" });
@@ -197,6 +242,7 @@ describe("CreateListingPublishButton -- SELLER_POLICIES_NOT_ACCEPTED consent flo
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByText(/please add at least one photo before publishing/i)).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 });
 
