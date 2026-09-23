@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const { signOutActionMock } = vi.hoisted(() => ({
   signOutActionMock: vi.fn(),
@@ -141,5 +141,43 @@ describe("AccountMenu -- desktop dropdown direct shortcuts", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("AccountMenu -- Sign out submission (via the shared SignOutForm)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clicking Sign out calls signOutAction", async () => {
+    signOutActionMock.mockResolvedValue({ error: null });
+    render(<AccountMenu email="buyer@example.com" />);
+    openMenu();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await waitFor(() => expect(signOutActionMock).toHaveBeenCalled());
+  });
+
+  it("a successful sign-out shows no error -- the confirmation itself is shown later, on the destination page", async () => {
+    signOutActionMock.mockResolvedValue({ error: null });
+    render(<AccountMenu email="buyer@example.com" />);
+    openMenu();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await waitFor(() => expect(signOutActionMock).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("a failed sign-out shows a useful inline error and never a success -- the Sign out control stays available to retry", async () => {
+    signOutActionMock.mockResolvedValue({ error: "We couldn't sign you out. Please try again." });
+    render(<AccountMenu email="buyer@example.com" />);
+    openMenu();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't sign you out. Please try again.");
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
   });
 });

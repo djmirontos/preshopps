@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AuthUser } from "@/lib/auth/session";
 import type { GetMyProfileResult, MyProfile } from "@/lib/account/get-my-profile";
 import type { LocationRef } from "@/lib/marketplace/reference-data";
@@ -201,6 +201,36 @@ describe("AccountPage", () => {
       expect(screen.getByText(/handled through a support request/i)).toBeInTheDocument();
     });
 
+    describe("Sign out submission (via the shared SignOutForm)", () => {
+      it("clicking Sign out calls signOutAction", async () => {
+        signOutActionMock.mockResolvedValue({ error: null });
+        render(await AccountPage());
+
+        fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+        await waitFor(() => expect(signOutActionMock).toHaveBeenCalled());
+      });
+
+      it("a successful sign-out shows no error -- the confirmation itself is shown later, on the destination page", async () => {
+        signOutActionMock.mockResolvedValue({ error: null });
+        render(await AccountPage());
+
+        fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+        await waitFor(() => expect(signOutActionMock).toHaveBeenCalled());
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+
+      it("a failed sign-out shows a useful inline error and never a success -- the Sign out control stays available to retry", async () => {
+        signOutActionMock.mockResolvedValue({ error: "We couldn't sign you out. Please try again." });
+        render(await AccountPage());
+
+        fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't sign you out. Please try again.");
+        expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+      });
+    });
   });
 
   describe("Security section", () => {

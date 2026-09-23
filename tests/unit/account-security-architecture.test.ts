@@ -261,17 +261,29 @@ describe("Sign out other devices uses the native scoped signOut, never affecting
   });
 });
 
-describe("Existing Sign out (normal) is completely untouched", () => {
-  it("lib/auth/actions.ts's signOutAction is unchanged: plain supabase.auth.signOut() with no scope, still redirects home", () => {
-    const source = readFile("lib/auth/actions.ts");
+describe("Regular Sign out gained failure feedback, but stayed session-scoped and homepage-bound like before", () => {
+  it("lib/auth/actions.ts's signOutAction still calls plain supabase.auth.signOut() with no scope option -- unlike Change Password's own separate, deliberately global sign-out", () => {
+    const source = stripComments(readFile("lib/auth/actions.ts"));
     expect(source).toMatch(/await supabase\.auth\.signOut\(\);/);
     expect(source).not.toMatch(/scope/);
-    expect(source).toMatch(/redirect\("\/"\)/);
   });
 
-  it("app/account/page.tsx's Account section still submits to signOutAction via a plain form, unchanged", () => {
+  it("still redirects to the same homepage on success, now carrying the one-time signedOut marker SignedOutNotice reads", () => {
+    const source = readFile("lib/auth/actions.ts");
+    expect(source).toMatch(/redirect\("\/\?signedOut=1"\)/);
+  });
+
+  it("a genuine sign-out failure returns an error instead of redirecting -- the caller never sees a false success", () => {
+    const source = readFile("lib/auth/actions.ts");
+    expect(source).toMatch(/if \(error\) \{/);
+    expect(source).toMatch(/return \{ error: SIGN_OUT_ERROR_MESSAGE \};/);
+  });
+
+  it("app/account/page.tsx's Account section submits through the shared SignOutForm now, not a bare form action", () => {
     const source = readFile("app/account/page.tsx");
-    expect(source).toMatch(/form action=\{signOutAction\}/);
+    expect(source).toMatch(/from ["']@\/components\/auth\/SignOutForm["']/);
+    expect(source).toMatch(/<SignOutForm/);
+    expect(source).not.toMatch(/form action=\{signOutAction\}/);
   });
 });
 

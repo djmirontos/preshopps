@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronRight, Heart, List, Package, Store } from "lucide-react";
 import { getAuthUser } from "@/lib/auth/session";
-import { signOutAction } from "@/lib/auth/actions";
+import { SignOutForm } from "@/components/auth/SignOutForm";
 import { getMyProfile } from "@/lib/account/get-my-profile";
 import { getProvinces, getCitiesForProvince, getBarangaysForCity, type LocationRef } from "@/lib/marketplace/reference-data";
 import { getMyActiveRestrictions } from "@/lib/moderation/get-my-active-restrictions";
@@ -165,14 +165,7 @@ export default async function AccountPage() {
       <section className="mt-10">
         <h2 className="text-sm font-semibold text-ink">Account</h2>
         <div className="mt-3 space-y-3">
-          <form action={signOutAction}>
-            <button
-              type="submit"
-              className="h-11 w-full rounded-[10px] border border-border text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              Sign out
-            </button>
-          </form>
+          <SignOutForm className="h-11 w-full rounded-[10px] border border-border text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand" />
 
           <div className="rounded-[10px] border border-border p-3">
             <p className="text-sm font-medium text-ink">Request account deletion</p>

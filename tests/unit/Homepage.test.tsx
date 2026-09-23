@@ -17,6 +17,18 @@ vi.mock("@/lib/marketplace/reference-data", () => ({
   getCategories: getCategoriesMock,
 }));
 
+// The homepage now mounts SignedOutNotice (components/auth/SignedOutNotice.tsx)
+// for the post-sign-out confirmation, which needs a router context Next's
+// real navigation hooks don't have outside the actual app router. None of
+// these tests exercise that marker, so the default "no signedOut param"
+// case (see SignedOutNotice.test.tsx for its own dedicated coverage) is
+// all that's needed here.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => ({ get: () => null }),
+}));
+
 import Home from "@/app/page";
 
 const sampleCategories: CategoryRef[] = [

@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { SignedOutNotice } from "@/components/auth/SignedOutNotice";
 import { Hero } from "@/components/marketplace/Hero";
 import { CategoryStrip } from "@/components/marketplace/CategoryStrip";
 import { SectionHeader } from "@/components/marketplace/SectionHeader";
@@ -24,6 +26,14 @@ export default async function Home() {
 
   return (
     <>
+      {/* useSearchParams requires its own Suspense boundary; this reads
+          the one-time ?signedOut=1 marker left by signOutAction's own
+          successful redirect, shows the confirmation once, then strips
+          the marker so a manual refresh never repeats it. Renders
+          nothing itself. */}
+      <Suspense fallback={null}>
+        <SignedOutNotice />
+      </Suspense>
       <Hero />
       <CategoryStrip categories={categories} />
 

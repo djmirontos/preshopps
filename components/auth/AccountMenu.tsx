@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { UserCircle } from "lucide-react";
-import { signOutAction } from "@/lib/auth/actions";
+import { SignOutForm } from "@/components/auth/SignOutForm";
 import { Tooltip } from "@/components/ui/Tooltip";
 
 type Props = {
@@ -102,15 +102,10 @@ export function AccountMenu({ email }: Props) {
             </Link>
           ))}
           <div className="mt-1 border-t border-border pt-1">
-            <form action={signOutAction}>
-              <button
-                type="submit"
-                role="menuitem"
-                className="flex h-11 w-full items-center rounded-[10px] px-3 text-left text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-              >
-                Sign out
-              </button>
-            </form>
+            <SignOutForm
+              role="menuitem"
+              className="flex h-11 w-full items-center rounded-[10px] px-3 text-left text-sm text-ink hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            />
           </div>
         </div>
       )}
