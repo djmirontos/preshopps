@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, refreshMock, createReviewMock, updateReviewMock, uploadImageMock, deleteUploadedImageMock } = vi.hoisted(() => ({
+const { pushMock, refreshMock, createReviewMock, updateReviewMock, uploadImageMock, deleteUploadedImageMock, notifySuccessMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
   createReviewMock: vi.fn(),
   updateReviewMock: vi.fn(),
   uploadImageMock: vi.fn(),
   deleteUploadedImageMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/lib/image-processing/upload-image", async () => {
     deleteUploadedImage: deleteUploadedImageMock,
   };
 });
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
+}));
 
 import { ReviewFormClient } from "@/components/orders/ReviewFormClient";
 
@@ -69,6 +74,17 @@ describe("ReviewFormClient -- create mode", () => {
 
     await waitFor(() => expect(createReviewMock).toHaveBeenCalledWith("order-1", 4, "Great seller", []));
     expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC");
+  });
+
+  it("a successful create never fires a toast -- create keeps its existing navigation-only confirmation, unchanged", async () => {
+    createReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: /4 stars/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("sends null body when the review text is left blank", async () => {
@@ -294,6 +310,117 @@ describe("ReviewFormClient -- edit mode", () => {
     await waitFor(() => expect(updateReviewMock).toHaveBeenCalledWith("review-1", 3, "Original text", []));
   });
 
+  it("a successful edit fires exactly one 'Review updated' toast, before navigating away", async () => {
+    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        initialBody="Original text"
+        purchasedItemTitles={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+    expect(notifySuccessMock).toHaveBeenCalledWith("Review updated");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock.mock.invocationCallOrder[0]).toBeLessThan(pushMock.mock.invocationCallOrder[0]);
+  });
+
+  it("blocks a second submit while success cleanup is still pending, then toasts and navigates exactly once once it resolves", async () => {
+    let resolveCleanup: (value: boolean) => void = () => {};
+    deleteUploadedImageMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCleanup = resolve;
+        }),
+    );
+    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        initialImagePaths={["review-images/buyer-1/order-1/remove.jpg"]}
+        initialImageUrls={["https://example.supabase.co/x/remove.jpg"]}
+        purchasedItemTitles={[]}
+      />,
+    );
+
+    const submitButton = screen.getByRole("button", { name: "Save changes" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
+    fireEvent.click(submitButton);
+
+    // update_review has already resolved successfully, but the removed
+    // photo's own cleanup (deleteUploadedImage) is still pending.
+    await waitFor(() => expect(updateReviewMock).toHaveBeenCalledTimes(1));
+    expect(submitButton).toBeDisabled();
+
+    // A second click while cleanup is still in flight must never re-enter
+    // the handler and call update_review again.
+    fireEvent.click(submitButton);
+    expect(updateReviewMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+
+    resolveCleanup(true);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+    expect(notifySuccessMock).toHaveBeenCalledWith("Review updated");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a retry until failure cleanup finishes, then a fresh submit succeeds normally", async () => {
+    let resolveCleanup: (value: boolean) => void = () => {};
+    deleteUploadedImageMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCleanup = resolve;
+        }),
+    );
+    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/orphaned.jpg" });
+    updateReviewMock.mockResolvedValueOnce({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
+
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    selectFile(screen.getByLabelText(/add a review photo/i));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled());
+    const submitButton = screen.getByRole("button", { name: "Save changes" });
+
+    fireEvent.click(submitButton);
+
+    expect(await screen.findByText("The 7-day edit window for this review has closed.")).toBeInTheDocument();
+    // The failed submission's own orphaned-upload cleanup is still
+    // pending -- retry must stay blocked until it finishes.
+    expect(submitButton).toBeDisabled();
+    expect(updateReviewMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(submitButton);
+    expect(updateReviewMock).toHaveBeenCalledTimes(1);
+
+    resolveCleanup(true);
+    await waitFor(() => expect(submitButton).not.toBeDisabled());
+
+    updateReviewMock.mockResolvedValueOnce({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(updateReviewMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+  });
+
   it("maps REVIEW_EDIT_WINDOW_CLOSED to safe copy on a stale submit", async () => {
     updateReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
     render(
@@ -302,6 +429,7 @@ describe("ReviewFormClient -- edit mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("The 7-day edit window for this review has closed.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("resubmits an existing image path unchanged, and never deletes it if the mutation fails", async () => {
@@ -467,6 +595,7 @@ describe("ReviewFormClient -- edit mode, restriction-aware INTERACTION_BLOCKED e
     expect(await screen.findByText("You can't edit this review right now.")).toBeInTheDocument();
     expect(screen.getByText("Your account is currently suspended.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View account status" })).toHaveAttribute("href", "/account#account-status");
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("a buyer-only restriction (update_review deliberately never blocks editing for buyer_restricted alone) produces the generic edit error with no detail/link", async () => {

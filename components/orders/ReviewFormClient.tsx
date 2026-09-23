@@ -7,6 +7,7 @@ import { StarRatingInput } from "@/components/reviews/StarRatingInput";
 import { ReviewImagePicker } from "@/components/orders/ReviewImagePicker";
 import { createReview, updateReview, CREATE_REVIEW_ERROR_MESSAGES, UPDATE_REVIEW_ERROR_MESSAGES } from "@/lib/reviews/review-actions";
 import { deleteUploadedImage } from "@/lib/image-processing/upload-image";
+import { notifySuccess } from "@/lib/notifications/toast";
 import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
 const BODY_MAX_LENGTH = 1000;
@@ -61,6 +62,12 @@ type Props = {
  *   must never turn an already-successful review save into a visible
  *   failure -- it only leaves a harmless orphaned file, logged
  *   server-side by deleteUploadedImage itself, never surfaced to the user.
+ *
+ * Edit-mode confirmation: a successful update_review call fires exactly
+ * one notifySuccess("Review updated") toast, right before the existing
+ * navigation. Create mode is unchanged -- it keeps its existing
+ * navigation-only confirmation (no toast), since this addition is scoped
+ * to edit only.
  */
 export function ReviewFormClient({
   mode,
@@ -118,22 +125,34 @@ export function ReviewFormClient({
 
     if (mode === "create") {
       const result = await createReview(orderId, rating, bodyToSend, imagePaths);
-      setIsSubmitting(false);
       if (!result.ok) {
         setSubmitError({ message: CREATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
+        // Retry is only allowed once this failure's own cleanup has
+        // finished -- re-enabling Submit any earlier could let a second
+        // click race the still-in-flight delete of this same orphaned
+        // upload.
         await cleanUpNewlyUploadedImages(imagePaths);
+        setIsSubmitting(false);
         return;
       }
     } else {
       const result = await updateReview(reviewId as string, rating, bodyToSend, imagePaths);
-      setIsSubmitting(false);
       if (!result.ok) {
         setSubmitError({ message: UPDATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
         await cleanUpNewlyUploadedImages(imagePaths);
+        setIsSubmitting(false);
         return;
       }
     }
 
+    // Deliberately left true (Submit stays disabled) all the way through
+    // cleanup and navigation below -- the RPC already succeeded, so a
+    // second click here (e.g. during a slow Storage cleanup call) must
+    // never be allowed to re-enter this handler and submit a duplicate
+    // mutation, double-fire the toast, or double-navigate. The component
+    // unmounts on the route change below, so there is no later point
+    // where this needs to be reset back to false.
+    //
     // Best-effort only -- deleteUploadedImage itself never throws, but this
     // extra guard ensures a cleanup problem can never prevent the already-
     // successful save from navigating away normally (rule: cleanup failure
@@ -142,6 +161,13 @@ export function ReviewFormClient({
       await cleanUpRemovedPersistedImages(imagePaths);
     } catch (err) {
       console.error("Post-save review image cleanup threw:", err instanceof Error ? err.message : err);
+    }
+
+    // Edit only -- create keeps its existing, unchanged navigation-only
+    // confirmation. Fires only once updateReview() has already confirmed
+    // success above, and always before the navigation below.
+    if (mode === "edit") {
+      notifySuccess("Review updated");
     }
 
     router.push(`/orders/${orderPublicCode}`);
