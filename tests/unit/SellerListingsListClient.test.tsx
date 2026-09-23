@@ -253,6 +253,47 @@ describe("SellerListingsListClient -- immediate (non-confirmed) actions: Pause/R
     await screen.findByText(/isn't allowed from the listing's current status/i);
     expect(notifySuccessMock).not.toHaveBeenCalled();
   });
+
+  // Regression coverage: update_listing_status calls validate_published_listing
+  // on Paused -> Available, so a Resume attempt can fail with one of that
+  // validator's own completeness codes (e.g. stock silently reaching 0 while
+  // paused). Before lib/seller/listing-actions.ts recognized these codes, this
+  // exact case fell back to UNKNOWN and rendered the generic "Something went
+  // wrong. Please try again." -- useless for telling the seller what to fix.
+  it("shows the specific validation message (not the generic fallback) when Resume fails validate_published_listing's own check, keeps the listing Paused, and never calls notifySuccess", async () => {
+    updateListingStatusMock.mockResolvedValue({ ok: false, code: "STOCK_QUANTITY_INVALID" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByText("Stock quantity must be at least 1.")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong. Please try again.")).not.toBeInTheDocument();
+
+    // The row's own status badge and available actions must still reflect
+    // Paused -- the failed Resume must never have been applied optimistically.
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("a successful retry after a validation failure still fires exactly one 'Listing resumed' toast and the row updates to Available", async () => {
+    updateListingStatusMock.mockResolvedValueOnce({ ok: false, code: "STOCK_QUANTITY_INVALID" });
+    renderList({ initialListings: [listing({ status: "paused" })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await screen.findByText("Stock quantity must be at least 1.");
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+
+    updateListingStatusMock.mockResolvedValueOnce({ ok: true, listingId: "listing-1", status: "available", wasAlreadyInStatus: false, updatedAt: "now" });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Listing resumed"));
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Stock quantity must be at least 1.")).not.toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+  });
 });
 
 describe("SellerListingsListClient -- confirmed actions: Mark Sold/Archive", () => {

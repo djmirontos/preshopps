@@ -700,7 +700,34 @@ export type UpdateListingStatusErrorCode =
   | "NOT_LISTING_OWNER"
   | "TARGET_STATUS_NOT_ALLOWED"
   | "LISTING_HAS_ACTIVE_RESERVATION"
-  | "INVALID_STATUS_TRANSITION";
+  | "INVALID_STATUS_TRANSITION"
+  // The Paused -> Available transition (Resume) is the one case where
+  // update_listing_status (0094) itself calls validate_published_listing,
+  // exactly as publish_listing does -- any of publish_listing's own
+  // completeness codes (see PublishListingErrorCode above) can therefore
+  // come back from a Resume attempt too (e.g. stock quietly dropped to 0
+  // while paused). Before this addition these all fell through toErrorCode's
+  // unknown-detail branch to a generic "Something went wrong" message, even
+  // though the RPC's `detail` already carried the specific, useful reason --
+  // the fix belongs here, not in SellerListingsListClient (which only ever
+  // renders whatever message this map hands it) and not in the database
+  // (validate_published_listing already reports the right code).
+  | "TITLE_REQUIRED"
+  | "DESCRIPTION_REQUIRED"
+  | "CATEGORY_REQUIRED"
+  | "LISTING_TYPE_REQUIRED"
+  | "CONDITION_REQUIRED"
+  | "LISTING_TYPE_CONDITION_MISMATCH"
+  | "KNOWN_FLAWS_REQUIRED"
+  | "PRICE_REQUIRED"
+  | "STOCK_QUANTITY_INVALID"
+  | "PROVINCE_REQUIRED"
+  | "CITY_REQUIRED"
+  | "FULFILLMENT_REQUIRED"
+  | "IMAGE_REQUIRED"
+  | "TOO_MANY_LISTING_IMAGES"
+  | "REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED"
+  | "BRAND_NEW_REQUIRES_ACTUAL_IMAGE";
 
 const UPDATE_LISTING_STATUS_ERROR_CODES: ReadonlySet<string> = new Set<UpdateListingStatusErrorCode>([
   "NOT_AUTHENTICATED",
@@ -711,6 +738,22 @@ const UPDATE_LISTING_STATUS_ERROR_CODES: ReadonlySet<string> = new Set<UpdateLis
   "TARGET_STATUS_NOT_ALLOWED",
   "LISTING_HAS_ACTIVE_RESERVATION",
   "INVALID_STATUS_TRANSITION",
+  "TITLE_REQUIRED",
+  "DESCRIPTION_REQUIRED",
+  "CATEGORY_REQUIRED",
+  "LISTING_TYPE_REQUIRED",
+  "CONDITION_REQUIRED",
+  "LISTING_TYPE_CONDITION_MISMATCH",
+  "KNOWN_FLAWS_REQUIRED",
+  "PRICE_REQUIRED",
+  "STOCK_QUANTITY_INVALID",
+  "PROVINCE_REQUIRED",
+  "CITY_REQUIRED",
+  "FULFILLMENT_REQUIRED",
+  "IMAGE_REQUIRED",
+  "TOO_MANY_LISTING_IMAGES",
+  "REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED",
+  "BRAND_NEW_REQUIRES_ACTUAL_IMAGE",
 ]);
 
 export const UPDATE_LISTING_STATUS_ERROR_MESSAGES: ErrorMap<UpdateListingStatusErrorCode> = {
@@ -722,6 +765,23 @@ export const UPDATE_LISTING_STATUS_ERROR_MESSAGES: ErrorMap<UpdateListingStatusE
   TARGET_STATUS_NOT_ALLOWED: "That status cannot be set directly.",
   LISTING_HAS_ACTIVE_RESERVATION: "This listing has an active order reservation and can't be changed right now.",
   INVALID_STATUS_TRANSITION: "That status change isn't allowed from the listing's current status.",
+  TITLE_REQUIRED: "Please enter a title for your listing.",
+  DESCRIPTION_REQUIRED: "Please add a description before resuming.",
+  CATEGORY_REQUIRED: "Please choose a category before resuming.",
+  LISTING_TYPE_REQUIRED: "Please choose a listing type before resuming.",
+  CONDITION_REQUIRED: "Please choose a condition before resuming.",
+  LISTING_TYPE_CONDITION_MISMATCH: "That condition doesn't match the selected listing type.",
+  KNOWN_FLAWS_REQUIRED: "Please describe the known flaws for Fair condition.",
+  PRICE_REQUIRED: "Please enter a price before resuming.",
+  STOCK_QUANTITY_INVALID: "Stock quantity must be at least 1.",
+  PROVINCE_REQUIRED: "Please choose a province before resuming.",
+  CITY_REQUIRED: "Please choose a city or municipality before resuming.",
+  FULFILLMENT_REQUIRED: "Please select at least one fulfillment method before resuming.",
+  IMAGE_REQUIRED: "Please add at least one photo before resuming.",
+  TOO_MANY_LISTING_IMAGES: "A listing may have at most 8 photos.",
+  REFERENCE_IMAGES_NOT_ALLOWED_FOR_PRELOVED:
+    "Pre-loved listings may only include actual-item photos. Remove or replace the reference/catalog photos in the Photos section, or switch to Brand New.",
+  BRAND_NEW_REQUIRES_ACTUAL_IMAGE: "Brand New listings need at least one actual-item photo. Mark a photo as Actual in the Photos section.",
   UNKNOWN: "Something went wrong. Please try again.",
 };
 
