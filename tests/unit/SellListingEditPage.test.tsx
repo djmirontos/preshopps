@@ -240,7 +240,7 @@ describe("SellListingEditPage", () => {
       render(await SellListingEditPage({ params: params("listing-1") }));
 
       expect(screen.getByLabelText(/description/i)).toHaveValue("");
-      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("");
+      expect(screen.getByLabelText(/^price$/i)).toHaveValue("");
       expect(screen.getByLabelText(/brand/i)).toHaveValue("");
       expect(screen.getByLabelText(/^category/i)).toHaveValue("");
     });
@@ -251,7 +251,7 @@ describe("SellListingEditPage", () => {
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("19.99");
+      expect(screen.getByLabelText(/^price$/i)).toHaveValue("19.99");
       expect(screen.getByLabelText(/original price/i)).toHaveValue("25.00");
     });
 
@@ -261,7 +261,7 @@ describe("SellListingEditPage", () => {
 
       render(await SellListingEditPage({ params: params("listing-1") }));
 
-      expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("0.00");
+      expect(screen.getByLabelText(/^price$/i)).toHaveValue("0.00");
     });
 
     it("loads city/barangay reference options for the listing's stored location", async () => {

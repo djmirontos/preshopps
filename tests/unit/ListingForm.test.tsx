@@ -150,7 +150,7 @@ describe("ListingForm -- create mode", () => {
     renderForm();
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "19.99" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "19.99" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() => expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ priceCents: 1999 })));
@@ -161,7 +161,7 @@ describe("ListingForm -- create mode", () => {
     renderForm();
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() => expect(createListingMock).toHaveBeenCalledWith(expect.objectContaining({ priceCents: 0 })));
@@ -170,7 +170,7 @@ describe("ListingForm -- create mode", () => {
   it("rejects a malformed price client-side, before ever calling create_listing", async () => {
     renderForm();
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "abc" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "abc" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(await screen.findByText("Please enter a valid price.")).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe("ListingForm -- create mode", () => {
   it("rejects an original price lower than price client-side, before calling create_listing", async () => {
     renderForm();
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Item" } });
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText(/original price/i), { target: { value: "50" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
@@ -380,7 +380,7 @@ describe("ListingForm -- create mode", () => {
     renderForm();
     expect(screen.getByLabelText("Title")).toBeInTheDocument();
     expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^price$/i)).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Save Draft" });
     expect(submit.className).toContain("h-11");
   });
@@ -404,7 +404,7 @@ describe("ListingForm -- redundant section headings removed", () => {
     expect(screen.getByLabelText(/^brand/i, { selector: "#listing-brand" })).toBeInTheDocument();
     expect(screen.getByLabelText(/^category/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/listing type/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^price$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/original price/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/stock quantity/i)).toBeInTheDocument();
   });
@@ -480,7 +480,7 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm({ initialValues: { ...EMPTY_VALUES, priceCents: 1000 } });
 
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "19.99" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "19.99" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { price_cents: 1999 }));
@@ -490,8 +490,8 @@ describe("ListingForm -- edit mode: patch-diff semantics", () => {
     updateListingMock.mockResolvedValue({ ok: true, listingId: "listing-1", publicCode: "PSL-ABC", slug: "x", status: "draft", updatedAt: "now" });
     renderEditForm({ initialValues: { ...EMPTY_VALUES, priceCents: 1999 } });
 
-    expect(screen.getByLabelText(/^price \(optional\)/i)).toHaveValue("19.99");
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "" } });
+    expect(screen.getByLabelText(/^price$/i)).toHaveValue("19.99");
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
 
     await waitFor(() => expect(updateListingMock).toHaveBeenCalledWith("listing-1", { price_cents: null }));
@@ -1146,7 +1146,7 @@ function fillCompleteListing() {
   fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
   fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
   fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "good" } });
-  fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500" } });
+  fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "500" } });
   fireEvent.click(screen.getByLabelText("Meetup"));
 }
 
@@ -1209,7 +1209,7 @@ describe("ListingForm -- onPublishReadyChange (live publish-completeness signal,
     fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
     fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "good" } });
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500000" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "500000" } });
 
     expect(onPublishReadyChange).toHaveBeenLastCalledWith(true);
   });

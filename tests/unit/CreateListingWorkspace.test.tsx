@@ -207,7 +207,7 @@ function fillRequiredDetails() {
   fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
   fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "preloved" } });
   fireEvent.change(screen.getByLabelText(/^condition/i), { target: { value: "good" } });
-  fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500" } });
+  fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "500" } });
   fireEvent.click(screen.getByLabelText("Meetup"));
 }
 
@@ -258,7 +258,7 @@ describe("CreateListingWorkspace -- Brand New condition auto-assignment (0101)",
     fireEvent.change(screen.getByLabelText(/^category/i), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText(/listing type/i), { target: { value: "brand_new" } });
     expect(screen.queryByLabelText(/^condition/i)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/^price \(optional\)/i), { target: { value: "500" } });
+    fireEvent.change(screen.getByLabelText(/^price$/i), { target: { value: "500" } });
     fireEvent.click(screen.getByLabelText("Meetup"));
     selectFile(screen.getByLabelText("Add a listing photo"));
 

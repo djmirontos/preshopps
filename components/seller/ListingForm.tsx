@@ -861,7 +861,7 @@ export const ListingForm = forwardRef<ListingFormHandle, Props>(function Listing
         <div className="space-y-3">
           <div>
             <label htmlFor="listing-price" className="text-sm font-medium text-ink">
-              Price <span className="font-normal text-ink-muted">(optional)</span>
+              Price
             </label>
             <div className="mt-1.5 flex items-center rounded-[10px] border border-border bg-surface pl-3 focus-within:ring-2 focus-within:ring-brand">
               <span className="text-sm text-ink-muted">₱</span>
