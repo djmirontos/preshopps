@@ -166,7 +166,7 @@ describe("Bell vs Messages badge counts are split and never double-counted", () 
     expect(source).not.toMatch(/\bunreadCount\b/);
   });
 
-  it("routes new_message to a debounced authoritative refresh (never a direct setUnreadMessageCount increment) and every other type to a direct unreadNotificationCount increment, in one exclusive branch", () => {
+  it("routes new_message to a debounced authoritative refresh of unreadMessageCount, and every other type to a debounced authoritative refresh of unreadNotificationCount, in one exclusive branch -- neither ever a raw increment", () => {
     const source = readFile("components/notifications/NotificationsProvider.tsx");
     const branchMatch = source.match(/if \(row\.type === ["']new_message["']\) \{([\s\S]*?)\n\s*\} else \{([\s\S]*?)\n\s*\}/);
     expect(branchMatch).not.toBeNull();
@@ -179,9 +179,47 @@ describe("Bell vs Messages badge counts are split and never double-counted", () 
     expect(newMessageBranch).toMatch(/setTimeout/);
     expect(newMessageBranch).toMatch(/refreshUnreadMessageCount\(\)/);
 
-    // every other type still increments the Bell count directly and
-    // immediately -- unaffected by the new_message debounce.
-    expect(otherBranch).toMatch(/setUnreadNotificationCount\(\(prev\) => prev \+ 1\)/);
+    // every other type also never increments the Bell count directly --
+    // it schedules its own, separately-tracked debounced authoritative
+    // re-fetch instead (the missed-event/double-count fix), never sharing
+    // a timer/ref with the new_message branch above.
+    expect(otherBranch).not.toMatch(/setUnreadNotificationCount/);
+    expect(otherBranch).toMatch(/clearTimeout/);
+    expect(otherBranch).toMatch(/setTimeout/);
+    expect(otherBranch).toMatch(/refreshUnreadNotificationCount\(\)/);
+    expect(newMessageBranch).not.toMatch(/notificationRefreshTimeoutRef/);
+    expect(otherBranch).not.toMatch(/refreshTimeoutRef\.current/);
+  });
+
+  it("the Bell's own debounce timer is tracked in its own ref, separate from the Messages badge's timer, and cleared both on reschedule and on unmount", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/notificationRefreshTimeoutRef\s*=\s*useRef/);
+    expect(source).toMatch(/if \(notificationRefreshTimeoutRef\.current\) clearTimeout\(notificationRefreshTimeoutRef\.current\)/);
+  });
+
+  it("refreshUnreadNotificationCount never overwrites a known Bell count with a fabricated 0 on an RPC error, mirroring refreshUnreadMessageCount's own contract", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/const refreshUnreadNotificationCount = useCallback\(\(\) => \{/);
+    expect(source).toMatch(/if \(result\.ok\) setUnreadNotificationCount\(result\.count\)/);
+  });
+
+  it("the Bell is refreshed on mount, on window focus, and on Realtime reconnect -- all three independent of the Messages badge's own triggers", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).toMatch(/hasRevalidatedNotificationsOnMountRef/);
+    expect(source).toMatch(/window\.addEventListener\(["']focus["'],\s*handleWindowFocus\)/);
+    expect(source).toMatch(/if \(!hasSubscribedOnce \|\| experiencedDisconnectAfterSubscribe\) \{\s*experiencedDisconnectAfterSubscribe = false;\s*refreshUnreadNotificationCount\(\);/);
+  });
+
+  it("review fix: a genuine CLOSED (not just CHANNEL_ERROR/TIMED_OUT) also counts as a disconnect for reconnect purposes, but only while the effect is still active (never on our own unmount/auth-change teardown)", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    const closedBranch = source.split('if (status === "CLOSED") {')[1]!.split("return;\n            }")[0]!;
+    expect(closedBranch).toMatch(/if \(!cancelled && hasSubscribedOnce\) experiencedDisconnectAfterSubscribe = true;/);
+  });
+
+  it("review fix: refreshUnreadNotificationCount is never exposed as public API -- no useRefreshUnreadNotificationCount hook (it had zero callers and was removed)", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    expect(source).not.toMatch(/export function useRefreshUnreadNotificationCount/);
+    expect(source).not.toMatch(/refreshUnreadNotificationCount: \(\) => void/);
   });
 
   it("the new_message debounce timer is tracked in a ref and cleared both on reschedule and on unmount -- no leaked timer, no drift from a stale pending refresh", () => {
@@ -192,8 +230,25 @@ describe("Bell vs Messages badge counts are split and never double-counted", () 
 
   it("markOneRead/markAllRead (driven by /notifications' own mark-read actions) only ever touch unreadNotificationCount", () => {
     const source = readFile("components/notifications/NotificationsProvider.tsx");
-    expect(source).toMatch(/markOneRead = useCallback\(\(\) => setUnreadNotificationCount/);
-    expect(source).toMatch(/markAllRead = useCallback\(\(\) => setUnreadNotificationCount\(0\)/);
+    // Review fix: each now also bumps latestNotificationRefreshRequestIdRef
+    // (invalidating any in-flight Bell refresh) before touching the count,
+    // so these are block-bodied callbacks now, not single-expression ones.
+    const markOneReadFn = source.split("const markOneRead = useCallback(() => {")[1]!.split("}, []);")[0]!;
+    const markAllReadFn = source.split("const markAllRead = useCallback(() => {")[1]!.split("}, []);")[0]!;
+    expect(markOneReadFn).toMatch(/setUnreadNotificationCount/);
+    expect(markOneReadFn).toMatch(/latestNotificationRefreshRequestIdRef\.current \+= 1/);
+    expect(markAllReadFn).toMatch(/setUnreadNotificationCount\(0\)/);
+    expect(markAllReadFn).toMatch(/latestNotificationRefreshRequestIdRef\.current \+= 1/);
+    expect(markOneReadFn).not.toMatch(/setUnreadMessageCount/);
+    expect(markAllReadFn).not.toMatch(/setUnreadMessageCount/);
+  });
+
+  it("review fix: every optimistic Bell mutator (mark-read, dismiss, clear-all) invalidates any in-flight refreshUnreadNotificationCount so a stale response can never clobber a fresher locally-known value", () => {
+    const source = readFile("components/notifications/NotificationsProvider.tsx");
+    for (const fn of ["markOneRead", "markAllRead", "decrementGeneralUnreadByOne", "restoreGeneralUnreadByOne", "clearGeneralUnreadCount"]) {
+      const body = source.split(`const ${fn} = useCallback(() => {`)[1]!.split("}, []);")[0]!;
+      expect(body).toMatch(/latestNotificationRefreshRequestIdRef\.current \+= 1/);
+    }
   });
 
   it("MessagesIconLink (desktop) and MobileBottomNav's Messages tab both read unreadMessageCount, never unreadNotificationCount", () => {

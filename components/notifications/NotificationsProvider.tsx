@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMyUnreadConversationCount } from "@/lib/messaging/get-my-unread-conversation-count";
+import { getMyGeneralNotificationUnreadCount } from "@/lib/notifications/get-my-general-notification-unread-count-client";
 import type { NotificationType } from "@/lib/notifications/get-my-notifications";
 
 /** Raw public.notifications row shape, exactly as Realtime's
@@ -136,28 +137,83 @@ type Props = {
  *   triggers one refetch shortly after the burst settles, not one per
  *   message. Never affects unreadNotificationCount.
  * - everything else: unreadNotificationCount (the Bell, general
- *   marketplace activity) is incremented by exactly 1 per deduped event --
- *   safe here because each such event is its own independent, permanent
- *   unread item (no analogous "already counted via a different row"
- *   ambiguity the way conversations have). Never affects
- *   unreadMessageCount.
+ *   marketplace activity) schedules the exact same kind of debounced
+ *   authoritative refresh as new_message above (refreshUnreadNotification
+ *   Count, its own separate debounce timer/ref so it never interferes
+ *   with the Messages badge's timer) -- NOT a raw per-event increment.
+ *   Never affects unreadMessageCount.
  *
- * Session-race fix (see this Provider's own git history for the original
- * bug): this Provider mounts at the very first paint of the app, before
- * the browser Supabase client has necessarily finished restoring/
- * validating the session from cookies/localStorage. Subscribing before
- * that resolves means the Realtime websocket authenticates as anon (no
- * JWT), so notifications_select_own's RLS check (auth.uid() =
- * recipient_id) never matches for that connection -- Postgres silently
- * sends zero events to it, and since isAuthenticated/userId are resolved
- * server-side and never change again, the effect never re-runs to retry.
- * Explicitly awaiting getSession() first forces the client to finish that
- * hydration (which internally calls realtime.setAuth(access_token)) before
- * the channel is ever created. (ConversationDetailClient's own messages
- * subscription deliberately does NOT get this same guard -- see its own
- * file for why.)
+ *   This was a raw `setUnreadNotificationCount((prev) => prev + 1)`
+ *   originally, which is unsafe once any authoritative refresh of this
+ *   same counter exists (see the mount/focus/reconnect refreshes below):
+ *   Realtime delivery for a given row can arrive AFTER an unrelated
+ *   authoritative refresh's RPC round trip that already read that same
+ *   freshly-committed row (Realtime's WAL-based delivery has its own
+ *   latency, independent of a plain PostgREST RPC call, and the two are
+ *   never ordered relative to each other). If that refresh's absolute
+ *   count is applied first and the raw increment for the same row lands
+ *   afterward, the Bell double-counts that one row by 1. Routing every
+ *   Bell-affecting event through the same authoritative-refresh mechanism
+ *   (always an absolute recount, gated by the latest-request-wins guard
+ *   below, never an arithmetic add) removes this by construction: there is
+ *   no longer any "increment on top of an already-inclusive value" to
+ *   double-count in the first place.
+ *
+ * Session-race note: this Provider mounts at the very first paint of the
+ * app, before the browser Supabase client has necessarily finished
+ * restoring/validating the session from cookies/localStorage. The
+ * installed @supabase/supabase-js (2.112.x) constructs its Realtime client
+ * with a live `accessToken` callback that re-reads the current session on
+ * every channel join/rejoin, rather than requiring a one-time push -- so a
+ * join is authenticated correctly regardless of when it happens relative
+ * to session hydration. Explicitly awaiting getSession() before creating
+ * the channel is kept anyway as a harmless, defensive ordering guard (and
+ * to force this effect's own `cancelled` check to run after any
+ * Strict-Mode double-invoke cleanup, which is what actually prevents the
+ * two invocations from ever creating a channel each on the same topic --
+ * see subscribe() below), but it is no longer the load-bearing fix for
+ * "Realtime never fires" the way it was against older client versions.
+ * (ConversationDetailClient's own messages subscription deliberately does
+ * NOT get this same guard -- see its own file for why.)
+ *
+ * Missed-event recovery (the actual fix for "the seller Bell didn't update
+ * while their page was open"): unlike ConversationThread's messages
+ * channel, this Provider previously had no reconnect reconciliation at
+ * all. realtime-js transparently reconnects a dropped websocket and
+ * rejoins already-subscribed channels on its own, but it never replays
+ * postgres_changes events published while a channel was disconnected --
+ * any notification INSERT that lands during a silent drop/rejoin gap (a
+ * laptop sleep/wake, a Wi-Fi handoff, a proxy/NAT idle timeout on an
+ * otherwise-idle websocket -- all invisible to the person looking at the
+ * still-open page) is permanently lost with nothing to ever correct it,
+ * since unreadNotificationCount had no authoritative-refresh path the way
+ * unreadMessageCount already did (its own mount-time revalidation, P1-2).
+ * This Provider now closes that gap for the Bell the same way, plus two
+ * more triggers that don't apply to messages:
+ * refreshUnreadNotificationCount fires (a) once on mount (mirrors
+ * unreadMessageCount's own P1-2 fix), (b) whenever the window regains
+ * focus (a backgrounded/throttled tab is exactly where a missed event is
+ * most likely to go unnoticed), and (c) on every postgres_changes channel
+ * SUBSCRIBED that follows either the very first one or a genuine
+ * disconnect -- CHANNEL_ERROR/TIMED_OUT (the same reconnect pattern
+ * ConversationThread's own subscribe() callback already proves out -- see
+ * its file for the realtime-js source citation), PLUS CLOSED specifically
+ * here: a plain unexpected socket drop (the actual laptop-sleep/Wi-Fi-
+ * handoff case (b) and this whole section are about) surfaces as CLOSED
+ * rather than CHANNEL_ERROR/TIMED_OUT, so it has to count too, unlike
+ * ConversationThread's own deliberate "always ignore CLOSED" choice (its
+ * own file explains why -- CLOSED also fires on every ordinary unmount
+ * there). Disambiguated from a CLOSED caused by this Provider's own
+ * unmount/auth-change teardown via the `cancelled` flag -- see the
+ * .subscribe() callback below. None of these ever overwrite a known good
+ * count with a fabricated 0: refreshUnreadNotificationCount shares
+ * refreshUnreadMessageCount's own "only apply a genuine ok=true result"
+ * contract, and every optimistic local mutator (markOneRead and friends,
+ * below) invalidates any refresh already in flight so a stale response can
+ * never clobber a fresher locally-known value either.
  */
 const MESSAGE_BADGE_REFRESH_DEBOUNCE_MS = 400;
+const NOTIFICATION_BADGE_REFRESH_DEBOUNCE_MS = 400;
 
 export function NotificationsProvider({
   isAuthenticated,
@@ -190,17 +246,56 @@ export function NotificationsProvider({
   // latest-wins guard above already protects against any actual
   // reordering), but this avoids the redundant second network round trip.
   const hasRevalidatedOnMountRef = useRef(false);
+  // Bell counterparts of the two refs directly above -- kept fully
+  // separate (never shared) so a message-count refresh and a
+  // notification-count refresh can never be mistaken for one another by
+  // the latest-wins guard, and so Strict Mode's double-invoke dedupe for
+  // one never accidentally suppresses the other's real first call.
+  const latestNotificationRefreshRequestIdRef = useRef(0);
+  const hasRevalidatedNotificationsOnMountRef = useRef(false);
+  // Debounce timer for Bell-affecting Realtime events, fully separate
+  // from refreshTimeoutRef (the Messages badge's own new_message timer)
+  // below -- see this file's header comment for why the Bell now debounces
+  // into an authoritative refresh instead of incrementing directly.
+  const notificationRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable identities (empty deps -- the setState functions React gives us
   // are themselves stable) so consumers that depend on these functions in
   // their own effects (e.g. ConversationDetailClient's mark-read-on-open
   // effect, or the subscription effect below) don't re-run just because
   // unreadMessageCount/unreadNotificationCount/lastEvent changed.
-  const markOneRead = useCallback(() => setUnreadNotificationCount((prev) => Math.max(0, prev - 1)), []);
-  const markAllRead = useCallback(() => setUnreadNotificationCount(0), []);
-  const decrementGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => Math.max(0, prev - 1)), []);
-  const restoreGeneralUnreadByOne = useCallback(() => setUnreadNotificationCount((prev) => prev + 1), []);
-  const clearGeneralUnreadCount = useCallback(() => setUnreadNotificationCount(0), []);
+  //
+  // Each of these five also bumps latestNotificationRefreshRequestIdRef --
+  // review fix: without this, an authoritative refreshUnreadNotificationCount
+  // call already in flight when one of these fires (e.g. a focus refresh
+  // reading a stale server count of 3 right before the person dismisses one
+  // item down to a true 2) could resolve afterward and silently clobber
+  // this fresher, locally-known value back to the stale one. Bumping the
+  // same sequence ref any in-flight refresh is keyed against makes that
+  // refresh's eventual response stale-by-definition once it resolves, so
+  // it is discarded instead of overwriting a mutation that happened after
+  // it started -- these five calls need no RPC round trip of their own to
+  // win that race, since they already know the correct new value directly.
+  const markOneRead = useCallback(() => {
+    latestNotificationRefreshRequestIdRef.current += 1;
+    setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
+  }, []);
+  const markAllRead = useCallback(() => {
+    latestNotificationRefreshRequestIdRef.current += 1;
+    setUnreadNotificationCount(0);
+  }, []);
+  const decrementGeneralUnreadByOne = useCallback(() => {
+    latestNotificationRefreshRequestIdRef.current += 1;
+    setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
+  }, []);
+  const restoreGeneralUnreadByOne = useCallback(() => {
+    latestNotificationRefreshRequestIdRef.current += 1;
+    setUnreadNotificationCount((prev) => prev + 1);
+  }, []);
+  const clearGeneralUnreadCount = useCallback(() => {
+    latestNotificationRefreshRequestIdRef.current += 1;
+    setUnreadNotificationCount(0);
+  }, []);
   // P1 fix: a failed refresh (RPC error/thrown/unexpected shape) must
   // never overwrite the last-known badge with a fabricated 0 -- only a
   // genuine ok=true result (which may itself legitimately carry count: 0)
@@ -217,6 +312,20 @@ export function NotificationsProvider({
     void getMyUnreadConversationCount().then((result) => {
       if (requestId !== latestRefreshRequestIdRef.current) return;
       if (result.ok) setUnreadMessageCount(result.count);
+    });
+  }, []);
+
+  // Bell counterpart of refreshUnreadMessageCount above -- same contract
+  // exactly (never overwrites on ok=false, guarded by its own separate
+  // latest-request-wins ref so an earlier-issued/later-resolving call can
+  // never clobber a fresher one). See this file's header comment for every
+  // trigger that calls this (mount, window focus, Realtime reconnect, and
+  // the debounced non-new_message event handler below).
+  const refreshUnreadNotificationCount = useCallback(() => {
+    const requestId = ++latestNotificationRefreshRequestIdRef.current;
+    void getMyGeneralNotificationUnreadCount().then((result) => {
+      if (requestId !== latestNotificationRefreshRequestIdRef.current) return;
+      if (result.ok) setUnreadNotificationCount(result.count);
     });
   }, []);
 
@@ -239,12 +348,51 @@ export function NotificationsProvider({
     refreshUnreadMessageCount();
   }, [isAuthenticated, refreshUnreadMessageCount]);
 
+  // Bell counterpart of the mount-time revalidation above -- same
+  // rationale exactly: initialUnreadNotificationCount is only ever an SSR
+  // seed (falls back to a bare 0 on its own transient RPC/network failure
+  // at that one render), so one authoritative client-side refresh right
+  // after mount closes the gap before anything else would otherwise
+  // revalidate it.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (hasRevalidatedNotificationsOnMountRef.current) return;
+    hasRevalidatedNotificationsOnMountRef.current = true;
+    refreshUnreadNotificationCount();
+  }, [isAuthenticated, refreshUnreadNotificationCount]);
+
+  // Bell refresh on tab focus -- a backgrounded/throttled tab is exactly
+  // where a Realtime event is most likely to be missed (or merely
+  // processed late enough that the person has already looked away and
+  // back), so regaining focus is its own independent trigger, never tied
+  // to the Realtime subscription's own lifecycle below. Deliberately
+  // scoped to the Bell only -- the Messages badge keeps its existing
+  // mount/new_message-debounce/mark-read triggers unchanged.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    function handleWindowFocus() {
+      refreshUnreadNotificationCount();
+    }
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [isAuthenticated, refreshUnreadNotificationCount]);
+
   useEffect(() => {
     if (!isAuthenticated || !userId) return;
 
     let cancelled = false;
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    // Reconnect tracking -- exact same pattern as ConversationThread's own
+    // messages channel (see its file for the realtime-js source citation
+    // confirming an automatic rejoin reuses the same channel/joinPush and
+    // re-invokes this same status callback with SUBSCRIBED again, so no
+    // second .subscribe()/channel() call is ever needed to observe it).
+    // Plain closure variables, not refs -- correctly scoped fresh to this
+    // one effect invocation/channel, with no stale carryover from a prior
+    // mount.
+    let hasSubscribedOnce = false;
+    let experiencedDisconnectAfterSubscribe = false;
 
     async function subscribe() {
       try {
@@ -285,7 +433,17 @@ export function NotificationsProvider({
                   refreshUnreadMessageCount();
                 }, MESSAGE_BADGE_REFRESH_DEBOUNCE_MS);
               } else {
-                setUnreadNotificationCount((prev) => prev + 1);
+                // Debounced authoritative refresh, never a raw increment
+                // -- see this file's header comment for exactly why a raw
+                // increment on this counter is unsafe once any
+                // authoritative refresh of the same counter exists (mount/
+                // focus/reconnect below). Its own separate timer/ref so it
+                // never interferes with the Messages badge's timer above.
+                if (notificationRefreshTimeoutRef.current) clearTimeout(notificationRefreshTimeoutRef.current);
+                notificationRefreshTimeoutRef.current = setTimeout(() => {
+                  notificationRefreshTimeoutRef.current = null;
+                  refreshUnreadNotificationCount();
+                }, NOTIFICATION_BADGE_REFRESH_DEBOUNCE_MS);
               }
 
               setLastEvent({
@@ -303,6 +461,39 @@ export function NotificationsProvider({
           .subscribe((status, err) => {
             if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
               console.error("Notifications realtime subscription failed:", err?.message ?? status);
+              if (hasSubscribedOnce) experiencedDisconnectAfterSubscribe = true;
+              return;
+            }
+            if (status === "CLOSED") {
+              // Review fix: a genuine unexpected socket drop (the laptop-
+              // sleep/Wi-Fi-handoff case this file's header comment is
+              // actually about) surfaces here as CLOSED, not
+              // CHANNEL_ERROR/TIMED_OUT -- ConversationThread's own
+              // equivalent callback deliberately ignores CLOSED entirely
+              // (ordinary unmount/conversationId-change teardown also
+              // fires it), which would otherwise leave that exact scenario
+              // unhandled here too. Disambiguated via `cancelled`: this
+              // effect's own cleanup always sets it to true BEFORE ever
+              // calling removeChannel(), and removeChannel's own leave is
+              // what produces CLOSED on ordinary teardown -- so a CLOSED
+              // seen while still `!cancelled` can only be a real mid-
+              // session drop, never our own unmount/auth-change cleanup.
+              if (!cancelled && hasSubscribedOnce) experiencedDisconnectAfterSubscribe = true;
+              return;
+            }
+            if (status === "SUBSCRIBED") {
+              // Missed-event recovery: reconcile on the very first
+              // SUBSCRIBED too (closes the initial-load -> first-subscribe
+              // gap, on top of the separate mount-time revalidation above),
+              // not only on a later genuine reconnect -- exactly one
+              // refresh call per SUBSCRIBED that matters, never two for the
+              // same event. See this file's header comment for the full
+              // "seller Bell didn't update" rationale.
+              if (!hasSubscribedOnce || experiencedDisconnectAfterSubscribe) {
+                experiencedDisconnectAfterSubscribe = false;
+                refreshUnreadNotificationCount();
+              }
+              hasSubscribedOnce = true;
             }
           });
       } catch (err) {
@@ -318,9 +509,13 @@ export function NotificationsProvider({
         clearTimeout(refreshTimeoutRef.current);
         refreshTimeoutRef.current = null;
       }
+      if (notificationRefreshTimeoutRef.current) {
+        clearTimeout(notificationRefreshTimeoutRef.current);
+        notificationRefreshTimeoutRef.current = null;
+      }
       if (channel) supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, userId, refreshUnreadMessageCount]);
+  }, [isAuthenticated, userId, refreshUnreadMessageCount, refreshUnreadNotificationCount]);
 
   const value = useMemo<NotificationsContextValue>(
     () => ({
