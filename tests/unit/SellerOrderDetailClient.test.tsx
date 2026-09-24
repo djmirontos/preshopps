@@ -13,6 +13,7 @@ const {
   getConversationForShopOrderMock,
   startConversationFromOrderMock,
   openConversationMock,
+  notifySuccessMock,
 } = vi.hoisted(() => ({
   refreshMock: vi.fn(),
   pushMock: vi.fn(),
@@ -24,10 +25,15 @@ const {
   getConversationForShopOrderMock: vi.fn(),
   startConversationFromOrderMock: vi.fn(),
   openConversationMock: vi.fn(),
+  notifySuccessMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock, push: pushMock }),
+}));
+
+vi.mock("@/lib/notifications/toast", () => ({
+  notifySuccess: notifySuccessMock,
 }));
 
 vi.mock("@/lib/seller/seller-order-actions", async () => {
@@ -1109,5 +1115,381 @@ describe("SellerOrderDetailClient -- mobile tap-target consistency across every 
     expect(tokens).toContain("h-11");
     expect(tokens).not.toContain("min-h-12");
     expect(tokens).not.toContain("flex-1");
+  });
+});
+
+/**
+ * LAUNCH UX S1.2 seller-order success feedback. Mirrors
+ * SellerListingsListClient.test.tsx's own established assertion style for
+ * exactly this feature (exact copy, toHaveBeenCalledTimes(1), never on
+ * failure, exactly one toast on a successful retry after a failure) --
+ * same mocking convention, same shape of proof.
+ */
+describe("SellerOrderDetailClient -- LAUNCH UX S1.2 success feedback (notifySuccess)", () => {
+  function acceptedOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery" = "meetup") {
+    return sampleOrder({ status: "accepted", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  function readyOrder(fulfillmentMethod: "pickup" | "shipping" | "meetup" | "local_delivery" = "meetup") {
+    return sampleOrder({ status: "ready", fulfillmentMethod, items: [{ ...sampleOrder().items[0], status: "accepted" }] });
+  }
+
+  function orderWithPendingCancellation() {
+    return sampleOrder({
+      status: "accepted",
+      items: [{ ...sampleOrder().items[0], status: "accepted" }],
+      pendingCancellationRequestId: "req-1",
+      pendingCancellationReason: "Changed my mind",
+    });
+  }
+
+  describe("Accept order / Save decisions", () => {
+    it("a full accept (every item checked) calls notifySuccess('Order accepted') exactly once, before router.refresh", async () => {
+      acceptOrderItemsMock.mockResolvedValue({ ok: true, orderStatus: "accepted", wasAlreadyProcessed: false, acceptedItemIds: ["item-1", "item-2"], declinedItemIds: [], stockConflictItemIds: [] });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Accept order" }));
+
+      await waitFor(() => expect(refreshMock).toHaveBeenCalledWith());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Order accepted");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+      expect(notifySuccessMock.mock.invocationCallOrder[0]).toBeLessThan(refreshMock.mock.invocationCallOrder[0]);
+    });
+
+    it("a partial accept (Save decisions) calls notifySuccess('Decisions saved') exactly once, never 'Order accepted'", async () => {
+      acceptOrderItemsMock.mockResolvedValue({ ok: true, orderStatus: "changes_pending", wasAlreadyProcessed: false, acceptedItemIds: ["item-1"], declinedItemIds: ["item-2"], stockConflictItemIds: [] });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("checkbox", { name: /accept item b/i }));
+      fireEvent.click(screen.getByRole("button", { name: "Save decisions" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Decisions saved"));
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+      expect(notifySuccessMock).not.toHaveBeenCalledWith("Order accepted");
+    });
+
+    it("never calls notifySuccess when accept_order_items fails", async () => {
+      acceptOrderItemsMock.mockResolvedValue({ ok: false, code: "ITEM_ALREADY_DECIDED" });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Accept order" }));
+
+      await waitFor(() => expect(screen.getByText(/already been updated/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("a successful retry after a failed accept fires exactly one toast, never two", async () => {
+      acceptOrderItemsMock.mockResolvedValueOnce({ ok: false, code: "ITEM_ALREADY_DECIDED" });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Accept order" }));
+      await waitFor(() => expect(screen.getByText(/already been updated/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+
+      acceptOrderItemsMock.mockResolvedValueOnce({ ok: true, orderStatus: "accepted", wasAlreadyProcessed: false, acceptedItemIds: ["item-1", "item-2"], declinedItemIds: [], stockConflictItemIds: [] });
+      fireEvent.click(screen.getByRole("button", { name: "Accept order" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Order accepted"));
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Decline order", () => {
+    it("calls notifySuccess('Order declined') exactly once, after the confirmation dialog closes", async () => {
+      acceptOrderItemsMock.mockResolvedValue({ ok: true, orderStatus: "declined", wasAlreadyProcessed: false, acceptedItemIds: [], declinedItemIds: ["item-1", "item-2"], stockConflictItemIds: [] });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Decline order" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Decline order" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Order declined");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("never calls notifySuccess when the decline confirmation dialog is merely cancelled", () => {
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Decline order" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(acceptOrderItemsMock).not.toHaveBeenCalled();
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("never calls notifySuccess when the decline RPC fails", async () => {
+      acceptOrderItemsMock.mockResolvedValue({ ok: false, code: "ITEM_ALREADY_DECIDED" });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Decline order" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Decline order" }));
+
+      await waitFor(() => expect(within(dialog).getByText(/already been updated/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("review finding: closeDialog() (a deferred React state update) never suppresses notifySuccess (an immediate, synchronous, root-level call) -- the toast fires even at the exact moment the dialog is technically still mounted", async () => {
+      let dialogInDomWhenNotified: boolean | null = null;
+      notifySuccessMock.mockImplementation(() => {
+        dialogInDomWhenNotified = document.querySelector('[role="dialog"]') !== null;
+      });
+      acceptOrderItemsMock.mockResolvedValue({ ok: true, orderStatus: "declined", wasAlreadyProcessed: false, acceptedItemIds: [], declinedItemIds: ["item-1", "item-2"], stockConflictItemIds: [] });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Decline order" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Decline order" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Order declined"));
+      // closeDialog() only schedules the state update that removes the
+      // dialog -- React has not flushed it yet at the exact synchronous
+      // instant notifySuccess runs, so the dialog is still in the DOM at
+      // that moment. The toast fires regardless: it is rendered by the
+      // root-level <Toaster/>, structurally independent of this
+      // component's own tree, so this ordering can never suppress it.
+      expect(dialogInDomWhenNotified).toBe(true);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    });
+  });
+
+  describe("Mark Ready", () => {
+    it("calls notifySuccess('Marked as ready') exactly once, after the fulfillment modal closes", async () => {
+      markOrderReadyMock.mockResolvedValue({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Marked as ready");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("never calls notifySuccess when Message Buyer is used from inside the modal instead of confirming readiness", async () => {
+      getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Message Buyer" }));
+
+      await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalled());
+      expect(markOrderReadyMock).not.toHaveBeenCalled();
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("never calls notifySuccess when mark_order_ready fails", async () => {
+      markOrderReadyMock.mockResolvedValue({ ok: false, code: "CANCELLATION_REQUEST_PENDING" });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+
+      await waitFor(() => expect(within(dialog).getByText(/resolve the buyer's pending cancellation request/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("a successful retry after a failed Mark Ready fires exactly one toast, never two", async () => {
+      markOrderReadyMock.mockResolvedValueOnce({ ok: false, code: "CANCELLATION_REQUEST_PENDING" });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ready for Meetup" }));
+      let dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+      await waitFor(() => expect(within(dialog).getByText(/resolve the buyer's pending cancellation request/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+
+      markOrderReadyMock.mockResolvedValueOnce({ ok: true, orderStatus: "ready", wasAlreadyReady: false });
+      dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ready for Meetup" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Marked as ready"));
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Mark Handed Over/Shipped", () => {
+    it("calls notifySuccess with the fulfillment-specific completion copy exactly once per method, after the modal closes -- never the generic 'handed over or shipped' for any method", async () => {
+      const successMessage = {
+        pickup: "Marked as picked up",
+        shipping: "Marked as shipped",
+        meetup: "Marked as handed over",
+        local_delivery: "Marked as delivered",
+      } as const;
+
+      for (const fulfillmentMethod of ["pickup", "shipping", "meetup", "local_delivery"] as const) {
+        notifySuccessMock.mockClear();
+        markOrderHandedOverOrShippedMock.mockClear();
+        markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+        const outerLabel = { pickup: "Mark as Picked Up", shipping: "Mark as Shipped", meetup: "Item Handed Over", local_delivery: "Mark as Delivered" }[fulfillmentMethod];
+        const modalLabel = { pickup: "Confirm Picked Up", shipping: "Confirm Shipped", meetup: "Confirm Handover", local_delivery: "Confirm Delivered" }[fulfillmentMethod];
+        const { unmount } = render(<SellerOrderDetailClient initialOrder={readyOrder(fulfillmentMethod)} />);
+
+        fireEvent.click(screen.getByRole("button", { name: outerLabel }));
+        const dialog = screen.getByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: modalLabel }));
+
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(notifySuccessMock).toHaveBeenCalledWith(successMessage[fulfillmentMethod]);
+        expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+        expect(notifySuccessMock).not.toHaveBeenCalledWith("Marked as handed over or shipped");
+        unmount();
+      }
+    });
+
+    it("shipping specifically never says 'handed over' -- nothing is physically handed to the buyer when shipped", async () => {
+      markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: true, orderStatus: "handed_over_or_shipped", wasAlreadyHandedOverOrShipped: false });
+      render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark as Shipped" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm Shipped" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Marked as shipped"));
+      expect(notifySuccessMock).not.toHaveBeenCalledWith(expect.stringContaining("handed over"));
+    });
+
+    it("never calls notifySuccess when 'Not Yet' is used instead of confirming", () => {
+      render(<SellerOrderDetailClient initialOrder={readyOrder("pickup")} />);
+      fireEvent.click(screen.getByRole("button", { name: "Mark as Picked Up" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Not Yet" }));
+
+      expect(markOrderHandedOverOrShippedMock).not.toHaveBeenCalled();
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("never calls notifySuccess when mark_order_handed_over_or_shipped fails", async () => {
+      markOrderHandedOverOrShippedMock.mockResolvedValue({ ok: false, code: "CANCELLATION_REQUEST_PENDING" });
+      render(<SellerOrderDetailClient initialOrder={readyOrder("shipping")} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Mark as Shipped" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Shipped" }));
+
+      await waitFor(() => expect(within(dialog).getByText(/resolve the buyer's pending cancellation request/i)).toBeInTheDocument());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Cancel accepted order", () => {
+    it("calls notifySuccess('Order cancelled') exactly once, after the confirmation dialog closes", async () => {
+      cancelAcceptedOrderMock.mockResolvedValue({ ok: true, orderStatus: "cancelled", wasAlreadyCancelled: false });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+      fireEvent.change(screen.getByLabelText("Reason for cancellation"), { target: { value: "Out of stock" } });
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel order" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Order cancelled");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("never calls notifySuccess when the cancel confirmation dialog is merely cancelled", () => {
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(cancelAcceptedOrderMock).not.toHaveBeenCalled();
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("never calls notifySuccess when cancel_accepted_order fails", async () => {
+      cancelAcceptedOrderMock.mockResolvedValue({ ok: false, code: "ORDER_NOT_CANCELLABLE" });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+      fireEvent.change(screen.getByLabelText("Reason for cancellation"), { target: { value: "Out of stock" } });
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel order" }));
+
+      await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent(/no longer be cancelled/i));
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("a successful retry after a failed cancellation fires exactly one toast, never two", async () => {
+      cancelAcceptedOrderMock.mockResolvedValueOnce({ ok: false, code: "ORDER_NOT_CANCELLABLE" });
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+      fireEvent.change(screen.getByLabelText("Reason for cancellation"), { target: { value: "Out of stock" } });
+      let dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel order" }));
+      await waitFor(() => expect(dialog).toHaveTextContent(/no longer be cancelled/i));
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+
+      cancelAcceptedOrderMock.mockResolvedValueOnce({ ok: true, orderStatus: "cancelled", wasAlreadyCancelled: false });
+      dialog = screen.getByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel order" }));
+
+      await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Order cancelled"));
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Approve / Reject buyer cancellation request", () => {
+    it("Approve cancellation calls notifySuccess('Cancellation approved') exactly once, never 'Cancellation rejected'", async () => {
+      resolveOrderCancellationMock.mockResolvedValue({ ok: true, requestStatus: "approved", orderStatus: "cancelled", wasAlreadyResolved: false });
+      render(<SellerOrderDetailClient initialOrder={orderWithPendingCancellation()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Approve cancellation" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve cancellation" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Cancellation approved");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+      expect(notifySuccessMock).not.toHaveBeenCalledWith("Cancellation rejected");
+    });
+
+    it("Reject request calls notifySuccess('Cancellation rejected') exactly once, never 'Cancellation approved'", async () => {
+      resolveOrderCancellationMock.mockResolvedValue({ ok: true, requestStatus: "rejected", orderStatus: "accepted", wasAlreadyResolved: false });
+      render(<SellerOrderDetailClient initialOrder={orderWithPendingCancellation()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Reject request" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Review note"), { target: { value: "Already packed for shipping." } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Reject request" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(notifySuccessMock).toHaveBeenCalledWith("Cancellation rejected");
+      expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+      expect(notifySuccessMock).not.toHaveBeenCalledWith("Cancellation approved");
+    });
+
+    it("never calls notifySuccess when resolve_order_cancellation fails", async () => {
+      resolveOrderCancellationMock.mockResolvedValue({ ok: false, code: "REQUEST_ALREADY_RESOLVED" });
+      render(<SellerOrderDetailClient initialOrder={orderWithPendingCancellation()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Approve cancellation" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve cancellation" }));
+
+      await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent(/already been resolved/i));
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("never calls notifySuccess when the resolve-cancellation dialog is merely cancelled", () => {
+      render(<SellerOrderDetailClient initialOrder={orderWithPendingCancellation()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Approve cancellation" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(resolveOrderCancellationMock).not.toHaveBeenCalled();
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("no cross-action duplicate/leak", () => {
+    it("Message Buyer never fires any of the six order-lifecycle toasts", async () => {
+      getConversationForShopOrderMock.mockResolvedValue({ ok: true, conversationId: "conv-1" });
+      render(<SellerOrderDetailClient initialOrder={sampleOrder()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Message Buyer" }));
+
+      await waitFor(() => expect(getConversationForShopOrderMock).toHaveBeenCalled());
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
+
+    it("mounting the page with no action taken never calls notifySuccess", () => {
+      render(<SellerOrderDetailClient initialOrder={acceptedOrder()} />);
+      expect(notifySuccessMock).not.toHaveBeenCalled();
+    });
   });
 });

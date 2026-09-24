@@ -8,6 +8,7 @@ import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { Badge } from "@/components/ui/Badge";
+import { notifySuccess } from "@/lib/notifications/toast";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import { SellerFulfillmentTransitionModal } from "@/components/seller/SellerFulfillmentTransitionModal";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
@@ -16,7 +17,7 @@ import { isDesktopViewport } from "@/lib/ui/viewport";
 import { getConversationForShopOrder } from "@/lib/messaging/get-conversation-for-shop-order";
 import { startConversationFromOrder, START_CONVERSATION_FROM_ORDER_ERROR_MESSAGES } from "@/lib/messaging/start-conversation-from-order";
 import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
-import { FULFILLMENT_LABELS } from "@/lib/marketplace/search-params";
+import { FULFILLMENT_LABELS, type FulfillmentMethod } from "@/lib/marketplace/search-params";
 import {
   getSellerOrderStatusGuidance,
   getAllowedSellerActions,
@@ -61,9 +62,61 @@ type ComposeError = { message: string; restriction?: InteractionBlockedPresentat
  * pattern React recommends for "adjusting state when a prop changes"; it
  * never assumes the outcome and mutates local state as if it were
  * authoritative.
+ *
+ * LAUNCH UX S1.2 seller-order success feedback: each of the six lifecycle
+ * mutations below (accept/save decisions, decline, mark ready, mark
+ * handed-over/shipped, cancel accepted, approve/reject a buyer's
+ * cancellation request) now fires exactly one notifySuccess(...) call --
+ * only once the authoritative RPC has actually confirmed success, always
+ * after closeDialog() and before the existing router.refresh() -- mirroring
+ * the exact pattern the seller listing status actions
+ * (SellerListingsListClient.tsx) already use. Never fires on a validation/
+ * mutation failure (those return before reaching it, exactly as before) or
+ * on a merely-cancelled/closed dialog (closeDialog() itself never calls any
+ * of these handlers). No inline success text existed anywhere on this page
+ * before this change -- confirmed by reading the full component -- so
+ * there is nothing for these toasts to duplicate.
+ *
+ * The handed-over/shipped toast is per-fulfillment-method
+ * (handedOverSuccessMessage below), mirroring
+ * getSellerMarkHandedOverActionLabel's own wording -- fulfillment method is
+ * already known at that handler's own call site (order.fulfillmentMethod),
+ * and "handed over" is a physical, in-person exchange that is simply false
+ * for a shipping order. Every other toast here is one fixed string, since
+ * none of the other five actions have an analogous method-dependent
+ * accuracy problem (e.g. "Marked as ready" reads correctly regardless of
+ * pickup/shipping/meetup/local_delivery).
+ *
+ * closeDialog() (a setState call, batched/deferred by React) is always
+ * called before notifySuccess() (an immediate, synchronous, imperative
+ * call into Sonner's own global store) in every handler that has a
+ * dialog to close -- this ordering cannot suppress the toast: the single
+ * <Toaster/> that actually renders it is mounted once at the root layout,
+ * structurally independent of this component's own tree (no
+ * React portal is involved on either side), so closing/unmounting this
+ * component's own dialog has no relationship to whether the toast renders.
  */
 function decisionsFor(order: SellerOrderDetail): Record<string, boolean> {
   return Object.fromEntries(order.items.filter((item) => item.status === "pending").map((item) => [item.orderItemId, true]));
+}
+
+/** Review fix: fulfillment method is already known at handleMarkHandedOver
+ * OrShipped's own call site (order.fulfillmentMethod), so the success toast
+ * mirrors getSellerMarkHandedOverActionLabel's own per-method wording
+ * instead of one generic string -- "handed over" is a physical, in-person
+ * exchange (pickup/meetup/local_delivery) and is simply false for a
+ * shipping order, where nothing is ever handed to the buyer directly. */
+function handedOverSuccessMessage(fulfillmentMethod: FulfillmentMethod): string {
+  switch (fulfillmentMethod) {
+    case "pickup":
+      return "Marked as picked up";
+    case "shipping":
+      return "Marked as shipped";
+    case "meetup":
+      return "Marked as handed over";
+    case "local_delivery":
+      return "Marked as delivered";
+  }
 }
 
 export function SellerOrderDetailClient({ initialOrder }: Props) {
@@ -110,6 +163,10 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
       return;
     }
 
+    // Mirrors the button's own dynamic label (allChecked decides "Accept
+    // order" vs "Save decisions") -- declinedItemIds is empty for a true
+    // full accept, matching allChecked exactly.
+    notifySuccess(declinedItemIds.length === 0 ? "Order accepted" : "Decisions saved");
     router.refresh();
   }
 
@@ -128,6 +185,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     }
 
     closeDialog();
+    notifySuccess("Order declined");
     router.refresh();
   }
 
@@ -145,6 +203,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     }
 
     closeDialog();
+    notifySuccess("Marked as ready");
     router.refresh();
   }
 
@@ -162,6 +221,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     }
 
     closeDialog();
+    notifySuccess(handedOverSuccessMessage(order.fulfillmentMethod));
     router.refresh();
   }
 
@@ -256,6 +316,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     }
 
     closeDialog();
+    notifySuccess("Order cancelled");
     router.refresh();
   }
 
@@ -274,6 +335,7 @@ export function SellerOrderDetailClient({ initialOrder }: Props) {
     }
 
     closeDialog();
+    notifySuccess(confirm ? "Cancellation approved" : "Cancellation rejected");
     router.refresh();
   }
 

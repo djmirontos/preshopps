@@ -63,8 +63,9 @@ describe("SellerOrderDetailClient: no direct Supabase messaging writes -- only t
     expect(stripped).not.toMatch(/buyerId|buyer_id/);
   });
 
-  it("never touches conversation_user_states or notifications directly", () => {
-    expect(stripped).not.toMatch(/conversation_user_states|notifications/);
+  it("never touches conversation_user_states or the notifications table/RPCs directly -- the unrelated LAUNCH UX S1.2 success-toast import (lib/notifications/toast, a presentation-only helper with no table/RPC access of its own) is the one allowed exception", () => {
+    const withoutToastImport = stripped.replace(/import \{ notifySuccess \} from ["']@\/lib\/notifications\/toast["'];?/, "");
+    expect(withoutToastImport).not.toMatch(/conversation_user_states|notifications/);
   });
 });
 
