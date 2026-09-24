@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { ChangePasswordForm } from "@/components/account/ChangePasswordForm";
+import { PASSWORD_UPDATED_STORAGE_KEY } from "@/lib/auth/password-updated-flag";
 
 function renderForm() {
   const onUpdatingChange = vi.fn();
@@ -36,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   updateUserMock.mockResolvedValue({ data: {}, error: null });
   signOutMock.mockResolvedValue({ error: null });
+  sessionStorage.clear();
 });
 
 describe("ChangePasswordForm -- asks for the current password directly, no reauthentication OTP", () => {
@@ -136,6 +138,18 @@ describe("ChangePasswordForm -- wrong current password gets safe copy", () => {
 
     expect(await screen.findByText("We couldn't update your password. Please try again.")).toBeInTheDocument();
   });
+
+  it("shows only its own existing error, never redirects, and never sets the passwordUpdated flag when updateUser fails", async () => {
+    updateUserMock.mockResolvedValue({ data: null, error: new Error("Invalid login credentials") });
+    renderForm();
+    fillAndSubmit();
+
+    await screen.findByText("The current password is incorrect.");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("Password updated. Signing you out…")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(PASSWORD_UPDATED_STORAGE_KEY)).toBeNull();
+  });
 });
 
 describe("ChangePasswordForm -- successful change triggers a mandatory global sign-out", () => {
@@ -146,11 +160,50 @@ describe("ChangePasswordForm -- successful change triggers a mandatory global si
     await waitFor(() => expect(signOutMock).toHaveBeenCalledWith({ scope: "global" }));
   });
 
-  it("redirects to /sign-in after a successful global sign-out", async () => {
+  it("redirects to plain /sign-in (no URL marker) after a successful global sign-out", async () => {
     renderForm();
     fillAndSubmit();
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sign-in"));
+    // Concern 1 fix: never a query-string marker anyone could type/share.
+    expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining("?"));
+  });
+
+  it("sets the one-time passwordUpdated sessionStorage flag only after signOut itself has succeeded", async () => {
+    renderForm();
+    fillAndSubmit();
+
+    await waitFor(() => expect(sessionStorage.getItem(PASSWORD_UPDATED_STORAGE_KEY)).toBe("1"));
+  });
+
+  it("sets the passwordUpdated flag before pushing the redirect, so PasswordUpdatedNotice can already read it once /sign-in mounts", async () => {
+    renderForm();
+    fillAndSubmit();
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sign-in"));
+    // Both are async-resolved by the time push fires; the flag must not
+    // still be unset at that point.
+    expect(sessionStorage.getItem(PASSWORD_UPDATED_STORAGE_KEY)).toBe("1");
+  });
+
+  it("review finding: still redirects even if sessionStorage is entirely unavailable/throwing -- markPasswordJustUpdated's own best-effort guard must never block navigation after a successful password change", async () => {
+    const original = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get() {
+        throw new Error("SecurityError: sessionStorage is not available");
+      },
+    });
+
+    try {
+      renderForm();
+      fillAndSubmit();
+
+      await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/sign-in"));
+      expect(await screen.findByText("Password updated. Signing you out…")).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "sessionStorage", original!);
+    }
   });
 
   it("does not show a lingering success page while still signed in -- the visible state is a transient redirecting notice", async () => {
@@ -174,6 +227,18 @@ describe("ChangePasswordForm -- global sign-out failure after a successful passw
       ),
     ).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves signOutFailedNotice, never redirects/refreshes, and never sets the passwordUpdated flag -- PasswordUpdatedNotice can never show for an incomplete flow", async () => {
+    signOutMock.mockResolvedValue({ error: new Error("network error") });
+    renderForm();
+    fillAndSubmit();
+
+    await screen.findByRole("alert");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("Password updated. Signing you out…")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(PASSWORD_UPDATED_STORAGE_KEY)).toBeNull();
   });
 
   it("does not automatically retry the sign-out call", async () => {

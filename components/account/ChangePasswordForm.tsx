@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { mapChangePasswordError, PASSWORD_CHANGED_SIGN_OUT_FAILED_MESSAGE } from "@/lib/auth/security-errors";
+import { markPasswordJustUpdated } from "@/lib/auth/password-updated-flag";
 import { PasswordVisibilityToggle } from "@/components/ui/PasswordVisibilityToggle";
 
 const PASSWORD_MIN_LENGTH = 6;
@@ -23,15 +24,27 @@ type Props = {
  * sign-out (`signOut({ scope: "global" })`), then a hard redirect to
  * /sign-in: the user must re-authenticate with their new password on
  * every device, including this one. This is intentional -- there is no
- * "stay signed in" success state here. If the sign-out call itself
- * fails, the password change already succeeded and cannot be undone, so
- * this shows safe recovery copy and points at the existing "Sign out
- * other devices" action instead of silently claiming success or
- * retrying indefinitely.
+ * "stay signed in" success state here. Right before that redirect,
+ * markPasswordJustUpdated() sets a same-origin, per-tab sessionStorage
+ * flag (never a URL query param -- see lib/auth/password-updated-flag.ts
+ * for why a URL marker would let anyone who can share/click a link see a
+ * false confirmation) that /sign-in's own PasswordUpdatedNotice reads
+ * exactly once and shows as a persistent one-time explanation, never a
+ * toast fired from here (a toast on THIS page is not guaranteed to
+ * survive the push+refresh below the way a flag read on the destination
+ * page is). If the sign-out call itself fails, the password change
+ * already succeeded and cannot be undone, so this shows safe recovery
+ * copy and points at the existing "Sign out other devices" action instead
+ * of silently claiming success or retrying indefinitely -- the flag is
+ * never set and no redirect happens on that path, so PasswordUpdatedNotice
+ * can never show on a failed sign-out either.
  *
  * Current/new/confirm password values live only in this component's own
  * transient state -- never logged, never written to localStorage/
- * sessionStorage, and cleared immediately once the update succeeds.
+ * sessionStorage, and cleared immediately once the update succeeds. The
+ * one thing this component does write to sessionStorage (via
+ * markPasswordJustUpdated) is a bare non-secret marker with no relation
+ * to the password itself.
  */
 export function ChangePasswordForm({ onUpdatingChange }: Props) {
   const router = useRouter();
@@ -120,6 +133,13 @@ export function ChangePasswordForm({ onUpdatingChange }: Props) {
     }
 
     setIsRedirecting(true);
+    // Set only here, after both updateUser and the global sign-out have
+    // already succeeded -- the sign-out-failure path above returns before
+    // ever reaching this line, so PasswordUpdatedNotice can never show a
+    // false confirmation for a flow that didn't fully complete. A
+    // sessionStorage flag, not a URL query param -- see
+    // lib/auth/password-updated-flag.ts for why.
+    markPasswordJustUpdated();
     router.push("/sign-in");
     router.refresh();
   }

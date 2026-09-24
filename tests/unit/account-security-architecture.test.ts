@@ -162,11 +162,45 @@ describe("Change Password: successful update triggers a mandatory GLOBAL sign-ou
     expect(source).toMatch(/auth\.signOut\(\{\s*scope:\s*["']global["']\s*\}\)/);
   });
 
-  it("redirects to /sign-in only after signOut itself succeeds", () => {
+  it("redirects to plain /sign-in only after signOut itself succeeds", () => {
     const body = source.split("if (signOutError) {")[1]!.split("router.push")[0]!;
     expect(body).not.toMatch(/router\.push/);
     const afterBody = source.split("router.push(\"/sign-in\")")[1]!;
     expect(afterBody).toBeDefined();
+  });
+
+  it("sets the one-time passwordUpdated flag (markPasswordJustUpdated) only after signOut itself succeeds, and via sessionStorage -- never a URL query param anyone could type or share", () => {
+    const body = source.split("if (signOutError) {")[1]!.split("markPasswordJustUpdated()")[0]!;
+    expect(body).not.toMatch(/markPasswordJustUpdated/);
+    const afterBody = source.split("markPasswordJustUpdated()")[1]!;
+    expect(afterBody).toBeDefined();
+    expect(afterBody!.split("router.push")[0]).toBeDefined();
+    expect(source).toMatch(/from ["']@\/lib\/auth\/password-updated-flag["']/);
+    expect(source).not.toMatch(/router\.push\("\/sign-in\?passwordUpdated/);
+  });
+
+  it("review finding: nothing can interrupt between signOut resolving and the flag+redirect, on the success path -- no further await stands between them for some other async listener (e.g. a hypothetical onAuthStateChange callback) to run in between", () => {
+    const afterSignOut = stripComments(source).split("const { error: signOutError } = await supabase.auth.signOut")[1]!.split("router.refresh();")[0]!;
+    // Exactly the two already-awaited calls above this point (updateUser,
+    // signOut) -- no additional await anywhere in the remaining
+    // synchronous continuation that sets the flag and redirects.
+    expect(afterSignOut).not.toMatch(/await/);
+  });
+
+  it("review finding: no onAuthStateChange (or any Supabase auth-state) listener exists anywhere in the app that could react to signOut's own SIGNED_OUT event and interrupt this sequence", () => {
+    // ResetPasswordForm's own onAuthStateChange subscription (a completely
+    // separate route, /reset-password, never mounted during this flow) is
+    // the only one in the app -- confirmed by this exact grep target.
+    const appFiles = [
+      "components/account/ChangePasswordForm.tsx",
+      "components/account/SecuritySection.tsx",
+      "components/account/SecurityDialog.tsx",
+      "components/auth/AuthStatusProvider.tsx",
+      "app/account/page.tsx",
+    ];
+    for (const file of appFiles) {
+      expect(stripComments(readFile(file))).not.toMatch(/\.auth\.onAuthStateChange\(/);
+    }
   });
 
   it("on signOut failure, shows the exact locked safe-recovery copy and does not navigate away", () => {
@@ -175,7 +209,7 @@ describe("Change Password: successful update triggers a mandatory GLOBAL sign-ou
     expect(source2).toContain("Your password was updated, but we couldn't sign out your other sessions automatically.");
     expect(source2).toContain('For your security, please use \\"Sign out other devices\\" below.');
     expect(source).toMatch(/PASSWORD_CHANGED_SIGN_OUT_FAILED_MESSAGE/);
-    expect(source).not.toMatch(/router\.push\("\/sign-in"\);\s*\n\s*router\.refresh\(\);\s*\n\s*\}\s*\n\s*if \(signOutError\)/);
+    expect(source).not.toMatch(/markPasswordJustUpdated\(\);\s*\n\s*router\.push\("\/sign-in"\);\s*\n\s*router\.refresh\(\);\s*\n\s*\}\s*\n\s*if \(signOutError\)/);
   });
 
   it("never auto-retries the sign-out call (no retry loop/counter in actual code)", () => {

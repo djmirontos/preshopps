@@ -52,7 +52,7 @@ describe("SecuritySection -- Change Password dialog", () => {
     expect(screen.queryByLabelText(/verification code/i)).not.toBeInTheDocument();
   });
 
-  it("a successful change globally signs out and redirects to /sign-in", async () => {
+  it("a successful change globally signs out and redirects to plain /sign-in (the one-time confirmation is a sessionStorage flag, never a URL marker)", async () => {
     render(<SecuritySection />);
     fireEvent.click(screen.getByRole("button", { name: /^change password$/i }));
 
