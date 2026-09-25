@@ -8,6 +8,7 @@ import { OrderStatusBadge } from "@/components/orders/OrderStatusBadge";
 import { Badge } from "@/components/ui/Badge";
 import { BuyerOrderActionsClient } from "@/components/orders/BuyerOrderActionsClient";
 import { BuyerOrderReviewSection } from "@/components/orders/BuyerOrderReviewSection";
+import { BuyNowOrderSubmittedNotice } from "@/components/orders/BuyNowOrderSubmittedNotice";
 import { DisputeSection } from "@/components/disputes/DisputeSection";
 import { getOrderReview } from "@/lib/reviews/get-order-review";
 import { getOrderDisputeSummary } from "@/lib/disputes/get-order-dispute-summary";
@@ -68,6 +69,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
       <Link href="/orders" className="text-sm text-ink-secondary hover:text-ink">
         ← Back to My Orders
       </Link>
+
+      {/* One-time confirmation after BuyNowDialog's own successful
+          submission -- see BuyNowOrderSubmittedNotice's own file for why a
+          sessionStorage flag keyed to this exact order code, never a URL
+          marker, is what drives this. Renders nothing on an ordinary visit
+          to this same page, an older order, or a manually entered/shared
+          URL. The regular /cart checkout flow has its own, separate,
+          already-existing success card and never reaches this page via
+          this mechanism. */}
+      <BuyNowOrderSubmittedNotice orderPublicCode={order.orderPublicCode} />
 
       <div className="mt-3 flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold text-ink lg:text-2xl">{order.orderPublicCode}</h1>

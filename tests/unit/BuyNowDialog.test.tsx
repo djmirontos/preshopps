@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { rpcMock, pushMock } = vi.hoisted(() => ({ rpcMock: vi.fn(), pushMock: vi.fn() }));
+const { rpcMock, pushMock, markBuyNowOrderSubmittedMock } = vi.hoisted(() => ({
+  rpcMock: vi.fn(),
+  pushMock: vi.fn(),
+  markBuyNowOrderSubmittedMock: vi.fn(),
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ rpc: rpcMock }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
+}));
+vi.mock("@/lib/cart/buy-now-success-flag", () => ({
+  markBuyNowOrderSubmitted: markBuyNowOrderSubmittedMock,
 }));
 
 import { CartProvider, useCart } from "@/components/cart/CartProvider";
@@ -100,6 +107,7 @@ async function chooseFulfillmentAndSubmit() {
 beforeEach(() => {
   rpcMock.mockReset();
   pushMock.mockReset();
+  markBuyNowOrderSubmittedMock.mockReset();
 });
 
 describe("BuyNowDialog -- reuses the canonical order-review flow, never a second implementation", () => {
@@ -200,6 +208,17 @@ describe("BuyNowDialog -- successful submission navigates straight to the create
     await waitFor(() => expect(pushMock).toHaveBeenCalled());
     expect(rpcMock.mock.calls.filter(([name]) => name === "submit_buy_now_order")).toHaveLength(1);
   });
+
+  it("sets the one-time order-submitted flag for the exact order code the RPC returned, before navigating", async () => {
+    mockOpenThenSuccess();
+    renderDialog();
+
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(markBuyNowOrderSubmittedMock).toHaveBeenCalledWith("PSO-1"));
+    expect(markBuyNowOrderSubmittedMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith("/orders/PSO-1");
+  });
 });
 
 describe("BuyNowDialog -- a failed submission never navigates and stays open with the existing error behavior", () => {
@@ -248,6 +267,21 @@ describe("BuyNowDialog -- a failed submission never navigates and stays open wit
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/review your cart/i);
     expect(alert.textContent).not.toMatch(/CANNOT_BUY_OWN_LISTING/);
+  });
+
+  it("never sets the order-submitted flag on a rejected/failed submission", async () => {
+    rpcMock.mockImplementation((name: string) => {
+      if (name === "get_listing_detail") return Promise.resolve({ data: [detailRow()], error: null });
+      if (name === "submit_buy_now_order")
+        return Promise.resolve({ data: null, error: { message: "boom", details: "PRICE_CHANGED" } });
+      return Promise.resolve({ data: [], error: null });
+    });
+
+    renderDialog();
+    await chooseFulfillmentAndSubmit();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(markBuyNowOrderSubmittedMock).not.toHaveBeenCalled();
   });
 });
 

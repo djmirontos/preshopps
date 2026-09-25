@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { OrderReviewSubmit } from "@/components/cart/OrderReviewSubmit";
 import { buildBuyNowLine } from "@/lib/cart/build-buy-now-line";
 import { submitBuyNowOrder, type SubmitCartOrderResult, type SubmittedOrder } from "@/lib/cart/submit-buy-now-order";
+import { markBuyNowOrderSubmitted } from "@/lib/cart/buy-now-success-flag";
 import type { CartLineDisplay } from "@/lib/cart/map-cart-row";
 import type { RefreshMyCartResult } from "@/lib/cart/refresh-my-cart-client";
 import type { FulfillmentMethod } from "@/lib/marketplace/search-params";
@@ -109,11 +110,23 @@ export function BuyNowDialog({ publicCode, onClose }: Props) {
    * leaves this dialog open showing the existing error state. Closing
    * first removes the dialog immediately rather than letting it linger
    * for the tick before the route change completes.
+   *
+   * markBuyNowOrderSubmitted (LAUNCH UX S1.2) sets the one-time,
+   * order-code-keyed sessionStorage flag BuyNowOrderSubmittedNotice reads
+   * once on the destination page -- called only here, after
+   * submit_buy_now_order has already confirmed success, never on a
+   * validation/rejected submission (those never reach this function at
+   * all; see OrderReviewSubmit's own onSuccess contract, only ever called
+   * from `if (outcome.ok)`). Deliberately not a toast fired from here: a
+   * toast on this page is not guaranteed to survive this immediate
+   * navigation the way a flag read on the destination page is (same
+   * reasoning as ChangePasswordForm's own redirect to /sign-in).
    */
   function handleSuccess(orders: SubmittedOrder[]) {
     onClose();
     const order = orders[0];
     if (order) {
+      markBuyNowOrderSubmitted(order.orderPublicCode);
       router.push(`/orders/${order.orderPublicCode}`);
     }
   }
