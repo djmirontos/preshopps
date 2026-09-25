@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
+import { notifySuccess } from "@/lib/notifications/toast";
 import { getAllowedBuyerActions, type OrderStatus } from "@/lib/orders/order-status-copy";
 import {
   cancelPendingOrder,
@@ -36,6 +37,42 @@ type DialogKind = "cancel_pending" | "confirm_changes" | "cancel_changes" | "req
  * so the server re-fetches get_my_order_detail and this component's own
  * status prop resyncs to the canonical backend state -- it never assumes
  * an outcome and mutates local state as if it were authoritative.
+ *
+ * LAUNCH UX S1.2 buyer-order success feedback: each action's authoritative
+ * RPC result was checked before adding a toast (each RPC's own migration
+ * source, not just its TypeScript return type) -- cancelPendingOrder/
+ * cancelOrderChanges always return orderStatus 'cancelled' on any ok:true
+ * result (fresh or already-idempotent), and confirmOrderChanges always
+ * returns 'accepted', so those three fire unconditionally on result.ok.
+ * confirmOrderReceived is the one exception: per
+ * 0044_confirm_order_received_auto_complete.sql, a fresh confirmation
+ * attempts completion in the same call, but a caught completion failure
+ * (rare -- an inventory/reservation inconsistency) leaves orderStatus at
+ * 'received_confirmed' instead of 'completed', with result.ok still true.
+ * handleConfirmReceipt's toast is therefore gated on
+ * `result.orderStatus === "completed"` specifically, not merely
+ * `result.ok` -- it must never claim the order is complete (and reviewable)
+ * when it is not. In that rare non-completed outcome the buyer is not left
+ * with zero feedback: closeDialog()/router.refresh() still run as normal,
+ * the order's own status prop resyncs to 'received_confirmed', and the
+ * parent page's existing getOrderStatusGuidance text updates to "You've
+ * confirmed receiving this order." -- accurate, if less celebratory than
+ * true completion. getAllowedBuyerActions has no case for
+ * 'received_confirmed' (falls to its default: no actions), so the button
+ * also correctly disappears either way. Retrying confirm_order_received
+ * from that state hits its own idempotent branch server-side, which
+ * (by design, see that migration's own header) never retries the
+ * completion attempt -- a known, accepted, backend-only limitation, not
+ * something this component can or should work around.
+ *
+ * Every toast fires only after closeDialog() and before the existing
+ * router.refresh(), mirroring SellerOrderDetailClient's own pattern for
+ * the equivalent seller-side actions. Never fires on a validation/mutation
+ * failure (those return before reaching it, unchanged) or a merely-
+ * cancelled/closed dialog (closeDialog() itself never calls any of these
+ * handlers). The existing per-status guidance text (getOrderStatusGuidance)
+ * is a persistent state description, never an action-specific completion
+ * acknowledgment, so there is nothing here for these toasts to duplicate.
  */
 export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellationRequest }: Props) {
   const router = useRouter();
@@ -64,6 +101,7 @@ export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellatio
     }
 
     closeDialog();
+    notifySuccess("Order cancelled");
     router.refresh();
   }
 
@@ -81,6 +119,7 @@ export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellatio
     }
 
     closeDialog();
+    notifySuccess("Changes confirmed");
     router.refresh();
   }
 
@@ -98,6 +137,7 @@ export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellatio
     }
 
     closeDialog();
+    notifySuccess("Order cancelled");
     router.refresh();
   }
 
@@ -114,6 +154,7 @@ export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellatio
     }
 
     closeDialog();
+    notifySuccess("Cancellation requested");
     router.refresh();
   }
 
@@ -131,6 +172,15 @@ export function BuyerOrderActionsClient({ orderId, status, hasPendingCancellatio
     }
 
     closeDialog();
+    // Gated on the row's own true final status, not merely result.ok --
+    // see this file's own header comment for why confirm_order_received
+    // can succeed while the immediate completion attempt it makes
+    // internally did not (a rare caught failure, orderStatus staying
+    // 'received_confirmed'). Never claim the order is complete when it
+    // is not.
+    if (result.orderStatus === "completed") {
+      notifySuccess("Order completed");
+    }
     router.refresh();
   }
 
