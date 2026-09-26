@@ -7,6 +7,7 @@ import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { BuyNowDialog } from "@/components/cart/BuyNowDialog";
 import { ComposeMessageDialog } from "@/components/messaging/ComposeMessageDialog";
 import { ReportButton } from "@/components/moderation/ReportButton";
+import { ShareActions } from "@/components/listing/ShareActions";
 import { useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 import { startConversation, START_CONVERSATION_ERROR_MESSAGES } from "@/lib/messaging/start-conversation";
 import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
@@ -213,6 +214,11 @@ export function ListingActions({
       )}
 
       {isBuyNowOpen && <BuyNowDialog publicCode={publicCode} onClose={() => setIsBuyNowOpen(false)} />}
+
+      {/* Guest-visible, no sign-in required -- unlike every action above,
+          which either gates on isAuthenticated or is hidden for the
+          listing's own owner. */}
+      <ShareActions publicCode={publicCode} title={listingTitle} />
 
       <ReportButton
         targetType="listing"

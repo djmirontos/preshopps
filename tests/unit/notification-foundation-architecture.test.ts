@@ -50,10 +50,10 @@ describe("Notification foundation -- exactly one root toaster, no competing inst
 });
 
 describe("Shared toast wrapper -- exposes only the currently-required API", () => {
-  it("lib/notifications/toast.ts exposes notifySuccess and nothing else exported", () => {
+  it("lib/notifications/toast.ts exposes exactly notifySuccess and notifyError, nothing else exported", () => {
     const source = readFile("lib/notifications/toast.ts");
     const exportedNames = [...source.matchAll(/^export (?:function|const) (\w+)/gm)].map((m) => m[1]);
-    expect(exportedNames).toEqual(["notifySuccess"]);
+    expect(exportedNames).toEqual(["notifySuccess", "notifyError"]);
   });
 
   it("notifySuccess calls Sonner's success variant with a 4000ms duration", () => {
@@ -62,9 +62,20 @@ describe("Shared toast wrapper -- exposes only the currently-required API", () =
     expect(source).toMatch(/duration:\s*4000/);
   });
 
-  it("no unused error/warning/promise/action variant was introduced", () => {
+  // notifyError was added deliberately for the Share/Copy Link slice
+  // (components/listing/ShareActions.tsx), which needs to report a
+  // genuine clipboard/share failure truthfully rather than silently
+  // saying nothing or misusing notifySuccess -- this is the one
+  // additional variant this foundation now exposes on purpose.
+  it("notifyError calls Sonner's error variant with the same 4000ms duration convention as notifySuccess", () => {
     const source = readFile("lib/notifications/toast.ts");
-    expect(source).not.toMatch(/toast\.(error|warning|info|promise|custom)\(/);
+    expect(source).toMatch(/toast\.error\(/);
+    expect(source.match(/duration:\s*4000/g) ?? []).toHaveLength(2);
+  });
+
+  it("no unused warning/info/promise/custom variant or action button was introduced", () => {
+    const source = readFile("lib/notifications/toast.ts");
+    expect(source).not.toMatch(/toast\.(warning|info|promise|custom)\(/);
     expect(source).not.toMatch(/\baction:\s*\{/);
   });
 });
