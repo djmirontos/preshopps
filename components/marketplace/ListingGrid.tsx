@@ -1,11 +1,15 @@
 import { Children, type ReactNode } from "react";
 
 /**
- * Vertical results grid for /search -- unlike the homepage's horizontal
- * scroll-snap ListingRail, this is a plain responsive CSS grid meant for
- * paginated "Load More" browsing. ListingCard's own width utilities
- * (w-[44%] etc.) are sized for a horizontal rail, so each card is wrapped
- * here and forced to fill its grid cell instead -- ListingCard itself is
+ * Shared vertical results grid: exactly 2 columns on mobile, 3 from `sm`,
+ * 4 from `lg`, 5 from `xl` -- used by /search's paginated "Load More"
+ * browsing, favorites, shop listings, and (since the horizontal-scroll
+ * ListingRail was retired) the homepage's own Fresh Finds/Pre-loved/Brand
+ * New sections. A plain CSS grid, never horizontal scroll -- additional
+ * items always appear in further rows as the page scrolls vertically,
+ * never require a clipped card or a scrollbar. ListingCard's own width
+ * utilities (w-[44%] etc., sized for the retired horizontal rail) are
+ * overridden here to fill each grid cell instead -- ListingCard itself is
  * untouched.
  */
 export function ListingGrid({ children }: { children: ReactNode }) {

@@ -4,7 +4,7 @@ import { Hero } from "@/components/marketplace/Hero";
 import { CategoryStrip } from "@/components/marketplace/CategoryStrip";
 import { SectionHeader } from "@/components/marketplace/SectionHeader";
 import { ListingCard } from "@/components/marketplace/ListingCard";
-import { ListingRail } from "@/components/marketplace/ListingRail";
+import { ListingGrid } from "@/components/marketplace/ListingGrid";
 import { SectionEmptyState } from "@/components/marketplace/SectionEmptyState";
 import { TrustStrip } from "@/components/marketplace/TrustStrip";
 import { getHomepageMarketplaceData } from "@/lib/marketplace/browse-listings";
@@ -51,11 +51,11 @@ export default async function Home() {
         ) : freshFinds.listings.length === 0 ? (
           <SectionEmptyState message="No listings yet. Be the first to sell something." />
         ) : (
-          <ListingRail>
+          <ListingGrid>
             {freshFinds.listings.map((listing) => (
               <ListingCard key={listing.id} listing={listing} />
             ))}
-          </ListingRail>
+          </ListingGrid>
         )}
       </section>
 
@@ -68,11 +68,11 @@ export default async function Home() {
           {preLoved.hadError ? (
             <SectionEmptyState message="Unable to load listings right now." />
           ) : (
-            <ListingRail>
+            <ListingGrid>
               {preLoved.listings.map((listing) => (
                 <ListingCard key={listing.id} listing={listing} />
               ))}
-            </ListingRail>
+            </ListingGrid>
           )}
         </section>
       )}
@@ -83,11 +83,11 @@ export default async function Home() {
           {brandNew.hadError ? (
             <SectionEmptyState message="Unable to load listings right now." />
           ) : (
-            <ListingRail>
+            <ListingGrid>
               {brandNew.listings.map((listing) => (
                 <ListingCard key={listing.id} listing={listing} />
               ))}
-            </ListingRail>
+            </ListingGrid>
           )}
         </section>
       )}

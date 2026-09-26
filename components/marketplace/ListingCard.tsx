@@ -60,10 +60,18 @@ export function formatPriceFromCents(cents: number): string {
 }
 
 /**
- * One card component reused for both the mobile rail and the desktop grid
- * (sizing comes entirely from the parent ListingRail / container width).
- * Image ratio is fixed 4:5. No Add to Cart, no rating, no view count, no
- * fulfillment icons — kept deliberately short per the approved card spec.
+ * One card component reused across every listing grid on the site (sizing
+ * comes entirely from the parent ListingGrid / container width). The
+ * `w-[44%] sm:w-[30%] lg:w-auto` widths below match ListingGrid's own
+ * 2/3/4-5-column breakpoints (verified against the actual rendered card
+ * width for each: ~43-45vw at the 2-column base width, ~30vw at the
+ * 3-column `sm` width, ~18-23vw across the combined 4-/5-column `lg`+
+ * range) -- the `sizes` attribute on the image below uses those same
+ * fractions so the browser requests an appropriately-sized image at every
+ * breakpoint, not just the previous horizontal-rail layout this component
+ * was originally sized for. Image ratio is fixed 4:5. No Add to Cart, no
+ * rating, no view count, no fulfillment icons — kept deliberately short
+ * per the approved card spec.
  */
 export function ListingCard({ listing }: { listing: ListingCardData }) {
   const {

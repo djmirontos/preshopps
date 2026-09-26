@@ -26,16 +26,36 @@ const EDGE_TOLERANCE_PX = 1;
  * N+1), not a first-half/second-half split -- that's what lets this stay
  * a single flat list with plain horizontal scroll/snap instead of
  * needing custom data-chunking logic. At >=1024px it reverts to the
- * existing single-row flex rail, which is where cards can run past the
- * visible width with no obvious way to reach the rest -- left/right
- * arrow buttons are added there (lg: and up only) to smooth-scroll the
- * same rail; the touch-swipe 2-row rail below lg keeps its existing
- * mobile-first behavior untouched, arrows never render there. Backed by
- * live categories (fetched via the public-safe reference-data path, not
- * hardcoded). Each item links to /search?category={slug}. Inquiry-only
- * categories (Cars, Motorcycles, For Rent) get no special visual
- * treatment here -- that distinction belongs to the listing detail page,
- * not this chip.
+ * existing single-row flex rail. Either way, cards can run past the
+ * visible width with no obvious way to reach the rest, so left/right
+ * arrow buttons scroll-by-page the same rail at every breakpoint, mobile
+ * included -- they mirror actual scroll position (`canScrollLeft`/
+ * `canScrollRight`, `disabled:opacity-0`), so the right arrow alone shows
+ * at the very start and the left arrow only appears once scrolled away
+ * from it. Touch swipe on the rail itself is completely unaffected; the
+ * arrows are purely an additional, optional affordance.
+ *
+ * Below lg, the wrapping div is a flex ROW of three items -- left button,
+ * the scrollable <ul>, right button -- so each arrow gets its own fixed
+ * w-10 cell OUTSIDE the <ul>'s own overflow-x-auto box. That structural
+ * separation (not overlap-with-reserved-padding) is what guarantees an
+ * arrow's hit target can never cover a category's hit target at ANY
+ * scroll position, not just at the two scroll extremes: the two boxes
+ * simply don't share any pixels, at rest or mid-scroll. (An earlier
+ * version instead reserved pl-10/pr-10 padding *inside* the scrollable
+ * list and absolutely-positioned the arrows on top of it -- that only
+ * protected the two extremes; a brief early-scroll window could still let
+ * a newly-enabled arrow graze part of the adjacent category's tap target
+ * before it scrolled clear. This layout has no such window.) At lg+ the
+ * wrapping div reverts to block+relative and the buttons revert to their
+ * original absolute overlay (lg:absolute, w-8, top-1/2), i.e. desktop's
+ * appearance and behavior -- including that same overlay's own overlap
+ * characteristics -- are completely unchanged from before this mobile
+ * fix. Backed by live categories (fetched via the public-safe
+ * reference-data path, not hardcoded). Each item links to
+ * /search?category={slug}. Inquiry-only categories (Cars, Motorcycles,
+ * For Rent) get no special visual treatment here -- that distinction
+ * belongs to the listing detail page, not this chip.
  */
 export function CategoryStrip({ categories }: { categories: CategoryRef[] }) {
   const listRef = useRef<HTMLUListElement>(null);
@@ -86,21 +106,29 @@ export function CategoryStrip({ categories }: { categories: CategoryRef[] }) {
       <h2 id="categories-heading" className="sr-only">
         Browse categories
       </h2>
-      <div className="relative">
+      <div className="flex items-center lg:relative lg:block">
         <button
           type="button"
           onClick={() => scrollByDirection(-1)}
           disabled={!canScrollLeft}
           aria-label="Scroll categories left"
-          className="group absolute left-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
+          className="group flex h-8 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:absolute lg:left-1 lg:top-1/2 lg:z-10 lg:w-8 lg:-translate-y-1/2"
         >
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           <TooltipBubble label="Scroll left" />
         </button>
 
+        {/* Below lg, this list is a flex sibling of the two arrow buttons
+            (each its own fixed w-10 cell, outside this box entirely) --
+            not something the arrows overlay via reserved inline padding.
+            min-w-0 lets this shrink narrower than its content so
+            overflow-x-auto still applies within whatever space is left
+            between the two button cells. At lg+ (lg:flex-none) it drops
+            out of that flex sizing and reverts to a plain full-width
+            block child, matching its pre-fix shape exactly. */}
         <ul
           ref={listRef}
-          className="grid snap-x snap-proximity grid-flow-col grid-rows-2 gap-x-3 gap-y-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex lg:gap-4"
+          className="min-w-0 flex-1 grid snap-x snap-proximity grid-flow-col grid-rows-2 gap-x-3 gap-y-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex lg:flex-none lg:gap-4"
         >
           {categories.map(({ id, slug, name }) => {
             const imageSrc = getCategoryImage(slug);
@@ -137,7 +165,7 @@ export function CategoryStrip({ categories }: { categories: CategoryRef[] }) {
           onClick={() => scrollByDirection(1)}
           disabled={!canScrollRight}
           aria-label="Scroll categories right"
-          className="group absolute right-1 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:flex"
+          className="group flex h-8 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-ink-secondary shadow-sm transition-opacity duration-150 hover:border-brand hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:pointer-events-none disabled:opacity-0 lg:absolute lg:right-1 lg:top-1/2 lg:z-10 lg:w-8 lg:-translate-y-1/2"
         >
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
           <TooltipBubble label="Scroll right" />
