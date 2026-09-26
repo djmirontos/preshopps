@@ -115,10 +115,11 @@ describe("ShopForm -- create mode", () => {
       ),
     );
     expect(refreshMock).toHaveBeenCalled();
-    expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a duplicate-shop error safely and does not refresh on failure", async () => {
+  it("shows a duplicate-shop error safely, does not refresh, and never notifies on failure", async () => {
     createShopMock.mockResolvedValue({ ok: false, code: "SHOP_ALREADY_EXISTS" });
     render(
       <ShopForm
@@ -138,6 +139,7 @@ describe("ShopForm -- create mode", () => {
 
     expect(await screen.findByText("You already have a shop.")).toBeInTheDocument();
     expect(refreshMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("generates a default slug from the shop name and shows a URL preview", () => {
@@ -207,6 +209,7 @@ describe("ShopForm -- create mode", () => {
 
     expect(await screen.findByText("Shop URL must be lowercase letters, numbers, and hyphens only.")).toBeInTheDocument();
     expect(createShopMock).not.toHaveBeenCalled();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("maps a server-rejected slug collision to safe copy", async () => {
@@ -228,6 +231,7 @@ describe("ShopForm -- create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
     expect(await screen.findByText("That shop URL is already taken. Try another one.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
   it("does not render a Shop URL field in edit mode", () => {
@@ -288,6 +292,195 @@ describe("ShopForm -- create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
     await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("shop-images/owner-1/logo/a.jpg"));
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
+  it("fires notifySuccess with the exact copy exactly once on confirmed create success", async () => {
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(createShopMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires notifySuccess before router.refresh(), not merely alongside it", async () => {
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    const notifyOrder = notifySuccessMock.mock.invocationCallOrder[0];
+    const refreshOrder = refreshMock.mock.invocationCallOrder[0];
+    expect(notifyOrder).toBeLessThan(refreshOrder);
+  });
+
+  it("a failed attempt followed by a successful retry fires exactly one toast total, never one per attempt", async () => {
+    createShopMock.mockResolvedValueOnce({ ok: false, code: "SLUG_UNAVAILABLE" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+    expect(await screen.findByText("That shop URL is already taken. Try another one.")).toBeInTheDocument();
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+
+    createShopMock.mockResolvedValueOnce({ ok: true, shopId: "shop-1", slug: "annes-closet-2", createdAt: "2026-01-01T00:00:00.000Z" });
+    fireEvent.change(screen.getByLabelText("Shop URL"), { target: { value: "annes-closet-2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a later, unrelated re-render of the same mounted success state never fires a second toast", async () => {
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    const { rerender } = render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+    rerender(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed logo upload never notifies on its own, and a subsequent successful create with no logo still fires exactly one toast", async () => {
+    uploadImageMock.mockResolvedValue({ ok: false, code: "UPLOAD_FAILED" });
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    selectFile(screen.getByLabelText(/upload shop logo/i));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument());
+    // Wait for the parent's own logoUploading state to actually propagate
+    // back down (a separate render cycle from ShopLogoPicker's own Retry
+    // button appearing) -- otherwise the Submit button can still read
+    // "Uploading logo…" / disabled at the moment of the click below.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create Shop" })).not.toBeDisabled());
+    expect(notifySuccessMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(createShopMock).toHaveBeenCalledWith(expect.objectContaining({ logoStoragePath: null }), "anne-s-closet"));
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a post-success logo cleanup failure never retracts the already-fired toast, blocks refresh, or surfaces as an error", async () => {
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    deleteUploadedImageMock.mockRejectedValue(new Error("network down"));
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+        initialLogoPath="shop-images/owner-1/logo/old.jpg"
+        initialLogoUrl="https://example.supabase.co/x/old.jpg"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
   });
 });
 

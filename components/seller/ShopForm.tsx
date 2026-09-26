@@ -52,6 +52,19 @@ const EMPTY_LOCATION: ShopLocationValue = { provinceId: null, cityId: null, bara
  * (removed or replaced) is best-effort deleted only after the RPC
  * confirms success, and a cleanup failure never turns a successful save
  * into a visible error.
+ *
+ * Create-mode success feedback (LAUNCH UX S1.2): a successful createShop
+ * fires the "Shop created" notifySuccess toast exactly once, immediately
+ * after the result is confirmed `ok` and before the shared post-success
+ * logo cleanup / router.refresh() below. This exists because /seller/shop
+ * is a Server Component that re-fetches and renders an entirely different
+ * page (the create form becomes the management form) only once that
+ * refresh's own server round-trip lands -- until then, this same create
+ * form remains visible, still populated with what the seller just typed,
+ * indistinguishable from never having submitted at all. Never fires on
+ * validation failure or a createShop failure (both return before reaching
+ * this line), and is entirely independent of edit mode's own, separately-
+ * scoped "Shop updated" toast just below.
  */
 export function ShopForm({
   mode,
@@ -153,6 +166,7 @@ export function ShopForm({
         }
         return;
       }
+      notifySuccess("Shop created");
     } else {
       const result = await updateShop(input, status);
       setIsSubmitting(false);

@@ -6,6 +6,14 @@ function readFile(relativePath: string): string {
   return readFileSync(path.join(process.cwd(), relativePath), "utf-8");
 }
 
+/** Strips comments before a call-count assertion, so a doc comment that
+ * merely mentions a call by name (e.g. explaining when it fires) can never
+ * pad the count -- and, symmetrically, can never mask a real call that was
+ * actually removed while a comment mentioning it was left behind. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
 /** LAUNCH UX S1.2 STEP 2: the shared Sonner-backed notification foundation
  * and its first integration (Shop Update). Deliberately does not test
  * Sonner's own timer/stacking/pause-on-hover internals -- those belong to
@@ -61,16 +69,18 @@ describe("Shared toast wrapper -- exposes only the currently-required API", () =
   });
 });
 
-describe("ShopForm integration -- notification wired only into the existing-shop update path", () => {
+describe("ShopForm integration -- notification wired into both the create and existing-shop update paths", () => {
   it("ShopForm imports notifySuccess from the shared wrapper", () => {
     const source = readFile("components/seller/ShopForm.tsx");
     expect(source).toMatch(/import \{ notifySuccess \} from ["']@\/lib\/notifications\/toast["']/);
   });
 
-  it("notifySuccess is called exactly once in the source, inside the edit-mode branch, not inside a useEffect", () => {
-    const source = readFile("components/seller/ShopForm.tsx");
+  it("notifySuccess is called exactly twice in the source -- once in the create-mode branch, once in the edit-mode branch -- never inside a useEffect", () => {
+    const source = stripComments(readFile("components/seller/ShopForm.tsx"));
     const callCount = (source.match(/notifySuccess\(/g) ?? []).length;
-    expect(callCount).toBe(1);
+    expect(callCount).toBe(2);
+    expect(source).toMatch(/notifySuccess\("Shop created"\)/);
+    expect(source).toMatch(/notifySuccess\("Shop updated"\)/);
     expect(source).not.toMatch(/useEffect\([^)]*notifySuccess/);
   });
 });
