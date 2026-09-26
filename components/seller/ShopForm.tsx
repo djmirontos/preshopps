@@ -53,18 +53,28 @@ const EMPTY_LOCATION: ShopLocationValue = { provinceId: null, cityId: null, bara
  * confirms success, and a cleanup failure never turns a successful save
  * into a visible error.
  *
- * Create-mode success feedback (LAUNCH UX S1.2): a successful createShop
- * fires the "Shop created" notifySuccess toast exactly once, immediately
- * after the result is confirmed `ok` and before the shared post-success
- * logo cleanup / router.refresh() below. This exists because /seller/shop
- * is a Server Component that re-fetches and renders an entirely different
- * page (the create form becomes the management form) only once that
- * refresh's own server round-trip lands -- until then, this same create
- * form remains visible, still populated with what the seller just typed,
- * indistinguishable from never having submitted at all. Never fires on
- * validation failure or a createShop failure (both return before reaching
- * this line), and is entirely independent of edit mode's own, separately-
- * scoped "Shop updated" toast just below.
+ * Create-mode success feedback and navigation (LAUNCH UX S1.2): a
+ * successful createShop fires the "Shop created" notifySuccess toast
+ * exactly once, immediately after the result is confirmed `ok` -- before
+ * the shared best-effort logo cleanup and before navigating straight to
+ * the newly created shop's own public page, /shop/{result.slug}. The slug
+ * used is always the RPC's own returned value, never the editable form
+ * field (the seller could still be changing it moments after submitting)
+ * and never a client-recomputed slugify() result (the server may adjust
+ * it -- auto-generated fallback, collision suffix). This replaced staying
+ * on /seller/shop and waiting for it to re-render as the management form:
+ * that page only transforms once router.refresh()'s own server round-trip
+ * lands, and the seller's own newly created shop is real and immediately
+ * public well before that -- get_shop_detail has no listing/review/age
+ * requirement, and create_shop writes shop_slugs in the same transaction,
+ * so /shop/{slug} is fully live the instant createShop resolves. Never
+ * fires on validation failure or a createShop failure (both return before
+ * reaching this line), and is entirely independent of edit mode's own,
+ * separately-scoped "Shop updated" toast + router.refresh() (edit mode
+ * stays on /seller/shop, unchanged). isSubmitting is deliberately never
+ * reset back to false on the create-success path (see handleSubmit's own
+ * comment there), keeping Submit disabled through the whole notifySuccess/
+ * cleanup/navigation gap so a fast second click can't create a second shop.
  */
 export function ShopForm({
   mode,
@@ -101,6 +111,19 @@ export function ShopForm({
   const [fieldErrors, setFieldErrors] = useState<{ name?: string; slug?: string; province?: string; city?: string }>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** Set only once createShop has already confirmed success, purely to
+   * render a plain fallback link to the new shop below. router.push()
+   * returns void in Next.js -- there is no promise to await or catch, so
+   * this component has no way to detect whether the navigation it just
+   * triggered actually completes. Since isSubmitting is deliberately never
+   * reset back to false on this path (see handleSubmit's own comment), a
+   * navigation that stalls or fails for any reason would otherwise leave
+   * the seller stuck on a permanently disabled form with no way forward,
+   * even though their shop was genuinely already created. This link is a
+   * bounded, safe way out: a plain navigation, never a second createShop
+   * call, so it carries none of the duplicate-create risk a re-enabled
+   * Submit button would. */
+  const [createdShopSlug, setCreatedShopSlug] = useState<string | null>(null);
 
   const nameTooLong = name.length > NAME_MAX_LENGTH;
   const descriptionTooLong = description.length > DESCRIPTION_MAX_LENGTH;
@@ -123,6 +146,13 @@ export function ShopForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    // Defense in depth: the Submit button is already disabled via
+    // isSubmitting below, but a stale/queued event -- e.g. a direct form
+    // submit dispatched some other way than clicking that specific button,
+    // which the disabled attribute alone would not stop -- must never be
+    // able to re-enter this handler while a submission is already in
+    // flight.
+    if (isSubmitting) return;
     setSubmitError(null);
 
     const errors: typeof fieldErrors = {};
@@ -156,17 +186,33 @@ export function ShopForm({
       logoStoragePath: logoPath,
     };
 
+    let createdSlug: string | null = null;
+
     if (mode === "create") {
       const result = await createShop(input, slug.trim().toLowerCase());
-      setIsSubmitting(false);
       if (!result.ok) {
+        setIsSubmitting(false);
         setSubmitError(CREATE_SHOP_ERROR_MESSAGES[result.code]);
         if (logoPath && logoPath !== initialLogoPath) {
           await deleteUploadedImage(logoPath).catch(() => {});
         }
         return;
       }
+      // Deliberately left true (Submit stays disabled) all the way through
+      // cleanup and navigation below -- the RPC already succeeded, so a
+      // second click here must never be allowed to re-enter this handler
+      // and create a second shop before the navigation away from this page
+      // actually happens. Mirrors ReviewFormClient's own identical pattern
+      // for exactly this reason; this component unmounts on the route
+      // change below, so there is no later point where this needs to be
+      // reset back to false.
       notifySuccess("Shop created");
+      // The RPC's own returned slug is authoritative -- never the editable
+      // form value, which the seller could still be changing, and never a
+      // client-recomputed slugify() result, which the server may have
+      // adjusted (auto-generated fallback, collision suffix, etc.).
+      createdSlug = result.slug;
+      setCreatedShopSlug(result.slug);
     } else {
       const result = await updateShop(input, status);
       setIsSubmitting(false);
@@ -181,13 +227,19 @@ export function ShopForm({
     }
 
     // Best-effort only, after confirmed success -- never lets a cleanup
-    // problem make an already-successful save look failed.
+    // problem make an already-successful save look failed, and never lets
+    // one block navigation to the newly created shop either.
     try {
       if (initialLogoPath && initialLogoPath !== logoPath) {
         await deleteUploadedImage(initialLogoPath);
       }
     } catch (err) {
       console.error("Post-save shop logo cleanup threw:", err instanceof Error ? err.message : err);
+    }
+
+    if (createdSlug) {
+      router.push(`/shop/${createdSlug}`);
+      return;
     }
 
     router.refresh();
@@ -368,6 +420,12 @@ export function ShopForm({
         {mode === "edit" && currentSlug && (
           <Link href={`/shop/${currentSlug}`} className="text-sm font-medium text-brand-link hover:underline">
             View your shop
+          </Link>
+        )}
+
+        {createdShopSlug && (
+          <Link href={`/shop/${createdShopSlug}`} className="text-sm font-medium text-brand-link hover:underline">
+            View your new shop
           </Link>
         )}
       </div>

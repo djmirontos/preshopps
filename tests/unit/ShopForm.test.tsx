@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { refreshMock, createShopMock, updateShopMock, uploadImageMock, deleteUploadedImageMock, notifySuccessMock } = vi.hoisted(() => ({
+const { refreshMock, pushMock, createShopMock, updateShopMock, uploadImageMock, deleteUploadedImageMock, notifySuccessMock } = vi.hoisted(() => ({
   refreshMock: vi.fn(),
+  pushMock: vi.fn(),
   createShopMock: vi.fn(),
   updateShopMock: vi.fn(),
   uploadImageMock: vi.fn(),
@@ -11,7 +12,7 @@ const { refreshMock, createShopMock, updateShopMock, uploadImageMock, deleteUplo
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: refreshMock }),
+  useRouter: () => ({ refresh: refreshMock, push: pushMock }),
 }));
 
 vi.mock("@/lib/notifications/toast", () => ({
@@ -76,6 +77,7 @@ describe("ShopForm -- create mode", () => {
     expect(await screen.findByText("Please choose a city or municipality.")).toBeInTheDocument();
     expect(createShopMock).not.toHaveBeenCalled();
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("submits create_shop with the entered fields once required fields are filled", async () => {
@@ -114,12 +116,13 @@ describe("ShopForm -- create mode", () => {
         "anne-s-closet",
       ),
     );
-    expect(refreshMock).toHaveBeenCalled();
+    expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet");
+    expect(refreshMock).not.toHaveBeenCalled();
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a duplicate-shop error safely, does not refresh, and never notifies on failure", async () => {
+  it("shows a duplicate-shop error safely, does not navigate or refresh, and never notifies on failure", async () => {
     createShopMock.mockResolvedValue({ ok: false, code: "SHOP_ALREADY_EXISTS" });
     render(
       <ShopForm
@@ -139,6 +142,7 @@ describe("ShopForm -- create mode", () => {
 
     expect(await screen.findByText("You already have a shop.")).toBeInTheDocument();
     expect(refreshMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
     expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
@@ -210,6 +214,7 @@ describe("ShopForm -- create mode", () => {
     expect(await screen.findByText("Shop URL must be lowercase letters, numbers, and hyphens only.")).toBeInTheDocument();
     expect(createShopMock).not.toHaveBeenCalled();
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("maps a server-rejected slug collision to safe copy", async () => {
@@ -232,6 +237,7 @@ describe("ShopForm -- create mode", () => {
 
     expect(await screen.findByText("That shop URL is already taken. Try another one.")).toBeInTheDocument();
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("does not render a Shop URL field in edit mode", () => {
@@ -293,11 +299,12 @@ describe("ShopForm -- create mode", () => {
 
     await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("shop-images/owner-1/logo/a.jpg"));
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 
-describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
-  it("fires notifySuccess with the exact copy exactly once on confirmed create success", async () => {
+describe("ShopForm -- create success feedback and navigation (LAUNCH UX S1.2)", () => {
+  it("fires notifySuccess with the exact copy exactly once, and navigates straight to the new shop's own public page", async () => {
     createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
     render(
       <ShopForm
@@ -315,12 +322,40 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
-    await waitFor(() => expect(createShopMock).toHaveBeenCalled());
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 
-  it("fires notifySuccess before router.refresh(), not merely alongside it", async () => {
+  it("navigates to the RPC's own returned slug, never the editable form value or a client-recomputed slugify() result", async () => {
+    // The seller's own typed slug differs from what the server actually
+    // assigns (e.g. a collision-avoidance suffix, or an auto-generated
+    // fallback) -- the destination must follow the server, not the form.
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet-2", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.change(screen.getByLabelText("Shop URL"), { target: { value: "annes-closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(createShopMock).toHaveBeenCalledWith(expect.anything(), "annes-closet"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet-2"));
+    expect(pushMock).not.toHaveBeenCalledWith("/shop/annes-closet");
+  });
+
+  it("fires notifySuccess before router.push(), not merely alongside it", async () => {
     createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
     render(
       <ShopForm
@@ -338,14 +373,14 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
-    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
     const notifyOrder = notifySuccessMock.mock.invocationCallOrder[0];
-    const refreshOrder = refreshMock.mock.invocationCallOrder[0];
-    expect(notifyOrder).toBeLessThan(refreshOrder);
+    const pushOrder = pushMock.mock.invocationCallOrder[0];
+    expect(notifyOrder).toBeLessThan(pushOrder);
   });
 
-  it("a failed attempt followed by a successful retry fires exactly one toast total, never one per attempt", async () => {
+  it("a failed attempt followed by a successful retry fires exactly one toast and one navigation total, never one per attempt", async () => {
     createShopMock.mockResolvedValueOnce({ ok: false, code: "SLUG_UNAVAILABLE" });
     render(
       <ShopForm
@@ -364,17 +399,19 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
     expect(await screen.findByText("That shop URL is already taken. Try another one.")).toBeInTheDocument();
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
 
     createShopMock.mockResolvedValueOnce({ ok: true, shopId: "shop-1", slug: "annes-closet-2", createdAt: "2026-01-01T00:00:00.000Z" });
     fireEvent.change(screen.getByLabelText("Shop URL"), { target: { value: "annes-closet-2" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
-    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet-2"));
+    expect(pushMock).toHaveBeenCalledTimes(1);
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("a later, unrelated re-render of the same mounted success state never fires a second toast", async () => {
+  it("a later, unrelated re-render of the same mounted success state never fires a second toast or a second navigation", async () => {
     createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
     const { rerender } = render(
       <ShopForm
@@ -391,7 +428,7 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
 
     fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
-    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -420,9 +457,10 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     );
 
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
   });
 
-  it("a failed logo upload never notifies on its own, and a subsequent successful create with no logo still fires exactly one toast", async () => {
+  it("a failed logo upload never notifies or navigates on its own, and a subsequent successful create with no logo still fires exactly one toast and one navigation", async () => {
     uploadImageMock.mockResolvedValue({ ok: false, code: "UPLOAD_FAILED" });
     createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
     render(
@@ -447,15 +485,17 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     // "Uploading logo…" / disabled at the moment of the click below.
     await waitFor(() => expect(screen.getByRole("button", { name: "Create Shop" })).not.toBeDisabled());
     expect(notifySuccessMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
-    await waitFor(() => expect(createShopMock).toHaveBeenCalledWith(expect.objectContaining({ logoStoragePath: null }), "anne-s-closet"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
+    expect(createShopMock).toHaveBeenCalledWith(expect.objectContaining({ logoStoragePath: null }), "anne-s-closet");
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
   });
 
-  it("a post-success logo cleanup failure never retracts the already-fired toast, blocks refresh, or surfaces as an error", async () => {
+  it("a post-success logo cleanup failure never retracts the already-fired toast, blocks navigation, or surfaces as an error", async () => {
     createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
     deleteUploadedImageMock.mockRejectedValue(new Error("network down"));
     render(
@@ -477,10 +517,154 @@ describe("ShopForm -- create success feedback (LAUNCH UX S1.2)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
 
-    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
+    expect(refreshMock).not.toHaveBeenCalled();
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop created");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+  });
+
+  it("a fast second click after confirmed success cannot create a second shop while navigation is pending", async () => {
+    let resolveCreate!: (value: { ok: true; shopId: string; slug: string; createdAt: string }) => void;
+    createShopMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+    await waitFor(() => expect(createShopMock).toHaveBeenCalledTimes(1));
+
+    // Still awaiting createShop's own response -- Submit is already
+    // disabled ("Saving…"), so clicking it is a no-op at the DOM level
+    // (browsers, and jsdom matching them, never dispatch a click through a
+    // disabled form control) -- this asserts that disabled state is
+    // actually applied. It does NOT exercise handleSubmit's own internal
+    // guard, which a real bypass (a direct form submit, not a click on
+    // this specific disabled button) requires -- see the dedicated
+    // "genuine second form submit event" test below for that.
+    fireEvent.click(screen.getByRole("button", { name: "Saving…" }));
+    expect(createShopMock).toHaveBeenCalledTimes(1);
+
+    resolveCreate({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Shop created"));
+
+    // The RPC has now confirmed success, but router.push() hasn't actually
+    // navigated this test's jsdom environment away yet -- the form is
+    // still mounted. Submit must remain disabled through this entire gap.
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Saving…" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
+    expect(createShopMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a genuine second form submit event (not a button click, which the disabled attribute alone would already block) is still rejected by handleSubmit's own guard while navigation is pending", async () => {
+    let resolveCreate!: (value: { ok: true; shopId: string; slug: string; createdAt: string }) => void;
+    createShopMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const { container } = render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+    const form = container.querySelector("form")!;
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(createShopMock).toHaveBeenCalledTimes(1));
+
+    resolveCreate({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    await waitFor(() => expect(notifySuccessMock).toHaveBeenCalledWith("Shop created"));
+
+    // Dispatching the submit event directly on the <form> bypasses the
+    // Submit button's own disabled attribute entirely -- this proves
+    // handleSubmit's own `if (isSubmitting) return;` guard is what actually
+    // stops a second createShop call, not merely the browser refusing to
+    // click a disabled control.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
+    expect(createShopMock).toHaveBeenCalledTimes(1);
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a fallback 'View your new shop' link, using the RPC's own slug, once success is confirmed -- a bounded recovery if router.push() never actually navigates away", async () => {
+    createShopMock.mockResolvedValue({ ok: true, shopId: "shop-1", slug: "annes-closet", createdAt: "2026-01-01T00:00:00.000Z" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: /view your new shop/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/shop/annes-closet"));
+    // The mocked router.push() never actually unmounts this component (it's
+    // only recorded as a call), so the fallback link that a real failed/
+    // stalled navigation would need to expose is directly observable here.
+    expect(screen.getByRole("link", { name: /view your new shop/i })).toHaveAttribute("href", "/shop/annes-closet");
+  });
+
+  it("never shows the create-success fallback link on a createShop failure, and edit mode never shows it at all", async () => {
+    createShopMock.mockResolvedValue({ ok: false, code: "SLUG_UNAVAILABLE" });
+    render(
+      <ShopForm
+        mode="create"
+        ownerId="owner-1"
+        provinces={PROVINCES}
+        initialCities={CITIES}
+        initialBarangays={[]}
+        loadCities={vi.fn()}
+        loadBarangays={vi.fn()}
+        initialLocation={{ provinceId: 1, cityId: 10, barangayId: null }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Shop name"), { target: { value: "Anne's Closet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Shop" }));
+
+    expect(await screen.findByText("That shop URL is already taken. Try another one.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /view your new shop/i })).not.toBeInTheDocument();
   });
 });
 
@@ -538,6 +722,8 @@ describe("ShopForm -- edit mode", () => {
     );
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop updated");
     expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("only Active and Away are selectable -- no admin/suspended option exists", () => {
@@ -612,5 +798,6 @@ describe("ShopForm -- edit mode", () => {
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
     expect(notifySuccessMock).toHaveBeenCalledWith("Shop updated");
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
