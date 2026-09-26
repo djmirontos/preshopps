@@ -244,66 +244,62 @@ describe("CategoryStrip -- left/right navigation arrows", () => {
   });
 
   // jsdom has no real layout engine: it never computes actual pixel
-  // positions, so no assertion here can directly prove "these two boxes
-  // never share a pixel." What we CAN assert -- and what actually
-  // matters -- is the structural precondition that makes non-overlap a
-  // guarantee of the browser's own layout algorithm rather than a
-  // coincidence of chosen padding/width numbers: below lg, each arrow
-  // button has no `absolute` (or any other out-of-flow) positioning of
-  // its own, so it is laid out as an ordinary flex-item sibling of the
-  // list, in its own reserved cell, never stacked on top of the list's
-  // box at all -- there is no scroll position where an in-flow sibling
-  // can occupy the same box as another in-flow sibling. That is a
-  // property of which CSS classes are present, which this file CAN
-  // assert; genuine cross-browser pixel confirmation still needs a real
-  // browser (see the mobile-homepage report's viewport-verification
-  // notes -- no CDP-attachable browser is available in this sandbox).
-  it("lays out each arrow button as an in-flow flex sibling of the list below lg -- never absolutely overlaid on top of it, so it cannot share pixels with a category link at any scroll position", () => {
+  // positions, so nothing here proves whether an arrow visually overlaps
+  // a category link at a given scroll position, in either direction --
+  // that would need a real browser (see the mobile-homepage report's
+  // viewport-verification notes: no CDP-attachable browser is available
+  // in this sandbox). What these assertions CAN and do prove is which
+  // structure is actually shipped: an unconditional absolute overlay with
+  // no reserved gutter, the same at every breakpoint -- i.e. that the
+  // owner's explicit "accept overlap, keep full rail width, no permanent
+  // side gutters" decision is what the class list actually implements,
+  // not a leftover of the rejected flex-cell alternative (which reserved
+  // a dedicated w-10 cell for each arrow, outside the scrollable list).
+  it("overlays each arrow button absolutely on the list at every breakpoint (no separate flex cell, no lg-only variant) -- the owner's explicit no-gutter, accept-overlap choice", () => {
     render(<CategoryStrip categories={categories} />);
     const leftArrow = screen.getByRole("button", { name: "Scroll categories left" });
     const rightArrow = screen.getByRole("button", { name: "Scroll categories right" });
 
     for (const arrow of [leftArrow, rightArrow]) {
       const classes = arrow.className.split(/\s+/);
-      // No bare/unconditional "absolute" (or "lg:absolute" would also
-      // contain the substring "absolute", hence the token-exact check).
-      expect(classes).not.toContain("absolute");
-      expect(classes).toContain("lg:absolute");
+      expect(classes).toContain("absolute");
+      expect(classes).not.toContain("lg:absolute");
+      expect(classes).not.toContain("w-10");
+      expect(classes).not.toContain("shrink-0");
+      expect(classes).toContain("w-8");
     }
   });
 
-  it("gives each arrow button its own fixed-width flex cell (w-10, non-shrinking) instead of overlaying the scrollable list", () => {
+  it("centers each arrow vertically on the two-row category area at every breakpoint (top-1/2 -translate-y-1/2), not just at lg+", () => {
     render(<CategoryStrip categories={categories} />);
     const leftArrow = screen.getByRole("button", { name: "Scroll categories left" });
     const rightArrow = screen.getByRole("button", { name: "Scroll categories right" });
 
     for (const arrow of [leftArrow, rightArrow]) {
-      expect(arrow.className).toContain("w-10");
-      expect(arrow.className).toContain("shrink-0");
-      // Restores the pre-fix desktop button size exactly at lg+.
-      expect(arrow.className).toContain("lg:w-8");
+      const classes = arrow.className.split(/\s+/);
+      expect(classes).toContain("top-1/2");
+      expect(classes).toContain("-translate-y-1/2");
+      expect(classes).not.toContain("lg:top-1/2");
     }
   });
 
-  it("makes the list itself a shrinkable flex sibling below lg (min-w-0 flex-1), so it fills only the space left between the two button cells rather than the whole row", () => {
+  it("adds no reserved gutter/padding around the scrollable list -- the rail keeps its full width on mobile", () => {
     render(<CategoryStrip categories={categories} />);
     const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
-    expect(rail.className).toContain("min-w-0");
-    expect(rail.className).toContain("flex-1");
-    // Drops out of that flex sizing again at lg+, reverting to the
-    // original plain full-width block child.
-    expect(rail.className).toContain("lg:flex-none");
+    for (const token of ["pl-10", "pr-10", "lg:pl-0", "lg:pr-0", "flex-1", "min-w-0", "lg:flex-none"]) {
+      expect(rail.className).not.toContain(token);
+    }
   });
 
-  it("makes the wrapping row a flex container below lg (for the button-cell/list/button-cell layout), reverting to the original block+relative overlay container at lg+", () => {
+  it("keeps the wrapping container a plain positioning box (relative) at every breakpoint, not a flex row of button cells", () => {
     render(<CategoryStrip categories={categories} />);
     const rail = screen.getByRole("link", { name: "Women" }).closest("ul") as HTMLUListElement;
     const wrapper = rail.parentElement as HTMLElement;
     const classes = wrapper.className.split(/\s+/);
-    expect(classes).toContain("flex");
-    expect(classes).not.toContain("relative");
-    expect(wrapper.className).toContain("lg:relative");
-    expect(wrapper.className).toContain("lg:block");
+    expect(classes).toContain("relative");
+    expect(classes).not.toContain("flex");
+    expect(classes).not.toContain("lg:relative");
+    expect(classes).not.toContain("lg:block");
   });
 
   it("keeps the desktop single-row rail and its own flex layout unchanged", () => {
