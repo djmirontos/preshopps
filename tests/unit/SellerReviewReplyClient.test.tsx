@@ -236,3 +236,162 @@ describe("SellerReviewReplyClient -- restriction-aware INTERACTION_BLOCKED error
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 });
+
+describe("SellerReviewReplyClient -- display reconciliation (LAUNCH UX S1.2, no toast)", () => {
+  it("Add: after a confirmed success, immediately shows the submitted reply in the read-only view, before any refreshed props ever arrive", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: null });
+    render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody={null} canWriteReply={true} />);
+
+    fireEvent.change(screen.getByLabelText(/reply to this review/i), { target: { value: "  Thanks for your order!  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Thanks for your order!"));
+    expect(screen.getByText("Thanks for your order!")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/reply to this review/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit reply" })).toBeInTheDocument();
+  });
+
+  it("Edit: after a confirmed success, immediately shows the NEW text in the read-only view, never the stale initialReplyBody prop", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: "2026-01-02T00:00:00.000Z" });
+    render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Old reply" canWriteReply={true} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "Updated reply text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Updated reply text"));
+    expect(screen.getByText("Updated reply text")).toBeInTheDocument();
+    expect(screen.queryByText("Old reply")).not.toBeInTheDocument();
+  });
+
+  it("failure: a rejected first-time submission never shows the attempted text as if it were confirmed -- the compose form remains, proving confirmedBody was never set", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: false, code: "NOT_REVIEW_SELLER" });
+    render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody={null} canWriteReply={true} />);
+
+    fireEvent.change(screen.getByLabelText(/reply to this review/i), { target: { value: "Nice job" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalled());
+    expect(screen.getByText("You don't have permission to reply to this review.")).toBeInTheDocument();
+    // "Nice job" legitimately remains visible as the still-open textarea's
+    // own retained draft value -- the actual claim under test is that no
+    // CONFIRMED reply state was created, i.e. the read-only "Your reply"
+    // view (which confirmedBody would drive) never appears at all.
+    expect(screen.queryByText("Your reply")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/reply to this review/i)).toBeInTheDocument();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("Cancel after a confirmed edit reverts to the just-confirmed text, not the stale initialReplyBody prop", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: "2026-01-02T00:00:00.000Z" });
+    render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Old reply" canWriteReply={true} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "Confirmed new reply" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Confirmed new reply"));
+    expect(screen.getByText("Confirmed new reply")).toBeInTheDocument();
+
+    // Re-open editing, change the draft to something else, then Cancel
+    // without submitting -- the draft this Cancel resets to (checked by
+    // re-opening editing once more) must be the just-CONFIRMED text, never
+    // the stale initialReplyBody prop ("Old reply"), which the read-only
+    // view alone can't distinguish since it renders from confirmedBody
+    // either way.
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "An abandoned draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    expect(screen.getByLabelText(/edit your reply/i)).toHaveValue("Confirmed new reply");
+  });
+
+  it("refresh reconciliation: a fresh initialReplyBody prop matching what was just saved is seamless, and a LATER, different prop update is then reflected -- proving the local override was actually cleared, not just coincidentally matching", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: "2026-01-02T00:00:00.000Z" });
+    const { rerender } = render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Old reply" canWriteReply={true} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "Updated reply text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Updated reply text"));
+    expect(screen.getByText("Updated reply text")).toBeInTheDocument();
+
+    // The server round-trip behind router.refresh() resolves: parent
+    // re-renders with the matching, now-fresh prop.
+    rerender(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Updated reply text" canWriteReply={true} />);
+    expect(screen.getByText("Updated reply text")).toBeInTheDocument();
+
+    // A later, unrelated prop update (e.g. this same order page loading
+    // fresh server data again) must now be trusted directly.
+    rerender(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="A completely different value" canWriteReply={true} />);
+    expect(screen.getByText("A completely different value")).toBeInTheDocument();
+    expect(screen.queryByText("Updated reply text")).not.toBeInTheDocument();
+  });
+
+  it("a stale, out-of-order refresh response arriving after a NEWER confirmed save must not regress the display -- two successive edits, where the FIRST edit's own router.refresh() finally resolves only after the SECOND edit has already been confirmed locally", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: "2026-01-02T00:00:00.000Z" });
+    const { rerender } = render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Original" canWriteReply={true} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "First edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "First edit"));
+
+    // The first save's own router.refresh() has NOT resolved yet (no
+    // rerender with a fresh prop happens here) when the seller edits again.
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "Second edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Second edit"));
+    expect(screen.getByText("Second edit")).toBeInTheDocument();
+
+    // The FIRST refresh() call's response finally lands, LATE, carrying the
+    // now-stale value from the first edit -- out of order, after the second
+    // edit's own newer confirmation already landed locally.
+    rerender(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="First edit" canWriteReply={true} />);
+
+    expect(screen.getByText("Second edit")).toBeInTheDocument();
+    expect(screen.queryByText("First edit")).not.toBeInTheDocument();
+
+    // The SECOND refresh() call's own response now lands too, correctly
+    // matching -- only now does the local override actually clear.
+    rerender(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Second edit" canWriteReply={true} />);
+    expect(screen.getByText("Second edit")).toBeInTheDocument();
+  });
+
+  it("switching to another review clears a just-confirmed reply and does not show the previous review's text", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: true, reviewId: "review-1", replyCreatedAt: "2026-01-01T00:00:00.000Z", replyUpdatedAt: "2026-01-02T00:00:00.000Z" });
+    const { rerender } = render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody="Review 1's old reply" canWriteReply={true} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit reply" }));
+    fireEvent.change(screen.getByLabelText(/edit your reply/i), { target: { value: "Review 1's confirmed edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalledWith("review-1", "Review 1's confirmed edit"));
+    expect(screen.getByText("Review 1's confirmed edit")).toBeInTheDocument();
+
+    // A different review's props land on this same component instance.
+    rerender(<SellerReviewReplyClient reviewId="review-2" initialReplyBody={null} canWriteReply={true} />);
+
+    expect(screen.queryByText("Review 1's confirmed edit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review 1's old reply")).not.toBeInTheDocument();
+    // Review 2 has no reply yet -- back to the compose form, not the
+    // leftover read-only view from review 1.
+    expect(screen.getByLabelText(/reply to this review/i)).toBeInTheDocument();
+  });
+
+  it("switching to another review also clears a pending in-progress draft and error from the previous review", async () => {
+    upsertReviewReplyMock.mockResolvedValue({ ok: false, code: "NOT_REVIEW_SELLER" });
+    const { rerender } = render(<SellerReviewReplyClient reviewId="review-1" initialReplyBody={null} canWriteReply={true} />);
+
+    fireEvent.change(screen.getByLabelText(/reply to this review/i), { target: { value: "Draft for review 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit reply" }));
+    await waitFor(() => expect(upsertReviewReplyMock).toHaveBeenCalled());
+    expect(screen.getByText("You don't have permission to reply to this review.")).toBeInTheDocument();
+
+    rerender(<SellerReviewReplyClient reviewId="review-2" initialReplyBody="Review 2's reply" canWriteReply={true} />);
+
+    expect(screen.queryByText("You don't have permission to reply to this review.")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Draft for review 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Review 2's reply")).toBeInTheDocument();
+  });
+});
