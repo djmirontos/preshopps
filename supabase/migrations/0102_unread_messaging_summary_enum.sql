@@ -1,0 +1,41 @@
+-- Messaging Email Summary, Step M1.1: enum addition only.
+--
+-- PostgreSQL's own documentation for ALTER TYPE ... ADD VALUE is explicit:
+-- a value added to a PRE-EXISTING enum type cannot be used until the
+-- transaction that added it has committed, unless the enum type itself was
+-- created in that same transaction. public.email_event_type_enum is
+-- pre-existing (0083) -- it was not created here -- so the new value below
+-- must not be referenced (in a column default, a CREATE OR REPLACE
+-- FUNCTION body, a CAST, anywhere) until this migration has committed as
+-- its own, separate transaction. This project already has four prior
+-- precedents for exactly this split (0015 added 'changes_pending' alone,
+-- used only in later migrations; 0073 added 'dispute_opened'/
+-- 'dispute_resolved' alone, used only in 0074/0075; 0080 added
+-- 'account_anonymized' alone, used only in 0081; 0095 added
+-- 'moderation_restriction_applied'/'moderation_restriction_lifted' alone,
+-- used only in 0096) -- this migration follows that same established
+-- convention.
+--
+-- Pre-inspection findings (read-only, immediately before writing this file)
+-- -----------------------------------------------------------------------
+-- Migration history ends at 0101_auto_assign_brand_new_condition (confirmed
+-- live against the pre-launch Preshopps project, ref ylhfbqcyxjmxrbpkxtgu --
+-- no drift). public.email_event_type_enum (0083) currently has 8 values
+-- (new_order_request, order_accepted, order_declined,
+-- order_partial_acceptance, order_expiration_reminder,
+-- order_seller_cancelled, moderation_restriction_applied,
+-- moderation_restriction_lifted); 'unread_messages_summary' does not exist
+-- on it yet.
+--
+-- Nothing else lives in this file. The scan function that actually
+-- enqueues this event, the claim-time unread-recheck function, the
+-- claimed-row cancellation function, the new pg_cron job, and the Edge
+-- Function's new template case all move to a later migration (0103+),
+-- which is free to reference this value because this migration will
+-- already be a prior, committed one by the time that migration runs. This
+-- step intentionally implements none of the approved product decisions
+-- for later steps (30-minute initial unread delay, muted-conversation
+-- exclusion, 2-hour minimum digest cooldown) -- those govern the scan
+-- function's own eligibility query, which does not exist yet.
+
+alter type public.email_event_type_enum add value 'unread_messages_summary';

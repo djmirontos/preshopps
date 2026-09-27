@@ -53,6 +53,7 @@ describe("0092 -- migration numbering", () => {
       "0099_schedule_pending_order_expiry.sql",
       "0100_allow_incomplete_fair_condition_draft.sql",
       "0101_auto_assign_brand_new_condition.sql",
+      "0102_unread_messaging_summary_enum.sql",
     ]);
   });
 
