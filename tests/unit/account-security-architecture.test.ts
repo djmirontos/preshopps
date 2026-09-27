@@ -40,6 +40,7 @@ describe("Account Security slice adds no backend/migration/config change", () =>
       "0100_allow_incomplete_fair_condition_draft.sql",
       "0101_auto_assign_brand_new_condition.sql",
       "0102_unread_messaging_summary_enum.sql",
+      "0103_unread_messaging_summary.sql",
     ]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });

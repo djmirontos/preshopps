@@ -47,6 +47,7 @@ describe("Floating Messenger slice -- no backend/migration/RLS change was made",
       "0100_allow_incomplete_fair_condition_draft.sql",
       "0101_auto_assign_brand_new_condition.sql",
       "0102_unread_messaging_summary_enum.sql",
+      "0103_unread_messaging_summary.sql",
     ]);
   });
 
