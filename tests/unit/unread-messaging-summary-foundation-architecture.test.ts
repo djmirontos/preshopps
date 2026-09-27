@@ -16,7 +16,6 @@ function stripSqlComments(sql: string): string {
 const ENUM_MIGRATION_PATH = "supabase/migrations/0102_unread_messaging_summary_enum.sql";
 const FOUNDATION_MIGRATION_PATH = "supabase/migrations/0103_unread_messaging_summary.sql";
 const BADGE_COUNT_MIGRATION_PATH = "supabase/migrations/0088_exact_unread_badge_counts.sql";
-const EDGE_FUNCTION_PATH = "supabase/functions/process-email-outbox/index.ts";
 
 const enumSource = stripSqlComments(readFile(ENUM_MIGRATION_PATH));
 const foundationSource = readFile(FOUNDATION_MIGRATION_PATH);
@@ -374,8 +373,17 @@ describe("0103: existing email_outbox architecture and event types are untouched
     expect(code).not.toMatch(/alter type public\.email_event_type_enum/i);
   });
 
-  it("does not modify the Edge Function -- it still has no case for the new event type", () => {
-    const edgeFunctionSource = readFile(EDGE_FUNCTION_PATH);
-    expect(edgeFunctionSource).not.toMatch(/unread_messages_summary/);
+  it("this migration's own SQL never references the Edge Function's file path or Deno-specific syntax -- a SQL migration has no business touching a Deno file at all", () => {
+    // NOTE: an earlier version of this test instead asserted that the
+    // Edge Function's OWN source had no case for 'unread_messages_summary'
+    // yet -- that was true only as a snapshot of this migration's own
+    // moment in time (M1.2), not a durable property of this migration
+    // file itself. A later, separate, explicitly-approved step (M1.3)
+    // deliberately added that case to the Edge Function -- correctly, not
+    // as a violation of anything 0103 itself claims. This migration's own
+    // SQL text (`code`, below) genuinely never referenced that file either
+    // before or after that later change, which is the actual durable
+    // claim worth asserting here.
+    expect(code).not.toMatch(/process-email-outbox|Deno\.serve|Deno\.env/);
   });
 });

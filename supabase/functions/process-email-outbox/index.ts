@@ -86,7 +86,8 @@ type EmailEventType =
   | "order_expiration_reminder"
   | "order_seller_cancelled"
   | "moderation_restriction_applied"
-  | "moderation_restriction_lifted";
+  | "moderation_restriction_lifted"
+  | "unread_messages_summary";
 
 type EmailTemplate = { subject: string; text: string; html: string };
 
@@ -120,6 +121,13 @@ function buyerOrderLink(publicCode: string): string {
 
 function supportLink(): string {
   return `${getAppUrl()}/support`;
+}
+
+// A grouped digest can cover multiple conversations at once -- there is no
+// single conversation to deep-link to, so this always points at the plain
+// inbox, never /messages/{conversationId}.
+function messagesLink(): string {
+  return `${getAppUrl()}/messages`;
 }
 
 function asString(value: unknown, fallback = ""): string {
@@ -227,6 +235,43 @@ function renderEmailTemplate(eventType: EmailEventType, payload: Record<string, 
   }
 }
 
+// ===================== unread messaging summary (grouped digest) =====================
+// Deliberately NOT rendered through renderEmailTemplate/row.payload above --
+// this event type's content always comes from a claim-time, live RPC
+// result (get_current_unread_messaging_summary), never from the outbox
+// row's own payload, which holds only the enqueue-time `covers_through`
+// bookkeeping timestamp and is never displayed. See processEmailOutbox's
+// own dedicated branch for this event type.
+type UnreadMessagingSummaryRow = {
+  conversation_id: string;
+  shop_name: string | null;
+  listing_title: string | null;
+  other_party_display_name: string | null;
+};
+
+// Keeps the digest short even when a recipient has many eligible
+// conversations -- no per-message detail, just a small set of safe labels.
+const MAX_LISTED_UNREAD_CONVERSATIONS = 5;
+
+function conversationLabel(row: UnreadMessagingSummaryRow): string {
+  const who = asString(row.other_party_display_name) || asString(row.shop_name) || "Someone";
+  const listingTitle = asString(row.listing_title);
+  return listingTitle ? `${who} (${listingTitle})` : who;
+}
+
+function renderUnreadMessagingSummaryTemplate(rows: UnreadMessagingSummaryRow[]): EmailTemplate {
+  const count = rows.length;
+  const lines = [count === 1 ? "You have 1 unread conversation waiting for you." : `You have ${count} unread conversations waiting for you.`];
+
+  const listed = rows.slice(0, MAX_LISTED_UNREAD_CONVERSATIONS).map(conversationLabel);
+  lines.push(...listed);
+  if (count > MAX_LISTED_UNREAD_CONVERSATIONS) {
+    lines.push(`...and ${count - MAX_LISTED_UNREAD_CONVERSATIONS} more.`);
+  }
+
+  return buildTemplate("You have unread messages on Preshopps", lines, messagesLink(), "View your messages");
+}
+
 // ===================== resend wrapper (port of lib/email/resend-client.ts) =====================
 type SendEmailResult =
   | { ok: true }
@@ -283,7 +328,7 @@ async function processEmailOutbox(supabase: SupabaseClient, limit = 20) {
     console.warn(
       "[email] Provider is not configured (RESEND_API_KEY/EMAIL_FROM_ADDRESS/APP_BASE_URL missing) -- skipping this run without claiming any email_outbox rows.",
     );
-    return { claimed: 0, sent: 0, failed: 0, providerConfigured: false };
+    return { claimed: 0, sent: 0, failed: 0, cancelled: 0, providerConfigured: false };
   }
 
   const { data, error } = await supabase.rpc("claim_pending_emails", { p_limit: limit });
@@ -294,8 +339,88 @@ async function processEmailOutbox(supabase: SupabaseClient, limit = 20) {
   const rows = (data ?? []) as ClaimedEmailRow[];
   let sent = 0;
   let failed = 0;
+  let cancelled = 0;
 
   for (const row of rows) {
+    // Narrow, self-contained branch for the one event type that needs a
+    // live recheck between claim and send -- every other event type falls
+    // through to the unchanged normal path below unmodified.
+    if (row.event_type === "unread_messages_summary") {
+      const { data: summaryData, error: summaryError } = await supabase.rpc("get_current_unread_messaging_summary", {
+        p_recipient_user_id: row.recipient_user_id,
+      });
+
+      if (summaryError) {
+        // A genuine RPC failure, scoped to this one row -- treated exactly
+        // like a per-row Resend failure below (mark_email_failed, continue
+        // to the next row), not a batch-aborting throw: the failure is
+        // this row's own problem, not evidence the whole claimed batch is
+        // unusable. last_error is never exposed to the recipient (same
+        // outbox column every other event type's own provider error
+        // already uses) -- this only prefixes it for operator clarity.
+        const { error: markError } = await supabase.rpc("mark_email_failed", {
+          p_id: row.id,
+          p_error: `get_current_unread_messaging_summary failed: ${summaryError.message}`,
+        });
+        if (markError) console.error(`mark_email_failed failed for email_outbox row ${row.id}:`, markError.message);
+        failed += 1;
+        continue;
+      }
+
+      const summary = (summaryData ?? []) as UnreadMessagingSummaryRow[];
+
+      if (summary.length === 0) {
+        // Everything the recipient had unread at enqueue time has since
+        // been read, muted, or archived -- there is genuinely nothing left
+        // to send. This is a cancellation, not a failure: it must never
+        // reach mark_email_failed's retry/backoff path or count as sent.
+        const { error: cancelError } = await supabase.rpc("cancel_claimed_email", {
+          p_id: row.id,
+          p_reason: "No unread messaging summary remained eligible at send time.",
+        });
+        if (cancelError) {
+          // Do not send the now-stale digest and do not mark it sent. The
+          // row is left exactly as claim_pending_emails left it
+          // ('processing') -- once claimed_at exceeds 5 minutes it becomes
+          // eligible for that function's own existing stale-'processing'
+          // reclaim on a later tick, which re-runs this identical recheck
+          // from scratch rather than resending stale content.
+          console.error(`cancel_claimed_email failed for email_outbox row ${row.id}:`, cancelError.message);
+          continue;
+        }
+        cancelled += 1;
+        continue;
+      }
+
+      // Rendered entirely from this fresh RPC result -- never from
+      // row.payload, which holds only the enqueue-time covers_through
+      // bookkeeping timestamp and is never displayed.
+      const template = renderUnreadMessagingSummaryTemplate(summary);
+      const result = await sendEmailViaResend({
+        to: row.recipient_email,
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
+      });
+
+      if (result.ok) {
+        const { error: markError } = await supabase.rpc("mark_email_sent", { p_id: row.id });
+        if (markError) console.error(`mark_email_sent failed for email_outbox row ${row.id}:`, markError.message);
+        sent += 1;
+        continue;
+      }
+
+      if (result.reason === "not_configured") {
+        console.warn(`[email] Provider became unconfigured mid-run for email_outbox row ${row.id}; leaving it claimed for later reclaim.`);
+        continue;
+      }
+
+      const { error: markError } = await supabase.rpc("mark_email_failed", { p_id: row.id, p_error: result.error });
+      if (markError) console.error(`mark_email_failed failed for email_outbox row ${row.id}:`, markError.message);
+      failed += 1;
+      continue;
+    }
+
     const template = renderEmailTemplate(row.event_type, row.payload ?? {});
     const result = await sendEmailViaResend({
       to: row.recipient_email,
@@ -321,7 +446,7 @@ async function processEmailOutbox(supabase: SupabaseClient, limit = 20) {
     failed += 1;
   }
 
-  return { claimed: rows.length, sent, failed, providerConfigured: true };
+  return { claimed: rows.length, sent, failed, cancelled, providerConfigured: true };
 }
 
 // ===================== HTTP entrypoint =====================
