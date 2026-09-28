@@ -306,9 +306,17 @@ The following are implemented and merged as of the product implementation milest
   - Available to guests, unconditionally, on every public listing detail page (`ListingActions.tsx`) — no sign-in gate, matching §12's guest-allowed "Share listing links."
   - Uses `navigator.share` when supported, falling back to a clipboard copy when it isn't; Copy Link always copies directly regardless of native-share support. Both paths give truthful success/failure feedback, and a cancelled native share sheet (`AbortError`) is correctly treated as a normal dismissal — no error toast, no fallback copy.
   - **Owner confirmed** a copied public listing link opens the intended listing correctly in a private browser window.
-  - **Listing Social Sharing is COMPLETE under §36.** Shop-page sharing is not a §36 requirement and remains unimplemented — not a gap against this section. Listing/shop OG and canonical metadata (§36.1), `/search` metadata, and JSON-LD (§37) remain separate, not-yet-addressed backlog items.
+  - **Listing Social Sharing is COMPLETE under §36.** Shop-page sharing is not a §36 requirement and remains unimplemented — not a gap against this section. `/search` metadata and JSON-LD (§37) remain separate, not-yet-addressed backlog items.
 
 **Listing Social Sharing — COMPLETE.**
+
+- Listing/shop canonical URLs and Open Graph metadata (§36.1): absolute `alternates.canonical` and `openGraph` (title, description, url, `type: "website"`, image when available) added to `generateMetadata` on both the listing (`app/item/[publicCode]/page.tsx`) and shop (`app/shop/[slug]/page.tsx`) detail pages, reusing data already fetched for the page body — no added queries (commit `171ad56`).
+  - Listing Open Graph descriptions include price, type/condition, and location, with an explicit unavailability prefix ("Sold"/"Reserved"/"Archived") so a sold/reserved/archived listing's shared preview never reads as currently available. Shop canonical/OG URLs resolve to `shop.slug` (the current, resolved slug), so an old slug's own metadata still canonicalizes to the shop's real URL.
+  - **Production verified** on `https://preshopps.com` for one real sold listing (`PSL-C228A6AD2B7ADE36`) and one real shop (`vlady`): `canonical` and `og:url` matched exactly, both using `https://preshopps.com` with the correct public code/current slug and no doubled slash, localhost, or preview domain; `og:title`, `og:description`, `og:type: "website"`, and `og:image` (a real Supabase Storage URL) were all present and correct; the listing's `og:description` accurately reflected its visible "Sold" status and ₱2,500 price. Owner-confirmed Netlify Production `NEXT_PUBLIC_APP_URL` is `https://preshopps.com`.
+  - The old-shop-slug-canonicalizes-to-current-slug case is covered by a focused unit test (`tests/unit/ShopPage.test.tsx`) but was not exercised against a live old-slug fixture — no shop in the live database currently has an old slug to test against.
+  - Social-platform link-preview rendering (e.g. a Facebook/Twitter/LinkedIn scraper's own cached preview) was not independently tested — only the underlying HTML tags were verified directly.
+
+**Listing/shop OG and canonical metadata — COMPLETE.**
 
 ---
 
