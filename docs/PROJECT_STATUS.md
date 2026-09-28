@@ -302,6 +302,14 @@ The following are implemented and merged as of the product implementation milest
 
 **Messaging action feedback — Mute/Archive/Mark as Unread — COMPLETE.**
 
+- Listing Social Sharing (PRD §36): Share Listing and Copy Link, implemented earlier (commit `091e84c`, `components/listing/ShareActions.tsx`) but never previously recorded here, were audited against §36 and confirmed to satisfy it.
+  - Available to guests, unconditionally, on every public listing detail page (`ListingActions.tsx`) — no sign-in gate, matching §12's guest-allowed "Share listing links."
+  - Uses `navigator.share` when supported, falling back to a clipboard copy when it isn't; Copy Link always copies directly regardless of native-share support. Both paths give truthful success/failure feedback, and a cancelled native share sheet (`AbortError`) is correctly treated as a normal dismissal — no error toast, no fallback copy.
+  - **Owner confirmed** a copied public listing link opens the intended listing correctly in a private browser window.
+  - **Listing Social Sharing is COMPLETE under §36.** Shop-page sharing is not a §36 requirement and remains unimplemented — not a gap against this section. Listing/shop OG and canonical metadata (§36.1), `/search` metadata, and JSON-LD (§37) remain separate, not-yet-addressed backlog items.
+
+**Listing Social Sharing — COMPLETE.**
+
 ---
 
 ## Current next major module
