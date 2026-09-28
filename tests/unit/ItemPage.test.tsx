@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ListingDetail, ListingDetailResult } from "@/lib/marketplace/listing-detail";
+import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 
 const { getListingDetailMock, notFoundMock } = vi.hoisted(() => ({
   getListingDetailMock: vi.fn<(publicCode: string) => Promise<ListingDetailResult>>(),
@@ -18,6 +19,10 @@ vi.mock("@/lib/marketplace/listing-detail", () => ({
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
   useRouter: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("@/lib/env", () => ({
+  getAppUrl: () => "https://preshopps.com",
 }));
 
 import ItemPage, { generateMetadata } from "@/app/item/[publicCode]/page";
@@ -117,10 +122,72 @@ describe("ItemPage", () => {
     expect(metadata.description).toBe("Worn a few times, still great.");
   });
 
-  it("falls back to generic metadata without leaking anything when not found", async () => {
+  it("falls back to generic metadata without leaking anything when not found -- no canonical or Open Graph field of any kind", async () => {
     getListingDetailMock.mockResolvedValue({ status: "not_found" });
     const metadata = await generateMetadata(makeParams("missing"));
     expect(metadata.title).toBe("Listing | Preshopps");
+    expect(metadata.description).toBeUndefined();
+    expect(metadata.alternates).toBeUndefined();
+    expect(metadata.openGraph).toBeUndefined();
+  });
+
+  describe("generateMetadata -- canonical and Open Graph (PRD §37 / ARCHITECTURE §27)", () => {
+    it("emits an absolute canonical URL from the listing's own resolved public code", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      expect(metadata.alternates).toEqual({ canonical: "https://preshopps.com/item/PLS-ABC123" });
+    });
+
+    it("Open Graph title/url/type match the canonical values, description reuses the same base as the meta description", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      expect(metadata.openGraph?.title).toBe("Nike Air Max 270 | Preshopps");
+      expect(metadata.openGraph?.url).toBe("https://preshopps.com/item/PLS-ABC123");
+      // Next's Metadata["openGraph"] union type requires narrowing before
+      // a plain property read on `type` compiles -- toMatchObject checks
+      // it at runtime without that compile-time narrowing.
+      expect(metadata.openGraph).toMatchObject({ type: "website" });
+    });
+
+    it("Open Graph description includes price, type/condition, and location ahead of the listing's own description, with no unavailability prefix while available", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      const price = formatPriceFromCents(sampleListing.priceCents);
+      expect(metadata.openGraph?.description).toBe(
+        `${price} · Pre-loved · Good · Tangub City, Misamis Occidental — Worn a few times, still great.`,
+      );
+    });
+
+    it("omits the Open Graph image entirely (never a placeholder URL) when the listing has no images", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, imageUrls: [] } });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      expect(metadata.openGraph?.images).toBeUndefined();
+    });
+
+    it("includes the listing's first photo as the Open Graph image when present", async () => {
+      getListingDetailMock.mockResolvedValue({
+        status: "found",
+        listing: { ...sampleListing, imageUrls: ["https://supabase.example/storage/v1/object/public/listings/photo1.jpg", "https://supabase.example/storage/v1/object/public/listings/photo2.jpg"] },
+      });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      expect(metadata.openGraph?.images).toEqual([{ url: "https://supabase.example/storage/v1/object/public/listings/photo1.jpg" }]);
+    });
+
+    it.each(["sold", "reserved", "archived"] as const)(
+      "prefixes the Open Graph description with the real status for a %s listing -- never describing it as currently available",
+      async (status) => {
+        getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, status } });
+        const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+        const expectedLabel = status === "sold" ? "Sold" : status === "reserved" ? "Reserved" : "Archived";
+        expect(metadata.openGraph?.description).toMatch(new RegExp(`^${expectedLabel} · `));
+      },
+    );
+
+    it("does not prefix the Open Graph description with any status label while the listing is available", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: sampleListing });
+      const metadata = await generateMetadata(makeParams("PLS-ABC123"));
+      expect(metadata.openGraph?.description).not.toMatch(/^(Sold|Reserved|Archived) ·/);
+    });
   });
 
   it("never renders private seller/order fields such as a raw owner id", async () => {

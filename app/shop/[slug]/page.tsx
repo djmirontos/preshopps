@@ -15,6 +15,7 @@ import { getShopReviews, type ShopReviewsCursor, type ReviewRatingFilter, type R
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 import type { BrowseCursor } from "@/lib/marketplace/search-params";
+import { getAppUrl } from "@/lib/env";
 
 const LISTINGS_LIMIT = 20;
 const REVIEWS_LIMIT = 10;
@@ -45,12 +46,35 @@ export async function generateMetadata({ params }: ShopPageProps): Promise<Metad
   const result = await getCachedShopDetail(slug);
 
   if (result.status !== "found") {
+    // Uniform for a nonexistent slug and a suspended-seller shop alike --
+    // no canonical/Open Graph field of any kind, so nothing about a
+    // private or nonexistent shop is ever derived into metadata.
     return { title: "Shop | Preshopps" };
   }
 
+  const { shop } = result;
+  const title = `${shop.name} | Preshopps`;
+  // shop.slug is get_shop_detail's own resolved CURRENT slug, never the
+  // raw route param -- an old, redirected slug's own metadata still
+  // canonicalizes to the shop's real, current URL (the same slug the
+  // page body's own permanentRedirect below already targets), so a
+  // crawler that doesn't follow the redirect still learns the right URL.
+  const canonicalUrl = `${getAppUrl()}/shop/${shop.slug}`;
+
   return {
-    title: `${result.shop.name} | Preshopps`,
-    description: buildMetaDescription(result.shop.name, result.shop.description),
+    title,
+    description: buildMetaDescription(shop.name, shop.description),
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      title,
+      description: buildMetaDescription(shop.name, shop.description),
+      url: canonicalUrl,
+      type: "website",
+      // Omitted entirely (never a fallback/placeholder URL) when the
+      // shop has no logo -- shop.logoUrl is already an absolute
+      // Supabase Storage URL when present (getListingImageUrl).
+      images: shop.logoUrl ? [{ url: shop.logoUrl }] : undefined,
+    },
   };
 }
 

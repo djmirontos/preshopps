@@ -12,11 +12,52 @@ import { ListingMeta } from "@/components/listing/ListingMeta";
 import { ListingSellerCard } from "@/components/listing/ListingSellerCard";
 import { ListingSellerPreview } from "@/components/listing/ListingSellerPreview";
 import { ListingSpecificDetails } from "@/components/listing/ListingSpecificDetails";
-import { getListingDetail } from "@/lib/marketplace/listing-detail";
+import { getListingDetail, type ListingDetail } from "@/lib/marketplace/listing-detail";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShop } from "@/lib/seller/get-my-shop";
+import { getAppUrl } from "@/lib/env";
+import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
+import { CONDITION_LABELS } from "@/lib/marketplace/search-params";
 
 const META_DESCRIPTION_LENGTH = 160;
+
+/** Same three-way convention ListingHeader's own STATUS_LABELS already
+ * uses for the page's visible status badge -- reused here (not
+ * redefined as a narrower sold/archived-only map) so the Open Graph
+ * description never contradicts what the page itself shows. Undefined
+ * for "available", which is exactly when no unavailability prefix
+ * should appear at all. */
+const STATUS_UNAVAILABLE_LABELS: Partial<Record<ListingDetail["status"], string>> = {
+  reserved: "Reserved",
+  sold: "Sold",
+  archived: "Archived",
+};
+
+/** Mirrors ListingHeader's own exact typeLabel rule (Brand New never
+ * repeats "· Brand New"; Pre-loved shows its condition only when known)
+ * so the Open Graph description and the page's own visible label never
+ * disagree. */
+function buildTypeConditionLabel(listing: ListingDetail): string {
+  return listing.listingType === "brand_new"
+    ? "Brand New"
+    : listing.condition
+      ? `Pre-loved · ${CONDITION_LABELS[listing.condition]}`
+      : "Pre-loved";
+}
+
+/** Price, type/condition, and location per ARCHITECTURE_ESSENTIALS §23's
+ * social-preview requirement, plus an explicit unavailability prefix so
+ * a sold/reserved/archived listing's own shared preview never reads as
+ * "currently available" -- prepended ahead of the ordinary meta
+ * description, never replacing it. */
+function buildOgDescription(listing: ListingDetail): string {
+  const statusLabel = STATUS_UNAVAILABLE_LABELS[listing.status];
+  const summary = [statusLabel, formatPriceFromCents(listing.priceCents), buildTypeConditionLabel(listing), listing.locationLabel]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+  const base = buildMetaDescription(listing.description);
+  return summary ? `${summary} — ${base}` : base;
+}
 
 /**
  * Memoized per-request so generateMetadata and the page body share one
@@ -45,12 +86,35 @@ export async function generateMetadata({ params }: ItemPageProps): Promise<Metad
   const result = await getCachedListingDetail(publicCode);
 
   if (result.status !== "found") {
+    // Uniform for nonexistent/draft/paused/suspended-seller listings --
+    // no canonical/Open Graph field of any kind, so nothing about a
+    // private or nonexistent listing is ever derived into metadata.
     return { title: "Listing | Preshopps" };
   }
 
+  const { listing } = result;
+  const title = `${listing.title} | Preshopps`;
+  // listing.publicCode is the resolved value from the fetched row, not
+  // the raw route param -- both are the same value for this route today
+  // (public_code is this route's only key, unlike the shop route's own
+  // slug/current-slug distinction below), but resolving from the fetched
+  // record is the same defensive convention used there.
+  const canonicalUrl = `${getAppUrl()}/item/${listing.publicCode}`;
+
   return {
-    title: `${result.listing.title} | Preshopps`,
-    description: buildMetaDescription(result.listing.description),
+    title,
+    description: buildMetaDescription(listing.description),
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      title,
+      description: buildOgDescription(listing),
+      url: canonicalUrl,
+      type: "website",
+      // Omitted entirely (never a fallback/placeholder URL) when the
+      // listing has no image -- listing.imageUrls[0] is already an
+      // absolute Supabase Storage URL when present (getListingImageUrl).
+      images: listing.imageUrls[0] ? [{ url: listing.imageUrls[0] }] : undefined,
+    },
   };
 }
 

@@ -47,6 +47,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("@/lib/env", () => ({
+  getAppUrl: () => "https://preshopps.com",
+}));
+
 import ShopPage, { generateMetadata } from "@/app/shop/[slug]/page";
 
 const sampleShop: ShopDetail = {
@@ -241,10 +245,60 @@ describe("ShopPage", () => {
     expect(metadata.title).toBe("Anne's Closet | Preshopps");
   });
 
-  it("falls back to generic metadata without leaking anything when not found", async () => {
+  it("falls back to generic metadata without leaking anything when not found -- no canonical or Open Graph field of any kind", async () => {
     getShopDetailMock.mockResolvedValue({ status: "not_found" });
     const metadata = await generateMetadata(makeParams("missing"));
     expect(metadata.title).toBe("Shop | Preshopps");
+    expect(metadata.description).toBeUndefined();
+    expect(metadata.alternates).toBeUndefined();
+    expect(metadata.openGraph).toBeUndefined();
+  });
+
+  describe("generateMetadata -- canonical and Open Graph (PRD §37 / ARCHITECTURE §27)", () => {
+    it("emits an absolute canonical URL from the shop's own resolved current slug", async () => {
+      getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: true });
+      const metadata = await generateMetadata(makeParams("annes-closet"));
+      expect(metadata.alternates).toEqual({ canonical: "https://preshopps.com/shop/annes-closet" });
+    });
+
+    it("an OLD slug's own metadata still canonicalizes to the CURRENT slug, not the requested one", async () => {
+      // get_shop_detail resolves historical slugs to the same shop --
+      // shop.slug is always the current one regardless of what was
+      // requested (isCurrentSlug: false is exactly this case, the same
+      // one that drives the page body's own permanentRedirect above).
+      getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: false });
+      const metadata = await generateMetadata(makeParams("old-shop-name"));
+      expect(metadata.alternates).toEqual({ canonical: "https://preshopps.com/shop/annes-closet" });
+      expect(metadata.openGraph?.url).toBe("https://preshopps.com/shop/annes-closet");
+    });
+
+    it("Open Graph title/description/url/type match the shop's own resolved values", async () => {
+      getShopDetailMock.mockResolvedValue({ status: "found", shop: sampleShop, isCurrentSlug: true });
+      const metadata = await generateMetadata(makeParams("annes-closet"));
+      expect(metadata.openGraph?.title).toBe("Anne's Closet | Preshopps");
+      expect(metadata.openGraph?.description).toBe("Quality pre-loved finds.");
+      expect(metadata.openGraph?.url).toBe("https://preshopps.com/shop/annes-closet");
+      // Next's Metadata["openGraph"] union type requires narrowing before
+      // a plain property read on `type` compiles -- toMatchObject checks
+      // it at runtime without that compile-time narrowing.
+      expect(metadata.openGraph).toMatchObject({ type: "website" });
+    });
+
+    it("omits the Open Graph image entirely (never a placeholder URL) when the shop has no logo", async () => {
+      getShopDetailMock.mockResolvedValue({ status: "found", shop: { ...sampleShop, logoUrl: undefined }, isCurrentSlug: true });
+      const metadata = await generateMetadata(makeParams("annes-closet"));
+      expect(metadata.openGraph?.images).toBeUndefined();
+    });
+
+    it("includes the shop's logo as the Open Graph image when present", async () => {
+      getShopDetailMock.mockResolvedValue({
+        status: "found",
+        shop: { ...sampleShop, logoUrl: "https://supabase.example/storage/v1/object/public/shops/logo.jpg" },
+        isCurrentSlug: true,
+      });
+      const metadata = await generateMetadata(makeParams("annes-closet"));
+      expect(metadata.openGraph?.images).toEqual([{ url: "https://supabase.example/storage/v1/object/public/shops/logo.jpg" }]);
+    });
   });
 
   it("never renders private fields such as a raw owner id", async () => {
