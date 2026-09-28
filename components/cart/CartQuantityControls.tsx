@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -31,46 +32,68 @@ const STEP_BUTTON_CLASS =
  * disables at/above it rather than allowing an over-quantity request.
  */
 export function CartQuantityControls({ quantity, max, disabled, isBusy, itemLabel, onIncrement, onDecrement, onRemove }: Props) {
+  const stockLimitMessageId = useId();
   const atMin = quantity <= 1;
   // null means "unknown ceiling" -- never allow incrementing past an
   // unknown limit rather than assuming it's safe.
   const atMax = max === null || quantity >= max;
+  // Distinct from atMax/the button's own disabled state: only true when
+  // the reason increment is unavailable is specifically a KNOWN stock
+  // ceiling already reached -- never merely because the whole row is
+  // disabled (an unavailable row's own reason is already shown elsewhere
+  // in CartRow), never merely because a mutation is pending (isBusy is
+  // temporary and unrelated to the quantity/max relationship itself),
+  // and never when max is null (an unknown ceiling -- claiming "maximum
+  // reached" would overstate what's actually known). Derived directly
+  // from props on every render, never stored in its own state, so it
+  // disappears on its own the instant quantity drops below max or a
+  // fresh max prop arrives -- no separate clearing logic needed.
+  const atStockLimit = !disabled && max !== null && quantity >= max;
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center rounded-[10px] border border-border">
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center rounded-[10px] border border-border">
+          <button
+            type="button"
+            aria-label={`Decrease quantity of ${itemLabel}`}
+            disabled={disabled || isBusy || atMin}
+            onClick={onDecrement}
+            className={cn(STEP_BUTTON_CLASS, "rounded-l-[10px]")}
+          >
+            <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <span aria-live="polite" className="w-8 text-center text-sm font-medium tabular-nums text-ink">
+            {quantity}
+          </span>
+          <button
+            type="button"
+            aria-label={`Increase quantity of ${itemLabel}`}
+            aria-describedby={atStockLimit ? stockLimitMessageId : undefined}
+            disabled={disabled || isBusy || atMax}
+            onClick={onIncrement}
+            className={cn(STEP_BUTTON_CLASS, "rounded-r-[10px]")}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+
         <button
           type="button"
-          aria-label={`Decrease quantity of ${itemLabel}`}
-          disabled={disabled || isBusy || atMin}
-          onClick={onDecrement}
-          className={cn(STEP_BUTTON_CLASS, "rounded-l-[10px]")}
+          aria-label={`Remove ${itemLabel} from cart`}
+          disabled={isBusy}
+          onClick={onRemove}
+          className="text-xs font-medium text-ink-secondary underline-offset-2 hover:text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
-          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <span aria-live="polite" className="w-8 text-center text-sm font-medium tabular-nums text-ink">
-          {quantity}
-        </span>
-        <button
-          type="button"
-          aria-label={`Increase quantity of ${itemLabel}`}
-          disabled={disabled || isBusy || atMax}
-          onClick={onIncrement}
-          className={cn(STEP_BUTTON_CLASS, "rounded-r-[10px]")}
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          Remove
         </button>
       </div>
 
-      <button
-        type="button"
-        aria-label={`Remove ${itemLabel} from cart`}
-        disabled={isBusy}
-        onClick={onRemove}
-        className="text-xs font-medium text-ink-secondary underline-offset-2 hover:text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-      >
-        Remove
-      </button>
+      {atStockLimit && (
+        <p id={stockLimitMessageId} className="text-xs text-ink-muted">
+          Maximum available quantity reached
+        </p>
+      )}
     </div>
   );
 }
