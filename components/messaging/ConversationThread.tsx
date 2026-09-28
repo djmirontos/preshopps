@@ -121,6 +121,20 @@ type Props = {
    * indicator; the full-page route has no use for it and never passes
    * it. */
   onIncomingMessage?: () => void;
+  /** Fired once, after a CONFIRMED-successful manual Mark as Unread --
+   * never on failure. The product decision (LAUNCH UX S1.2) is that the
+   * viewer leaves this conversation entirely on success rather than
+   * staying in a thread that still shows every message as visibly read,
+   * so this conversation stays genuinely unread until deliberately
+   * reopened: the full-page route navigates to /messages
+   * (ConversationDetailClient), and the floating panel deselects the
+   * current conversation back to its own empty state (FloatingChatPanel,
+   * via FloatingMessengerProvider's closeConversation) -- neither merely
+   * minimizes/hides the same still-mounted thread, which would leave it
+   * exposed to exactly the read-state races this action guards against
+   * below. Optional, defaulting to a no-op, only so existing tests that
+   * don't yet pass it keep working unchanged. */
+  onMarkedUnreadSuccess?: () => void;
   /** Rendered first inside the header's icon-button row, before the
    * existing mute/archive/mark-unread/block/report controls -- the
    * floating panel injects its own Minimize/Close buttons here so there
@@ -155,11 +169,11 @@ export function ConversationThread({
   hideIdentityHeader = false,
   isMinimized = false,
   onIncomingMessage,
+  onMarkedUnreadSuccess = () => {},
   headerActions,
 }: Props) {
   const [isArchived, setIsArchived] = useState(context.isArchived);
   const [isMuted, setIsMuted] = useState(context.isMuted);
-  const [markedUnreadFeedback, setMarkedUnreadFeedback] = useState(false);
   /** Failure feedback for the three state-control toggles below (mute,
    * archive, mark unread) -- shared, since isStateActionPending (below)
    * guarantees only one of these three can ever be in flight at a time,
@@ -179,6 +193,51 @@ export function ConversationThread({
    * released on success, on a returned failure, AND on a thrown
    * exception -- never leaving a control stuck disabled. */
   const [isStateActionPending, setIsStateActionPending] = useState(false);
+  /** EVERY currently in-flight auto-mark-read call -- the mount/restore
+   * effect below, the live Realtime handler, the reconciliation fetch, or
+   * the failure-recovery reconciliation in handleMarkUnread itself, each
+   * adds its own promise here before starting and removes it once
+   * settled. A manual Mark as Unread awaits the ENTIRE set (see
+   * handleMarkUnread) before writing -- not just whichever one happens to
+   * be the last one added. A single "most recent" slot is not enough: if
+   * an older call (e.g. the mount-time read) is still in flight when a
+   * newer one starts (e.g. a Realtime message arriving before the mount
+   * read resolves), a single slot loses track of the older one the
+   * instant the newer one overwrites it, and that older call can then
+   * resolve AFTER the manual write and silently overwrite it -- a real,
+   * found-and-fixed defect in an earlier version of this guard, proven by
+   * this file's own "waits for ALL older in-flight auto-reads" test. */
+  const pendingAutoReadsRef = useRef<Set<Promise<unknown>>>(new Set());
+  /** Records an auto-read promise in pendingAutoReadsRef and removes it
+   * once settled -- shared by every call site below (mount/restore
+   * effect, live Realtime handler, reconciliation fetch, and
+   * handleMarkUnread's own failure-recovery reconciliation) so all four
+   * are tracked identically; a manual Mark as Unread awaits the whole set
+   * via Promise.allSettled, never just whichever one is newest. */
+  function trackAutoRead(promise: Promise<unknown>) {
+    pendingAutoReadsRef.current.add(promise);
+    void promise.finally(() => {
+      pendingAutoReadsRef.current.delete(promise);
+    });
+  }
+  /** True for the exact duration of a manual Mark as Unread call --
+   * narrower than isStateActionPending (which also covers Mute/Archive).
+   * Read directly (a ref, not a prop, so no latestRef-style staleness
+   * risk) by the live Realtime handler and the reconciliation fetch so a
+   * message arriving WHILE the manual action is still in flight cannot
+   * start its own competing auto-mark-read and race the manual one. */
+  const isMarkingUnreadRef = useRef(false);
+  /** Set by the Realtime effect below to that exact invocation's own
+   * channel teardown, so a confirmed-successful Mark as Unread can tear
+   * the subscription down immediately (before onMarkedUnreadSuccess
+   * navigates/deselects) rather than leaving it live for however long
+   * that navigation takes to actually unmount this component -- closing
+   * even the narrow post-success window where a message could otherwise
+   * still arrive and silently re-mark this conversation read. The
+   * teardown itself is idempotent (see its own definition), so it is
+   * always safe to also run again, unchanged, when React's normal
+   * unmount cleanup fires right after. */
+  const realtimeCleanupRef = useRef<(() => void) | null>(null);
 
   const [isBlocked, setIsBlocked] = useState(initialIsBlocked);
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false);
@@ -304,7 +363,7 @@ export function ConversationThread({
     }
     if (markedForVisibleSessionRef.current === context.conversationId) return;
     markedForVisibleSessionRef.current = context.conversationId;
-    void markConversationReadIfUnread(context.conversationId).then(() => refreshUnreadMessageCount());
+    trackAutoRead(markConversationReadIfUnread(context.conversationId).then(() => refreshUnreadMessageCount()));
   }, [context.conversationId, isMinimized, refreshUnreadMessageCount]);
 
   // Realtime: one channel per open conversation, filtered server-side to
@@ -413,6 +472,11 @@ export function ConversationThread({
     let hasSubscribedOnce = false;
     let experiencedDisconnectAfterSubscribe = false;
 
+    // Reset before this invocation's own try block below assigns its
+    // real teardown -- never left pointing at a PREVIOUS invocation's
+    // (already-torn-down) cleanup if this one's own setup throws.
+    realtimeCleanupRef.current = null;
+
     // Matches every other Supabase-touching call in this codebase
     // (send-message.ts, conversation-state.ts, etc.): never let a client
     // construction/subscription failure throw uncaught and take down the
@@ -508,12 +572,14 @@ export function ConversationThread({
           if (hasIncomingNotMine) {
             latestRef.current.onIncomingMessage?.();
 
-            // Same isMinimized gate as the live handler: a minimized
-            // panel must not silently mark messages the viewer hasn't
-            // actually seen as read, even though its unread indicator
-            // (onIncomingMessage, above) still lights.
-            if (!latestRef.current.isMinimized) {
-              void markConversationRead(conversationId).then(() => refreshUnreadMessageCount());
+            // Same isMinimized gate as the live handler, plus the same
+            // isMarkingUnreadRef gate: a minimized panel must not
+            // silently mark messages the viewer hasn't actually seen as
+            // read (unread indicator above still lights), and a manual
+            // Mark as Unread currently in flight must not be raced by a
+            // competing auto-read triggered by this same reconciliation.
+            if (!latestRef.current.isMinimized && !isMarkingUnreadRef.current) {
+              trackAutoRead(markConversationRead(conversationId).then(() => refreshUnreadMessageCount()));
             }
           }
         } catch (err) {
@@ -606,9 +672,13 @@ export function ConversationThread({
               // not silently mark a message the user hasn't actually seen
               // as read. The Messages badge is recalculated afterward
               // from the server (authoritative), not decremented/
-              // incremented by guesswork here.
-              if (!latestRef.current.isMinimized) {
-                void markConversationRead(conversationId).then(() => refreshUnreadMessageCount());
+              // incremented by guesswork here. Also suppressed while a
+              // manual Mark as Unread is in flight (isMarkingUnreadRef):
+              // otherwise a message arriving at exactly this moment could
+              // fire its own competing auto-read and race the manual one
+              // to completion.
+              if (!latestRef.current.isMinimized && !isMarkingUnreadRef.current) {
+                trackAutoRead(markConversationRead(conversationId).then(() => refreshUnreadMessageCount()));
               }
             }
           },
@@ -648,10 +718,20 @@ export function ConversationThread({
           // -- intentionally falls through and does nothing.
         });
 
-      return () => {
+      // Idempotent by construction (the `torndown` guard) -- safe to call
+      // both early (a confirmed-successful Mark as Unread, via
+      // realtimeCleanupRef, before onMarkedUnreadSuccess navigates/
+      // deselects) AND again when React's own unmount cleanup runs this
+      // exact same function right afterward.
+      let torndown = false;
+      const cleanup = () => {
+        if (torndown) return;
+        torndown = true;
         cancelled = true;
         supabase.removeChannel(channel);
       };
+      realtimeCleanupRef.current = cleanup;
+      return cleanup;
     } catch (err) {
       console.error("Realtime message subscription failed to start:", err instanceof Error ? err.message : err);
       return undefined;
@@ -750,17 +830,55 @@ export function ConversationThread({
     if (isStateActionPending) return;
     setIsStateActionPending(true);
     setStateActionError(null);
+    // Set BEFORE the await below -- stops the live Realtime handler and
+    // the reconciliation fetch from starting a NEW competing auto-read
+    // for the whole duration of this call, not just from this point on.
+    isMarkingUnreadRef.current = true;
     try {
+      // Wait for EVERY auto-read already in flight when this click
+      // happened (mount-time, a live Realtime message, or a
+      // reconciliation fetch) -- not just whichever one is newest. See
+      // pendingAutoReadsRef's own comment for why a single "most recent"
+      // slot is not enough to guarantee this. Each one's own failure is
+      // already handled/logged at its own call site and must never block
+      // or fail this manual action.
+      if (pendingAutoReadsRef.current.size > 0) {
+        await Promise.allSettled(Array.from(pendingAutoReadsRef.current));
+      }
+
       const result = await markConversationUnread(context.conversationId);
       if (result.ok) {
-        setMarkedUnreadFeedback(true);
+        refreshUnreadMessageCount();
+        // Tear the Realtime subscription down immediately, before
+        // onMarkedUnreadSuccess navigates away/deselects -- closes even
+        // the brief window between this success and the component
+        // actually unmounting, during which an incoming message could
+        // otherwise still fire its own auto-read and re-mark this read.
+        realtimeCleanupRef.current?.();
+        onMarkedUnreadSuccess();
       } else {
         setStateActionError("Couldn't mark this conversation as unread. Please try again.");
+        // The conversation stays open on a failure -- any message that
+        // arrived while this call was in flight had its own auto-read
+        // deliberately suppressed (isMarkingUnreadRef, above and at each
+        // auto-read call site) so it wouldn't race this write. Since the
+        // write didn't happen, that suppression must be reconciled now,
+        // or the read state/badge could stay silently wrong for a
+        // message the viewer is still looking at -- nothing else is
+        // guaranteed to correct it (the mount/restore effect only ever
+        // runs once per visible session, and no later event is
+        // guaranteed to arrive). Fire-and-forget, tracked the same as
+        // every other auto-read here.
+        trackAutoRead(markConversationReadIfUnread(context.conversationId).then(() => refreshUnreadMessageCount()));
       }
     } catch (err) {
       console.error("markConversationUnread threw:", err instanceof Error ? err.message : err);
       setStateActionError("Couldn't mark this conversation as unread. Please try again.");
+      // Same reconciliation as the returned-failure branch above -- a
+      // thrown exception leaves the conversation open exactly the same way.
+      trackAutoRead(markConversationReadIfUnread(context.conversationId).then(() => refreshUnreadMessageCount()));
     } finally {
+      isMarkingUnreadRef.current = false;
       setIsStateActionPending(false);
     }
   }
@@ -885,7 +1003,7 @@ export function ConversationThread({
                 type="button"
                 onClick={handleMarkUnread}
                 aria-label="Mark as unread"
-                disabled={markedUnreadFeedback || isStateActionPending}
+                disabled={isStateActionPending}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
               >
                 <MailOpen className="h-4 w-4" aria-hidden="true" />

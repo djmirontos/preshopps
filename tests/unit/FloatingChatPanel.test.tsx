@@ -327,6 +327,142 @@ describe("FloatingChatPanel -- expanded two-column messaging center", () => {
     await waitFor(() => expect(screen.getByText("Select a conversation")).toBeInTheDocument());
   });
 
+  it("a rejected list fetch shows a real error (not stuck loading forever, not a false empty state), and retries when the panel is reopened", async () => {
+    loadConversationsForMessagingCenterMock.mockRejectedValueOnce(new Error("boom"));
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    await waitFor(() => expect(screen.getByText("Unable to load your messages right now.")).toBeInTheDocument());
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+    expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(1);
+
+    // Reopening retries the fetch rather than staying stuck on the
+    // failure for the rest of the session.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({
+      conversations: [sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" })],
+      hadError: false,
+      nextCursor: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Minimize messaging center" }));
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Anne's Closet")).toBeInTheDocument());
+  });
+
+  it("an in-band hadError list result is also retried when the panel is reopened", async () => {
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({ conversations: [], hadError: true, nextCursor: null });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    await waitFor(() => expect(screen.getByText("Unable to load your messages right now.")).toBeInTheDocument());
+    expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(1);
+
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({
+      conversations: [sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" })],
+      hadError: false,
+      nextCursor: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Minimize messaging center" }));
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Anne's Closet")).toBeInTheDocument());
+  });
+
+  it("REGRESSION (owner QA): a successful empty first load does not stay stale once conversations later exist and the panel is reopened", async () => {
+    // First open: genuinely empty at that moment (e.g. nothing yet, or a
+    // fetch that raced something) -- a real success, not a failure.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({ conversations: [], hadError: false, nextCursor: null });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    await waitFor(() => expect(screen.getByText("No messages yet.")).toBeInTheDocument());
+    expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(1);
+
+    // Conversations now exist (e.g. Mark as Unread on an existing one, or
+    // a new one arriving) -- Mark as Unread itself never fires the
+    // list's own new_message-driven refresh (it's a plain
+    // conversation_user_states update, not send_message), so nothing
+    // else will pick this up on its own before the panel is reopened.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({
+      conversations: [sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" })],
+      hadError: false,
+      nextCursor: null,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize messaging center" }));
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Anne's Closet")).toBeInTheDocument());
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+  });
+
+  it("REGRESSION (owner QA, exact sequence): the list refreshes when Mark as Unread's closeConversation returns to the list, WITHOUT requiring a minimize/reopen", async () => {
+    // 1. Floating panel has a successful empty list state.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({ conversations: [], hadError: false, nextCursor: null });
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    await waitFor(() => expect(screen.getByText("No messages yet.")).toBeInTheDocument());
+    expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(1);
+
+    // 2. A conversation is opened through the existing direct-open path
+    // while the panel remains open (isOpen never changes here).
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeInTheDocument());
+
+    // 4. Conversations are now available from the list loader by the
+    // time Mark as Unread completes.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({
+      conversations: [sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" })],
+      hadError: false,
+      nextCursor: null,
+    });
+
+    // 3. Mark as Unread succeeds; closeConversation() returns the
+    // still-open panel to "Select a conversation" -- the panel is never
+    // minimized or reopened anywhere in this sequence.
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(screen.getByText("Select a conversation")).toBeInTheDocument());
+
+    // Expected: the list refreshes and displays them without a
+    // minimize/reopen -- exactly one additional fetch (not zero, and not
+    // more than one from any duplicate trigger).
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Anne's Closet")).toBeInTheDocument());
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+  });
+
+  it("an older, still in-flight list fetch cannot overwrite a newer return-to-list refresh", async () => {
+    let resolveInitial: (value: { conversations: ConversationSummary[]; hadError: boolean; nextCursor: null }) => void = () => {};
+    loadConversationsForMessagingCenterMock.mockReturnValueOnce(new Promise((resolve) => (resolveInitial = resolve)));
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeInTheDocument());
+
+    // The newer refresh's own fetch resolves first, with the real data.
+    loadConversationsForMessagingCenterMock.mockResolvedValueOnce({
+      conversations: [sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" })],
+      hadError: false,
+      nextCursor: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(loadConversationsForMessagingCenterMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Anne's Closet")).toBeInTheDocument());
+
+    // The OLDER initial fetch (still pending from before Mark as Unread)
+    // finally resolves now, empty -- it must not overwrite the newer,
+    // already-applied real result.
+    resolveInitial({ conversations: [], hadError: false, nextCursor: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByText("Anne's Closet")).toBeInTheDocument();
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+  });
+
   it("selecting a conversation renders its thread in the right pane", async () => {
     renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
@@ -401,6 +537,43 @@ describe("FloatingChatPanel -- expanded two-column messaging center", () => {
     expect(markConversationReadMock).not.toHaveBeenCalled();
     expect(markConversationReadIfUnreadMock).not.toHaveBeenCalled();
     expect(markConversationUnreadMock).not.toHaveBeenCalled();
+  });
+
+  it("BUG REPRO (owner QA): the conversation list keeps showing its already-loaded conversations after Mark as Unread closes the selected conversation, and after reopening", async () => {
+    loadConversationsForMessagingCenterMock.mockResolvedValue({
+      conversations: [
+        sampleConversation({ conversationId: "conv-1", shopName: "Anne's Closet" }),
+        sampleConversation({ conversationId: "conv-2", shopName: "Bob's Shop" }),
+      ],
+      hadError: false,
+      nextCursor: null,
+    });
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    // "Anne's Closet" can legitimately appear twice once the thread loads
+    // (the list row AND the selected thread's own identity header both
+    // show the shop name) -- getAllByText, not getByText, is correct here.
+    await waitFor(() => expect(screen.getAllByText("Anne's Closet").length).toBeGreaterThan(0));
+    expect(screen.getByText("Bob's Shop")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(screen.getByText("Select a conversation")).toBeInTheDocument());
+
+    // The list must still show both existing conversations -- it must
+    // never fall back to "No messages yet" for data that already loaded
+    // successfully.
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Anne's Closet").length).toBeGreaterThan(0);
+    expect(screen.getByText("Bob's Shop")).toBeInTheDocument();
+
+    // Reopening (selecting the other existing conversation from the
+    // still-populated list) must also work normally.
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-2" }));
+    await waitFor(() => expect(screen.getAllByLabelText("Message").length).toBeGreaterThan(0));
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument();
   });
 
   it("stays within the viewport -- capped against 100vw, never a fixed size that could overflow a narrower desktop window", async () => {

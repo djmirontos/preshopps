@@ -13,6 +13,7 @@ const {
   removeChannelMock,
   getSessionMock,
   rpcMock,
+  pushMock,
 } = vi.hoisted(() => {
   const channelOnCalls: Array<{ config: { table: string; filter: string }; callback: (payload: { new: unknown }) => void }> = [];
   const channelNameCalls: string[] = [];
@@ -25,8 +26,13 @@ const {
     removeChannelMock: vi.fn(),
     getSessionMock: vi.fn(),
     rpcMock: vi.fn(),
+    pushMock: vi.fn(),
   };
 });
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
 
 function makeFakeChannel() {
   const fakeChannel = {

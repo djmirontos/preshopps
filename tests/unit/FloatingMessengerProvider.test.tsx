@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { FloatingMessengerProvider, useFloatingMessenger } from "@/components/messaging/FloatingMessengerProvider";
 
 function Probe() {
-  const { isOpen, selectedConversationId, openMessenger, openConversation, minimize, close } = useFloatingMessenger();
+  const { isOpen, selectedConversationId, openMessenger, openConversation, minimize, close, closeConversation } = useFloatingMessenger();
   return (
     <div>
       <p data-testid="is-open">{String(isOpen)}</p>
@@ -22,6 +22,9 @@ function Probe() {
       </button>
       <button type="button" onClick={close}>
         Close
+      </button>
+      <button type="button" onClick={closeConversation}>
+        Close conversation
       </button>
     </div>
   );
@@ -115,6 +118,23 @@ describe("FloatingMessengerProvider", () => {
     // The launcher (openMessenger) still works after close -- access was
     // collapsed, never destroyed.
     fireEvent.click(screen.getByRole("button", { name: "Open messenger" }));
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
+  });
+
+  it("closeConversation deselects the conversation without collapsing the center -- distinct from close()/minimize(), which both preserve the selection", () => {
+    render(
+      <FloatingMessengerProvider>
+        <Probe />
+      </FloatingMessengerProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open conv-1" }));
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("conv-1");
+    expect(screen.getByTestId("is-open")).toHaveTextContent("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close conversation" }));
+
+    expect(screen.getByTestId("selected-id")).toHaveTextContent("none");
+    // The center itself stays open -- only the selection was cleared.
     expect(screen.getByTestId("is-open")).toHaveTextContent("true");
   });
 

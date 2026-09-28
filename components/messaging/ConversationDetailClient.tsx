@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { ConversationThread } from "@/components/messaging/ConversationThread";
 import type { ConversationContext } from "@/lib/messaging/get-conversation-context";
 import type { ConversationMessage, MessagesCursor } from "@/lib/messaging/get-conversation-messages";
@@ -71,9 +72,15 @@ type Props = {
  * that -- removing the Footer that used to supply the extra height).
  */
 export function ConversationDetailClient(props: Props) {
+  const router = useRouter();
+
   return (
     <div className="fixed inset-x-0 top-[132px] bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 flex min-h-0 flex-col bg-canvas px-4 lg:static lg:inset-auto lg:top-auto lg:bottom-auto lg:z-auto lg:h-[calc(100vh-120px)] lg:px-0">
-      <ConversationThread {...props} />
+      {/* LAUNCH UX S1.2: after a confirmed-successful Mark as Unread,
+          leave this conversation entirely rather than staying in a
+          thread that still shows every message as visibly read -- see
+          ConversationThread's own onMarkedUnreadSuccess doc comment. */}
+      <ConversationThread {...props} onMarkedUnreadSuccess={() => router.push("/messages")} />
     </div>
   );
 }

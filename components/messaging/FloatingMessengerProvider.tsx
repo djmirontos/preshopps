@@ -32,6 +32,17 @@ type FloatingMessengerContextValue = {
    * never removes messenger access entirely -- the launcher itself stays
    * available for as long as the viewer is signed in and browsing. */
   close: () => void;
+  /** Deselects the current conversation (the right pane returns to its
+   * own "Select a conversation" empty state) WITHOUT collapsing the
+   * center itself -- a distinct action from close()/minimize() above,
+   * which both preserve the selection by design (see close's own
+   * comment). Added for LAUNCH UX S1.2's Mark as Unread success
+   * behavior: that action needs to leave the specific conversation
+   * (unmounting its ConversationThread instance, since the right pane's
+   * conditional render is keyed on selectedConversationId) rather than
+   * merely minimize the still-mounted thread, which neither close() nor
+   * minimize() do on their own. */
+  closeConversation: () => void;
 };
 
 const FloatingMessengerContext = createContext<FloatingMessengerContextValue>({
@@ -41,6 +52,7 @@ const FloatingMessengerContext = createContext<FloatingMessengerContextValue>({
   openConversation: () => {},
   minimize: () => {},
   close: () => {},
+  closeConversation: () => {},
 });
 
 /**
@@ -74,10 +86,11 @@ export function FloatingMessengerProvider({ children }: { children: ReactNode })
   // Same effect as minimize() -- see this value's own doc comment above
   // for why "close" no longer destroys anything in this design.
   const close = minimize;
+  const closeConversation = useCallback(() => setSelectedConversationId(null), []);
 
   const value = useMemo<FloatingMessengerContextValue>(
-    () => ({ isOpen, selectedConversationId, openMessenger, openConversation, minimize, close }),
-    [isOpen, selectedConversationId, openMessenger, openConversation, minimize, close],
+    () => ({ isOpen, selectedConversationId, openMessenger, openConversation, minimize, close, closeConversation }),
+    [isOpen, selectedConversationId, openMessenger, openConversation, minimize, close, closeConversation],
   );
 
   return <FloatingMessengerContext.Provider value={value}>{children}</FloatingMessengerContext.Provider>;

@@ -20,6 +20,7 @@ const {
   removeChannelMock,
   getSessionMock,
   rpcMock,
+  pushMock,
 } = vi.hoisted(() => {
   const channelOnCalls: Array<{ event: string; config: { event: string; schema: string; table: string; filter: string }; callback: (payload: { new: unknown }) => void }> = [];
   const channelNameCalls: string[] = [];
@@ -48,8 +49,13 @@ const {
     // subscription does.
     getSessionMock: vi.fn(),
     rpcMock: vi.fn(),
+    pushMock: vi.fn(),
   };
 });
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
 
 /** Minimal fake channel: `.on()` records every registration (so tests can
  * grab the latest callback and invoke it directly to simulate an incoming
@@ -158,6 +164,7 @@ function renderConversation(overrides: Partial<ComponentProps<typeof Conversatio
 beforeEach(() => {
   vi.clearAllMocks();
   loadEarlierMock.mockReset();
+  pushMock.mockReset();
   markConversationReadIfUnreadMock.mockResolvedValue({ ok: true });
   markConversationReadMock.mockResolvedValue({ ok: true });
   channelOnCalls.length = 0;
@@ -674,6 +681,128 @@ describe("ConversationDetailClient -- state controls", () => {
     // Rolled back (still "Mute", not stuck on "Unmute") and retryable.
     const muteButton = screen.getByRole("button", { name: "Mute conversation" });
     expect(muteButton).not.toBeDisabled();
+  });
+});
+
+describe("ConversationDetailClient -- Mark as Unread success behavior (LAUNCH UX S1.2)", () => {
+  it("navigates to /messages after a successful Mark as Unread", async () => {
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderConversation();
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages"));
+  });
+
+  it("does not navigate on a failed Mark as Unread, shows the existing error, and allows retry", async () => {
+    markConversationUnreadMock.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    renderConversation();
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't mark this conversation as unread/i);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Mark as unread" })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages"));
+  });
+
+  it("waits for an already in-flight auto-mark-read before writing the manual unread, so the older request can't overwrite it", async () => {
+    let resolveAutoRead: (value: { ok: boolean }) => void = () => {};
+    markConversationReadIfUnreadMock.mockReturnValue(new Promise((resolve) => (resolveAutoRead = resolve)));
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderConversation();
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    // The manual write must not happen while the mount's own auto-read is
+    // still unresolved -- otherwise that OLDER request could complete
+    // AFTER this one and silently overwrite it back to read. This is a
+    // synchronous assertion, not a timing guess: handleMarkUnread's own
+    // await is genuinely blocked on the still-pending promise above.
+    expect(markConversationUnreadMock).not.toHaveBeenCalled();
+
+    resolveAutoRead({ ok: true });
+    await waitFor(() => expect(markConversationUnreadMock).toHaveBeenCalledWith("conv-1"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages"));
+  });
+
+  it("does not let an incoming message during Mark as Unread fire a competing auto-read", async () => {
+    let resolveMarkUnread: (value: { ok: boolean }) => void = () => {};
+    markConversationUnreadMock.mockReturnValue(new Promise((resolve) => (resolveMarkUnread = resolve)));
+    renderConversation();
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    // A message arrives from the other party while the manual action is
+    // still in flight -- must not fire its own competing auto-read.
+    fireIncomingMessage({ id: "m-race", conversation_id: "conv-1", sender_id: "other-user-1", body: "hi", created_at: "2026-02-01T12:00:00.000Z" });
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+
+    resolveMarkUnread({ ok: true });
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/messages"));
+    // Still never fired -- the early realtime teardown on success closes
+    // this window deterministically rather than relying on timing.
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+  });
+
+  it("waits for ALL auto-reads already in flight (not just the most recently started one) before writing the manual unread", async () => {
+    let resolveMountRead: (value: { ok: boolean }) => void = () => {};
+    markConversationReadIfUnreadMock.mockReturnValue(new Promise((resolve) => (resolveMountRead = resolve)));
+    let resolveRealtimeRead: (value: { ok: boolean }) => void = () => {};
+    markConversationReadMock.mockReturnValue(new Promise((resolve) => (resolveRealtimeRead = resolve)));
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderConversation();
+
+    // The mount-time auto-read (A) starts and is still unresolved.
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
+
+    // A second, NEWER auto-read (B) starts from a live incoming message
+    // while A is still pending. A single "most recent" tracker would now
+    // only remember B, silently losing track of the still-pending A.
+    fireIncomingMessage({ id: "m-a", conversation_id: "conv-1", sender_id: "other-user-1", body: "hi", created_at: "2026-02-01T12:00:00.000Z" });
+    await waitFor(() => expect(markConversationReadMock).toHaveBeenCalledWith("conv-1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    // Resolving only the newer one (B) must not be enough to proceed --
+    // the older one (A) is still unresolved.
+    resolveRealtimeRead({ ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(markConversationUnreadMock).not.toHaveBeenCalled();
+
+    // Only once the older one (A) also resolves does the manual write
+    // proceed.
+    resolveMountRead({ ok: true });
+    await waitFor(() => expect(markConversationUnreadMock).toHaveBeenCalledWith("conv-1"));
+  });
+
+  it("reconciles the read state after a failed Mark as Unread, so a message that arrived during the attempt doesn't leave a stale unread badge", async () => {
+    let resolveMarkUnread: (value: { ok: boolean }) => void = () => {};
+    markConversationUnreadMock.mockReturnValue(new Promise((resolve) => (resolveMarkUnread = resolve)));
+    renderConversation();
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalled());
+    markConversationReadIfUnreadMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    // A message arrives while the manual action is in flight -- its own
+    // auto-read is correctly suppressed.
+    fireIncomingMessage({ id: "m-during-failure", conversation_id: "conv-1", sender_id: "other-user-1", body: "hi", created_at: "2026-02-01T12:00:00.000Z" });
+    expect(markConversationReadMock).not.toHaveBeenCalled();
+
+    resolveMarkUnread({ ok: false });
+
+    // The manual write failed -- the conversation stays open and visible,
+    // so the suppressed auto-read must be reconciled now, or the badge
+    // would stay wrong for a message the viewer is still looking at.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't mark this conversation as unread/i);
+    await waitFor(() => expect(markConversationReadIfUnreadMock).toHaveBeenCalledWith("conv-1"));
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 

@@ -44,6 +44,7 @@ const {
   markConversationReadIfUnreadMock,
   onIncomingMessageMock,
   refreshUnreadMessageCountMock,
+  pushMock,
 } = vi.hoisted(() => {
     return {
       channelOnCalls: [] as Array<{ topic: string; config: { table: string; filter: string }; callback: (payload: { new: unknown }) => void }>,
@@ -62,8 +63,13 @@ const {
       markConversationReadIfUnreadMock: vi.fn(),
       onIncomingMessageMock: vi.fn(),
       refreshUnreadMessageCountMock: vi.fn(),
+      pushMock: vi.fn(),
     };
   });
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
 
 // Simulates RealtimeClient's own internal "topic -> channel" registry --
 // a channel stays in here until its (async) removal actually resolves,

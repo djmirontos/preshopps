@@ -19,7 +19,7 @@ type ThreadState =
   | { status: "not_found" }
   | { status: "ready"; data: Extract<LoadConversationForPanelResult, { status: "found" }> };
 
-type ListState = { status: "loading" } | { status: "ready"; data: GetMyConversationsResult };
+type ListState = { status: "loading" } | { status: "error" } | { status: "ready"; data: GetMyConversationsResult; generation: number };
 
 type Props = {
   /** Gates the entire persistent launcher/messaging center -- messaging
@@ -66,7 +66,7 @@ type Props = {
  * has, regardless of whether the center is currently visible.
  */
 export function FloatingChatPanel({ isAuthenticated }: Props) {
-  const { isOpen, selectedConversationId, openMessenger, minimize, close } = useFloatingMessenger();
+  const { isOpen, selectedConversationId, openMessenger, minimize, close, closeConversation } = useFloatingMessenger();
   const unreadMessageCount = useUnreadMessageCount();
 
   const [threadState, setThreadState] = useState<ThreadState | null>(null);
@@ -74,6 +74,41 @@ export function FloatingChatPanel({ isAuthenticated }: Props) {
 
   const [listState, setListState] = useState<ListState | null>(null);
   const listLoadedRef = useRef(false);
+  /** Monotonically increasing per-fetch generation -- every call to
+   * fetchConversationList (the initial open below, or the return-to-list
+   * refresh further down) captures its own number before awaiting, and
+   * only applies its result if it is still the LATEST request by the
+   * time it resolves. Without this, an older, slower fetch (e.g. the
+   * initial open's own request, still in flight) could resolve AFTER a
+   * newer refresh and silently overwrite it with stale data. */
+  const listFetchGenerationRef = useRef(0);
+
+  function fetchConversationList() {
+    const generation = ++listFetchGenerationRef.current;
+    setListState({ status: "loading" });
+    loadConversationsForMessagingCenter()
+      .then((result) => {
+        if (listFetchGenerationRef.current !== generation) return;
+        // The generation also becomes ConversationsListClient's own React
+        // `key` below -- required, not cosmetic. That component only ever
+        // reads its initialConversations prop once, as its own useState
+        // seed; a later prop change alone is silently ignored by design
+        // (see its own file), so without a changing key here, a SECOND
+        // successful fetch's genuinely new data would never actually
+        // reach the screen even though this state update itself is
+        // correct. A fresh generation forces a fresh mount, which is safe
+        // here specifically because a data refresh (not a minimize/
+        // reopen-visibility change) is the only thing that ever changes
+        // it -- see this file's own top comment on why staying mounted
+        // across minimize/reopen is unaffected by this.
+        setListState({ status: "ready", data: result, generation });
+      })
+      .catch((err) => {
+        if (listFetchGenerationRef.current !== generation) return;
+        console.error("Failed to load messaging center conversation list:", err instanceof Error ? err.message : err);
+        setListState({ status: "error" });
+      });
+  }
 
   // Right pane: (re)load whenever the selected conversation changes.
   useEffect(() => {
@@ -96,17 +131,60 @@ export function FloatingChatPanel({ isAuthenticated }: Props) {
     };
   }, [selectedConversationId]);
 
-  // Left pane: load the conversation list lazily, once, the first time
-  // the center is actually opened -- never on every page load, so a
-  // viewer who never opens the messenger never triggers this fetch.
+  // Left pane: (re)loads the conversation list every time the center is
+  // opened, not just the very first time -- listLoadedRef resets the
+  // moment the center closes (mirroring ConversationThread's own
+  // markedForVisibleSessionRef pattern for its analogous mark-read-on-
+  // open/restore effect), so it still fetches at most once per open
+  // session, never on every render.
+  //
+  // A single "fetch once, ever" attempt (the previous version of this
+  // effect) can go silently stale: a genuinely successful, empty result
+  // fetched on an early open is trusted forever afterward, even once
+  // real conversations exist -- there is no other path that ever
+  // refetches it. ConversationsListClient's own live refresh only fires
+  // on a new_message notification (a genuinely new incoming message);
+  // Mark as Unread is a plain client-side conversation_user_states
+  // update, not send_message, so it creates no notification and can
+  // never trigger that refresh on its own. Confirmed this is the same
+  // underlying query as the full /messages page (getMyConversations with
+  // an identical limit and showArchived=false) -- so any discrepancy
+  // between the two surfaces is a timing/staleness issue, not a
+  // filtering difference: reopening now re-fetches fresh, matching how
+  // the full page already re-fetches on every visit.
   useEffect(() => {
-    if (!isOpen || listLoadedRef.current) return;
+    if (!isOpen) {
+      listLoadedRef.current = false;
+      return;
+    }
+    if (listLoadedRef.current) return;
     listLoadedRef.current = true;
-    setListState({ status: "loading" });
-    void loadConversationsForMessagingCenter().then((result) => {
-      setListState({ status: "ready", data: result });
-    });
+    fetchConversationList();
   }, [isOpen]);
+
+  // Left pane: also refresh when RETURNING to the list from a selected
+  // conversation while the panel stays open the whole time -- e.g. Mark
+  // as Unread's own closeConversation(), which clears
+  // selectedConversationId without ever touching isOpen. The effect
+  // above (keyed on isOpen) cannot catch this: isOpen never changes here,
+  // so it never re-runs. Fires only on the specific "had a selection, now
+  // has none" transition -- never on the initial mount (previous and
+  // current start equal, see the ref's own initial value), never when
+  // opening straight into a conversation (null -> an id is the opposite
+  // direction), and never merely from swapping to a different selected
+  // conversation (id -> a different id is still non-null). This is
+  // deliberately independent of listLoadedRef -- it always refreshes on
+  // this exact transition regardless of whether the initial load has
+  // already happened.
+  const previousSelectedIdRef = useRef<string | null>(selectedConversationId);
+  useEffect(() => {
+    const previousSelectedId = previousSelectedIdRef.current;
+    previousSelectedIdRef.current = selectedConversationId;
+    if (!isOpen) return;
+    if (previousSelectedId && !selectedConversationId) {
+      fetchConversationList();
+    }
+  }, [selectedConversationId, isOpen]);
 
   if (!isAuthenticated) return null;
 
@@ -181,14 +259,21 @@ export function FloatingChatPanel({ isAuthenticated }: Props) {
               260-320px target). Reuses ConversationsListClient as-is --
               its own row click already calls openConversation() on
               desktop, its own new_message-driven refresh already keeps
-              it live, and its own empty/error states already cover both
-              cases, so there is nothing left for this panel to duplicate. */}
+              it live, and its own empty/in-band-hadError states already
+              cover both cases once a result has actually loaded. This
+              panel's own "error" status above is a different failure
+              mode -- the initial fetch itself rejecting -- which
+              ConversationsListClient never sees at all since it isn't
+              mounted yet at that point. */}
           <div className="flex w-[280px] shrink-0 flex-col border-r border-divider">
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {listState === null || listState.status === "loading" ? (
                 <p className="p-2 text-sm text-ink-secondary">Loading conversations…</p>
+              ) : listState.status === "error" ? (
+                <p className="p-2 text-sm text-ink-secondary">Unable to load your messages right now.</p>
               ) : (
                 <ConversationsListClient
+                  key={listState.generation}
                   initialConversations={listState.data.conversations}
                   initialHadError={listState.data.hadError}
                   initialCursor={listState.data.nextCursor}
@@ -238,6 +323,7 @@ export function FloatingChatPanel({ isAuthenticated }: Props) {
                   initialIsBlocked={threadState.data.initialIsBlocked}
                   hideBackLink
                   isMinimized={!isOpen}
+                  onMarkedUnreadSuccess={closeConversation}
                 />
               </div>
             )}
