@@ -160,6 +160,25 @@ export function ConversationThread({
   const [isArchived, setIsArchived] = useState(context.isArchived);
   const [isMuted, setIsMuted] = useState(context.isMuted);
   const [markedUnreadFeedback, setMarkedUnreadFeedback] = useState(false);
+  /** Failure feedback for the three state-control toggles below (mute,
+   * archive, mark unread) -- shared, since isStateActionPending (below)
+   * guarantees only one of these three can ever be in flight at a time,
+   * and every action clears it up front so a stale error from an earlier
+   * action never lingers behind a newer one, whether that newer action
+   * succeeds or fails. Deliberately separate from blockError (its own
+   * pre-existing state), which stays untouched by this slice. */
+  const [stateActionError, setStateActionError] = useState<string | null>(null);
+  /** True for the duration of exactly one in-flight mute/archive/mark-
+   * unread call. Without this, two of these three buttons have no shared
+   * disable/guard at all -- a user (or a fast double-click) could start a
+   * second call before the first's own await resolves, and an EARLIER
+   * call's late failure could then overwrite state (including
+   * stateActionError) a LATER, already-resolved call had just set. Each
+   * handler below checks this at its very top (before touching any
+   * state) and unconditionally clears it in a finally block, so it is
+   * released on success, on a returned failure, AND on a thrown
+   * exception -- never leaving a control stuck disabled. */
+  const [isStateActionPending, setIsStateActionPending] = useState(false);
 
   const [isBlocked, setIsBlocked] = useState(initialIsBlocked);
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false);
@@ -686,22 +705,64 @@ export function ConversationThread({
   }
 
   async function handleToggleArchive() {
+    if (isStateActionPending) return;
+    setIsStateActionPending(true);
+    setStateActionError(null);
     const next = !isArchived;
     setIsArchived(next);
-    const result = await setConversationArchived(context.conversationId, next);
-    if (!result.ok) setIsArchived(!next);
+    try {
+      const result = await setConversationArchived(context.conversationId, next);
+      if (!result.ok) {
+        setIsArchived(!next);
+        setStateActionError("Couldn't update this conversation's archived status. Please try again.");
+      }
+    } catch (err) {
+      console.error("setConversationArchived threw:", err instanceof Error ? err.message : err);
+      setIsArchived(!next);
+      setStateActionError("Couldn't update this conversation's archived status. Please try again.");
+    } finally {
+      setIsStateActionPending(false);
+    }
   }
 
   async function handleToggleMute() {
+    if (isStateActionPending) return;
+    setIsStateActionPending(true);
+    setStateActionError(null);
     const next = !isMuted;
     setIsMuted(next);
-    const result = await setConversationMuted(context.conversationId, next);
-    if (!result.ok) setIsMuted(!next);
+    try {
+      const result = await setConversationMuted(context.conversationId, next);
+      if (!result.ok) {
+        setIsMuted(!next);
+        setStateActionError("Couldn't update mute settings. Please try again.");
+      }
+    } catch (err) {
+      console.error("setConversationMuted threw:", err instanceof Error ? err.message : err);
+      setIsMuted(!next);
+      setStateActionError("Couldn't update mute settings. Please try again.");
+    } finally {
+      setIsStateActionPending(false);
+    }
   }
 
   async function handleMarkUnread() {
-    const result = await markConversationUnread(context.conversationId);
-    if (result.ok) setMarkedUnreadFeedback(true);
+    if (isStateActionPending) return;
+    setIsStateActionPending(true);
+    setStateActionError(null);
+    try {
+      const result = await markConversationUnread(context.conversationId);
+      if (result.ok) {
+        setMarkedUnreadFeedback(true);
+      } else {
+        setStateActionError("Couldn't mark this conversation as unread. Please try again.");
+      }
+    } catch (err) {
+      console.error("markConversationUnread threw:", err instanceof Error ? err.message : err);
+      setStateActionError("Couldn't mark this conversation as unread. Please try again.");
+    } finally {
+      setIsStateActionPending(false);
+    }
   }
 
   /** Block requires confirmation (a consequential, cross-cutting PRD 30
@@ -801,7 +862,8 @@ export function ConversationThread({
                 onClick={handleToggleMute}
                 aria-label={isMuted ? "Unmute conversation" : "Mute conversation"}
                 aria-pressed={isMuted}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                disabled={isStateActionPending}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
               >
                 {isMuted ? <VolumeX className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-4 w-4" aria-hidden="true" />}
               </button>
@@ -812,7 +874,8 @@ export function ConversationThread({
                 onClick={handleToggleArchive}
                 aria-label={isArchived ? "Unarchive conversation" : "Archive conversation"}
                 aria-pressed={isArchived}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                disabled={isStateActionPending}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
               >
                 {isArchived ? <ArchiveRestore className="h-4 w-4" aria-hidden="true" /> : <Archive className="h-4 w-4" aria-hidden="true" />}
               </button>
@@ -822,7 +885,7 @@ export function ConversationThread({
                 type="button"
                 onClick={handleMarkUnread}
                 aria-label="Mark as unread"
-                disabled={markedUnreadFeedback}
+                disabled={markedUnreadFeedback || isStateActionPending}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-ink-secondary hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
               >
                 <MailOpen className="h-4 w-4" aria-hidden="true" />
@@ -850,6 +913,12 @@ export function ConversationThread({
             />
           </div>
         </div>
+
+        {stateActionError && (
+          <p role="alert" className="mt-2 text-right text-xs text-danger">
+            {stateActionError}
+          </p>
+        )}
 
         {blockError && !isBlockConfirmOpen && <p className="mt-2 text-right text-xs text-danger">{blockError}</p>}
 

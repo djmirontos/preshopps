@@ -555,6 +555,126 @@ describe("ConversationDetailClient -- state controls", () => {
     expect(screen.getByRole("button", { name: "Archive conversation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark as unread" })).toBeInTheDocument();
   });
+
+  it("shows a visible error and rolls back the icon when Archive fails", async () => {
+    setConversationArchivedMock.mockResolvedValue({ ok: false });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive conversation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't update this conversation's archived status/i);
+    // Rolled back -- still offering to archive, not stuck showing "Unarchive".
+    expect(screen.getByRole("button", { name: "Archive conversation" })).toBeInTheDocument();
+  });
+
+  it("shows a visible error and rolls back the icon when Mute fails", async () => {
+    setConversationMutedMock.mockResolvedValue({ ok: false });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't update mute settings/i);
+    expect(screen.getByRole("button", { name: "Mute conversation" })).toBeInTheDocument();
+  });
+
+  it("shows a visible error and leaves Mark as unread available (not disabled) on failure", async () => {
+    markConversationUnreadMock.mockResolvedValue({ ok: false });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't mark this conversation as unread/i);
+    // No false success/disabled state -- the action remains retryable.
+    expect(screen.getByRole("button", { name: "Mark as unread" })).not.toBeDisabled();
+  });
+
+  it("does not show a stale error when Mark as unread succeeds normally", async () => {
+    markConversationUnreadMock.mockResolvedValue({ ok: true });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(markConversationUnreadMock).toHaveBeenCalled());
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears a stale error from one failed action once a different state action starts", async () => {
+    setConversationArchivedMock.mockResolvedValue({ ok: false });
+    setConversationMutedMock.mockResolvedValue({ ok: true });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive conversation" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/archived status/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("clears a stale error once the same failed action is retried and succeeds", async () => {
+    setConversationMutedMock.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/mute settings/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    await waitFor(() => expect(setConversationMutedMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not allow a second state action to start before the first one resolves, even a different one", async () => {
+    let resolveArchive: (value: { ok: boolean }) => void = () => {};
+    setConversationArchivedMock.mockReturnValue(new Promise((resolve) => (resolveArchive = resolve)));
+    setConversationMutedMock.mockResolvedValue({ ok: true });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive conversation" }));
+
+    // Optimistic flip already happened -- the button now reads "Unarchive",
+    // and every state-control button (including the unrelated Mute one) is
+    // disabled while this one call is still in flight.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Unarchive conversation" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Mute conversation" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mark as unread" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    expect(setConversationMutedMock).not.toHaveBeenCalled();
+
+    resolveArchive({ ok: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mute conversation" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    await waitFor(() => expect(setConversationMutedMock).toHaveBeenCalledWith("conv-1", true));
+  });
+
+  it("releases the pending guard on a returned failure, allowing a subsequent action", async () => {
+    let resolveArchive: (value: { ok: boolean }) => void = () => {};
+    setConversationArchivedMock.mockReturnValue(new Promise((resolve) => (resolveArchive = resolve)));
+    setConversationMutedMock.mockResolvedValue({ ok: true });
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive conversation" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mute conversation" })).toBeDisabled());
+
+    resolveArchive({ ok: false });
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mute conversation" })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+    await waitFor(() => expect(setConversationMutedMock).toHaveBeenCalledWith("conv-1", true));
+  });
+
+  it("releases the pending guard, rolls back, and shows an error when the state helper throws", async () => {
+    setConversationMutedMock.mockRejectedValue(new Error("network down"));
+    renderConversation();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute conversation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/mute settings/i);
+    // Rolled back (still "Mute", not stuck on "Unmute") and retryable.
+    const muteButton = screen.getByRole("button", { name: "Mute conversation" });
+    expect(muteButton).not.toBeDisabled();
+  });
 });
 
 describe("ConversationDetailClient -- mark-read-on-open", () => {
