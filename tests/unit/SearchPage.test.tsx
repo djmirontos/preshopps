@@ -39,7 +39,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-import SearchPage from "@/app/search/page";
+import SearchPage, { generateMetadata } from "@/app/search/page";
 
 const sampleCategories: CategoryRef[] = [
   { id: 1, slug: "women", name: "Women" },
@@ -175,5 +175,63 @@ describe("SearchPage", () => {
     expect(searchListingsMock).toHaveBeenCalledTimes(1);
     const [filtersArg] = searchListingsMock.mock.calls[0];
     expect(filtersArg).toMatchObject({ categoryId: 1 });
+  });
+});
+
+async function getMetadata(rawParams: Record<string, string | string[] | undefined>) {
+  return generateMetadata({ searchParams: Promise.resolve(rawParams) });
+}
+
+describe("SearchPage generateMetadata -- title/description only (indexing/canonical/OG out of scope)", () => {
+  it("falls back to the generic title/description for a base search with no params", async () => {
+    const metadata = await getMetadata({});
+    expect(metadata.title).toBe("Search Preshopps");
+    expect(metadata.description).toBe("Search pre-loved and brand-new items for sale on Preshopps.");
+  });
+
+  it("reflects a valid text query in both title and description", async () => {
+    const metadata = await getMetadata({ q: "nike shoes" });
+    expect(metadata.title).toBe('Search results for "nike shoes" | Preshopps');
+    expect(metadata.description).toBe('Search results for "nike shoes" on Preshopps.');
+  });
+
+  it("does not echo a raw category slug as a friendly name -- falls back to generic since no label is available without a fetch", async () => {
+    const metadata = await getMetadata({ category: "women" });
+    expect(metadata.title).toBe("Search Preshopps");
+    expect(metadata.title).not.toMatch(/women/i);
+    expect(metadata.description).not.toMatch(/women/i);
+  });
+
+  it("with multiple filters plus a query, reflects only the query and never a raw slug/id", async () => {
+    const metadata = await getMetadata({
+      q: "shoes",
+      category: "women",
+      type: "preloved",
+      min_price: "500",
+      province: "3",
+    });
+    expect(metadata.title).toBe('Search results for "shoes" | Preshopps');
+    expect(metadata.description).toBe('Search results for "shoes" on Preshopps.');
+    expect(metadata.title).not.toMatch(/women|preloved|500|province|\b3\b/i);
+  });
+
+  it("treats empty/whitespace-only input the same as no params", async () => {
+    const metadata = await getMetadata({ q: "   " });
+    expect(metadata.title).toBe("Search Preshopps");
+    expect(metadata.description).toBe("Search pre-loved and brand-new items for sale on Preshopps.");
+  });
+
+  it("falls back cleanly when other params are malformed, without throwing", async () => {
+    const metadata = await getMetadata({ min_price: "abc", condition: "not-a-real-condition", province: "not-a-number" });
+    expect(metadata.title).toBe("Search Preshopps");
+    expect(metadata.description).toBe("Search pre-loved and brand-new items for sale on Preshopps.");
+  });
+
+  it("drops an overlong query (matching parseSearchFilters' own 100-char sanitization) rather than echoing it", async () => {
+    const overlong = "a".repeat(101);
+    const metadata = await getMetadata({ q: overlong });
+    expect(metadata.title).toBe("Search Preshopps");
+    expect(metadata.description).toBe("Search pre-loved and brand-new items for sale on Preshopps.");
+    expect(metadata.title).not.toMatch(/a{50}/);
   });
 });

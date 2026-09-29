@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActiveFilterChips } from "@/components/search/ActiveFilterChips";
 import { FilterControls } from "@/components/search/FilterControls";
 import { MobileFilterSheet } from "@/components/search/MobileFilterSheet";
@@ -39,6 +40,31 @@ const CLEAR_ALL_UPDATES = {
 type SearchPageProps = {
   searchParams: Promise<RawSearchParams>;
 };
+
+/**
+ * Built from parseSearchFilters -- the same pure, sanitized parser the
+ * page body uses -- rather than a separate fetch, so an overlong or
+ * malformed raw q is already dropped to null before it ever reaches a
+ * title/description. Category, location, and every other filter are
+ * deliberately NOT reflected here: their only human-readable labels
+ * (category name, province/city/barangay name) require a DB lookup this
+ * function does not already have, and echoing a raw slug or numeric id
+ * as if it were a friendly name would be worse than omitting it. Indexing
+ * policy (robots/noindex) and canonical/Open Graph fields are out of
+ * scope for this slice -- see docs/PROJECT_STATUS.md's Technical SEO
+ * backlog item.
+ */
+export async function generateMetadata({ searchParams }: SearchPageProps): Promise<Metadata> {
+  const rawParams = await searchParams;
+  const { q } = parseSearchFilters(rawParams);
+
+  const title = q ? `Search results for "${q}" | Preshopps` : "Search Preshopps";
+  const description = q
+    ? `Search results for "${q}" on Preshopps.`
+    : "Search pre-loved and brand-new items for sale on Preshopps.";
+
+  return { title, description };
+}
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
   const rawParams = await searchParams;
