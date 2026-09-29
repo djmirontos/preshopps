@@ -60,6 +60,81 @@ function buildOgDescription(listing: ListingDetail): string {
 }
 
 /**
+ * Escaping "<" prevents seller-supplied text (e.g. a listing title or
+ * description containing "</script><script>...") from breaking out of
+ * the JSON-LD script element below -- JSON.stringify alone does not
+ * escape it, since "<" is a perfectly valid JSON string character.
+ */
+function serializeJsonLd(data: unknown): string {
+  return JSON.stringify(data).replace(/</g, "\\u003c");
+}
+
+/**
+ * JSON-LD Product/Offer for one narrow, unambiguous case: a found,
+ * available, in-stock, non-inquiry-only listing with a real image and a
+ * valid price -- reusing the same listing data generateMetadata/the page
+ * body already fetch (no added query). Deliberately omits
+ * review/aggregateRating (no per-listing rating exists -- reviewCount/
+ * averageRating here are the SHOP's own stats, not this item's, and
+ * marking them up as a product rating would misattribute a seller rating
+ * to the product), brand/GTIN/MPN (not captured for ordinary listings),
+ * and any shipping/return/purchase-action claim (Preshopps never
+ * processes payment or fulfillment). Cars/Motorcycles/For Rent
+ * (isInquiryOnly) are excluded entirely: Product/Offer implies a fixed,
+ * directly-offered price that doesn't fit negotiable inquiry-only or
+ * period-priced rental listings. isNegotiable is checked independently
+ * of isInquiryOnly -- they are separate, independently-settable columns
+ * (ListingForm's "Price is negotiable" checkbox is not gated by
+ * category), so an ordinary listing can genuinely have isNegotiable
+ * true; marking that up as a fixed Offer.price would misrepresent a
+ * negotiable asking price as fixed. priceCents <= 0 is excluded because
+ * the listings_price_cents_check DB constraint only enforces >= 0 (not
+ * > 0) and publish_listing only null-checks price, so a published
+ * listing with price_cents = 0 is a real, reachable state, not merely a
+ * type-level impossibility.
+ */
+function buildListingJsonLd(listing: ListingDetail): Record<string, unknown> | null {
+  const image = listing.imageUrls[0];
+  if (
+    listing.status !== "available" ||
+    listing.availableQuantity <= 0 ||
+    listing.isInquiryOnly ||
+    listing.isNegotiable ||
+    !image ||
+    !Number.isFinite(listing.priceCents) ||
+    listing.priceCents <= 0
+  ) {
+    return null;
+  }
+
+  const canonicalUrl = `${getAppUrl()}/item/${listing.publicCode}`;
+  const description = listing.description.trim();
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: listing.title,
+    ...(description ? { description } : {}),
+    url: canonicalUrl,
+    image: listing.imageUrls,
+    offers: {
+      "@type": "Offer",
+      url: canonicalUrl,
+      price: (listing.priceCents / 100).toFixed(2),
+      priceCurrency: "PHP",
+      availability: "https://schema.org/InStock",
+      itemCondition:
+        listing.listingType === "brand_new" ? "https://schema.org/NewCondition" : "https://schema.org/UsedCondition",
+      seller: {
+        "@type": "Organization",
+        name: listing.shop.name,
+        url: `${getAppUrl()}/shop/${listing.shop.slug}`,
+      },
+    },
+  };
+}
+
+/**
  * Memoized per-request so generateMetadata and the page body share one
  * get_listing_detail call instead of fetching the same listing twice.
  */
@@ -142,9 +217,13 @@ export default async function ItemPage({ params }: ItemPageProps) {
   }
 
   const { listing } = result;
+  const listingJsonLd = buildListingJsonLd(listing);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      {listingJsonLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(listingJsonLd) }} />
+      )}
       <ListingBreadcrumb categoryName={listing.categoryName} title={listing.title} />
 
       <div className="lg:grid lg:grid-cols-2 lg:gap-10">

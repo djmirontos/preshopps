@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ListingDetail, ListingDetailResult } from "@/lib/marketplace/listing-detail";
@@ -271,6 +272,156 @@ describe("ItemPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close photo viewer" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add to Cart" })).not.toBeDisabled();
+  });
+
+  describe("Listing JSON-LD (Product/Offer) -- narrow eligibility, no fabricated fields", () => {
+    function getJsonLd(container: HTMLElement): Record<string, unknown> | null {
+      const script = container.querySelector('script[type="application/ld+json"]');
+      return script?.textContent ? JSON.parse(script.textContent) : null;
+    }
+
+    const eligibleListing: ListingDetail = {
+      ...sampleListing,
+      // sampleListing itself is negotiable (used elsewhere for negotiable-
+      // badge tests) -- a fixed-price Product/Offer requires overriding
+      // that to false here, independently of isInquiryOnly.
+      isNegotiable: false,
+      imageUrls: ["https://supabase.example/storage/v1/object/public/listings/photo1.jpg", "https://supabase.example/storage/v1/object/public/listings/photo2.jpg"],
+    };
+
+    it("emits Product/Offer JSON-LD for an eligible available in-stock listing, matching the visible url/price/condition/image", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: eligibleListing });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+
+      const jsonLd = getJsonLd(container);
+      expect(jsonLd).toMatchObject({
+        "@context": "https://schema.org",
+        "@type": "Product",
+        name: "Nike Air Max 270",
+        description: "Worn a few times, still great.",
+        url: "https://preshopps.com/item/PLS-ABC123",
+        image: eligibleListing.imageUrls,
+        offers: {
+          "@type": "Offer",
+          url: "https://preshopps.com/item/PLS-ABC123",
+          price: "3200.00",
+          priceCurrency: "PHP",
+          availability: "https://schema.org/InStock",
+          itemCondition: "https://schema.org/UsedCondition",
+          seller: { "@type": "Organization", name: "Sole Traders", url: "https://preshopps.com/shop/sole-traders" },
+        },
+      });
+      // The visible page's own display price uses formatPriceFromCents
+      // ("₱3,200"); Offer.price must be the plain decimal Google expects,
+      // never that formatted string.
+      expect(formatPriceFromCents(eligibleListing.priceCents)).toBe("₱3,200");
+      expect((jsonLd?.offers as Record<string, unknown>).price).not.toContain("₱");
+      // Never fabricated: no product-level rating, brand, GTIN, MPN, or
+      // shipping/return claim of any kind.
+      expect(jsonLd).not.toHaveProperty("aggregateRating");
+      expect(jsonLd).not.toHaveProperty("review");
+      expect(jsonLd).not.toHaveProperty("brand");
+      expect(jsonLd).not.toHaveProperty("gtin");
+      expect(jsonLd).not.toHaveProperty("mpn");
+      expect((jsonLd?.offers as Record<string, unknown>)).not.toHaveProperty("shippingDetails");
+      expect((jsonLd?.offers as Record<string, unknown>)).not.toHaveProperty("hasMerchantReturnPolicy");
+    });
+
+    it("maps brand_new to NewCondition and preloved to UsedCondition", async () => {
+      getListingDetailMock.mockResolvedValue({
+        status: "found",
+        listing: { ...eligibleListing, listingType: "brand_new", condition: undefined },
+      });
+      const brandNewRender = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect((getJsonLd(brandNewRender.container)?.offers as Record<string, unknown>).itemCondition).toBe(
+        "https://schema.org/NewCondition",
+      );
+
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: eligibleListing });
+      const prelovedRender = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect((getJsonLd(prelovedRender.container)?.offers as Record<string, unknown>).itemCondition).toBe(
+        "https://schema.org/UsedCondition",
+      );
+    });
+
+    it.each(["reserved", "sold", "archived"] as const)(
+      "emits no JSON-LD for a %s listing",
+      async (status) => {
+        getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...eligibleListing, status } });
+        const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+        expect(getJsonLd(container)).toBeNull();
+      },
+    );
+
+    it("emits no JSON-LD for a not-found/hidden listing -- the page 404s before any JSON-LD could render", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "not_found" });
+      await expect(ItemPage(makeParams("missing"))).rejects.toThrow("NEXT_NOT_FOUND");
+    });
+
+    it("emits no JSON-LD when availableQuantity is zero, even though status is still available", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...eligibleListing, availableQuantity: 0 } });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect(getJsonLd(container)).toBeNull();
+    });
+
+    it("emits no JSON-LD when the listing has no images", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...eligibleListing, imageUrls: [] } });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect(getJsonLd(container)).toBeNull();
+    });
+
+    it("emits no JSON-LD for an inquiry-only (Cars/Motorcycles/For Rent) listing even with an image and price", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...eligibleListing, isInquiryOnly: true } });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect(getJsonLd(container)).toBeNull();
+    });
+
+    it("emits no JSON-LD for a negotiable ordinary listing, even though isInquiryOnly is false -- isNegotiable and isInquiryOnly are independent flags, so a fixed Offer.price would misrepresent a genuinely negotiable asking price", async () => {
+      getListingDetailMock.mockResolvedValue({
+        status: "found",
+        listing: { ...eligibleListing, isInquiryOnly: false, isNegotiable: true },
+      });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect(getJsonLd(container)).toBeNull();
+    });
+
+    it("emits no JSON-LD when priceCents is zero -- listings_price_cents_check only enforces >= 0, and publish_listing only null-checks price, so a published listing with a zero price is a real reachable state, not just a type-level impossibility", async () => {
+      getListingDetailMock.mockResolvedValue({
+        status: "found",
+        listing: { ...eligibleListing, priceCents: 0 },
+      });
+      const { container } = render(await ItemPage(makeParams("PLS-ABC123")));
+      expect(getJsonLd(container)).toBeNull();
+    });
+
+    it("safely escapes hostile seller-supplied text in the actual server-rendered HTML string, so it cannot break out of the JSON-LD script element", async () => {
+      const hostileTitle = 'Nike Shoes</script><script>window.__pwned = true;</script>';
+      getListingDetailMock.mockResolvedValue({
+        status: "found",
+        listing: { ...eligibleListing, title: hostileTitle },
+      });
+
+      // renderToStaticMarkup produces the actual HTML STRING a browser's
+      // streaming HTML parser would tokenize -- the real risk surface.
+      // A jsdom-mounted client render (the `render()` helper used
+      // elsewhere in this file) sets dangerouslySetInnerHTML as a DOM
+      // property directly, which never re-parses raw HTML text the way a
+      // real page load does, so it would not catch this class of bug.
+      const html = renderToStaticMarkup(await ItemPage(makeParams("PLS-ABC123")));
+
+      const scriptMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+      expect(scriptMatch).not.toBeNull();
+      const scriptBody = scriptMatch![1];
+
+      // No literal "<" survives inside the script body -- so no
+      // "</script>" sequence from the hostile title can end the element
+      // early, and no injected <script> tag can execute.
+      expect(scriptBody).not.toContain("<");
+      expect(html.match(/<\/script>/g)?.length).toBe(1);
+
+      const jsonLd = JSON.parse(scriptBody);
+      expect(jsonLd.name).toBe(hostileTitle);
+    });
   });
 
   it("renders the Vehicle Details block for a Cars/Motorcycles listing with vehicle fields", async () => {
