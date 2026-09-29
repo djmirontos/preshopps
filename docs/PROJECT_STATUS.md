@@ -347,6 +347,14 @@ The following are implemented and merged as of the product implementation milest
   - **No production review was created or deleted for QA purposes** — reviews are immutable buyer-authored audit history per canonical Review Rules, and a disposable test review is not an acceptable way to validate this fix in production.
   - This closes only the review-image path-validation finding from the media/Storage audit. The other findings from that audit remain open and unaddressed: public-object reachability after moderation/suspension/account anonymization is unaffected by page-level visibility changes, orphaned-object accumulation from best-effort cleanup failures (confirmed live for `shop-images`), and `listing-images`' permanent inability to delete/replace an object via any client path. **The Media upload/delivery and Storage hardening backlog item is not being marked complete by this entry.**
 
+- Listing image resize/compression/delivery audit (read-only; no code change): confirmed the current upload path scales to a maximum 1600px edge without cropping or upscaling, and stores a compressed JPEG at quality 0.85 (`lib/image-processing/compress-image.ts`). Confirmed listing cards and the listing gallery already use `next/image` with a full responsive `srcset` breakpoint ladder, and that live production `/_next/image` responses served `image/webp` for a modern `Accept` header — one representative photo measured ~35KB WebP vs ~79KB JPEG at detail-page size and ~8.8KB WebP vs ~15.0KB JPEG at card size. These are illustrative samples from a small live check, not a guarantee for every image.
+  - **Closing this item for launch with no code change.** AVIF is deferred: current images are already small after the existing WebP delivery, and enabling it adds encoding and cache cost on top of savings the audit found to be modest at this project's current scale; revisit if future measurements justify it.
+  - OG/JSON-LD image URLs (shipped earlier this session) still reference the raw, un-optimized source Storage image rather than the WebP-delivering `/_next/image` path — noted as an optional, separate, not-yet-addressed follow-up, not folded into this closeout.
+  - Category illustration and category media optimization work remain a separate, untouched backlog item.
+  - The broader Media upload/delivery and Storage hardening backlog item remains open. This closes only the resize/compression/delivery review — the deferred draft-listing-image Storage deletion-policy fix and the avatar/shop-logo Storage-object lifecycle-on-anonymization decision (both surfaced by the same broader audit) remain open, owner-level decisions, not addressed here.
+
+**Listing image resize/compression/delivery — CLOSED FOR LAUNCH, no code change.** The Media upload/delivery and Storage hardening backlog item as a whole is not being marked complete by this entry.
+
 ---
 
 ## Current next major module
@@ -410,11 +418,11 @@ The following are folded into item 3 above once that work begins, not currently 
 
 - Custom Preshopps category illustration system
 - Category media optimization
-- Listing image resize/compression audit
-- WebP-first optimized listing uploads/delivery
-- Responsive image variants/thumbnails
-- Investigate AVIF delivery where it materially improves performance
+- AVIF listing-image delivery — deferred pending measurements that justify the added encoding/cache cost; see "Listing image resize/compression/delivery — CLOSED FOR LAUNCH" above (the resize/compression audit, WebP-first delivery, and responsive image variants items formerly listed here are closed — see that entry)
+- OG/JSON-LD image URLs still referencing the raw source Storage image instead of the WebP-delivering path — optional, separate follow-up; see "Listing image resize/compression/delivery — CLOSED FOR LAUNCH" above
 - Orphaned Storage cleanup, Draft and published-listing galleries (see "Known accepted Phase B limitations" above)
+- Draft-listing-image Storage deletion-policy fix — deferred by owner; see the media/Storage audit findings above
+- Avatar/shop-logo Storage-object lifecycle on account anonymization — owner decision needed; see the media/Storage audit findings above
 
 Messaging email summary is now implemented and live — see "Messaging Email Summary — COMPLETE" above. It is no longer folded into item 5.
 
