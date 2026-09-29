@@ -306,7 +306,7 @@ The following are implemented and merged as of the product implementation milest
   - Available to guests, unconditionally, on every public listing detail page (`ListingActions.tsx`) — no sign-in gate, matching §12's guest-allowed "Share listing links."
   - Uses `navigator.share` when supported, falling back to a clipboard copy when it isn't; Copy Link always copies directly regardless of native-share support. Both paths give truthful success/failure feedback, and a cancelled native share sheet (`AbortError`) is correctly treated as a normal dismissal — no error toast, no fallback copy.
   - **Owner confirmed** a copied public listing link opens the intended listing correctly in a private browser window.
-  - **Listing Social Sharing is COMPLETE under §36.** Shop-page sharing is not a §36 requirement and remains unimplemented — not a gap against this section. `/search` metadata and JSON-LD (§37) remain separate, not-yet-addressed backlog items.
+  - **Listing Social Sharing is COMPLETE under §36.** Shop-page sharing is not a §36 requirement and remains unimplemented — not a gap against this section. `/search` indexing/noindex policy, canonical URLs, Open Graph metadata, and JSON-LD (§37) remain separate, not-yet-addressed backlog items.
 
 **Listing Social Sharing — COMPLETE.**
 
@@ -317,6 +317,14 @@ The following are implemented and merged as of the product implementation milest
   - Social-platform link-preview rendering (e.g. a Facebook/Twitter/LinkedIn scraper's own cached preview) was not independently tested — only the underlying HTML tags were verified directly.
 
 **Listing/shop OG and canonical metadata — COMPLETE.**
+
+- `/search` dynamic title and description (commit `618fc9c`): `generateMetadata` added to `app/search/page.tsx`, built from the same sanitized `parseSearchFilters` output the page body already uses — no added fetch or query. A valid text query is reflected in both title and description; a generic "Search Preshopps" fallback is used for a base search, empty/whitespace-only input, malformed filter values, and an overlong query (matching `parseSearchFilters`'s own 100-character cutoff).
+  - Category and location labels are deliberately omitted from this metadata: no reliable human-readable label is available to `generateMetadata` without a DB lookup outside this slice's scope, and echoing a raw slug or numeric id as a friendly name would be worse than omitting it.
+  - Focused tests (16/16) and typecheck passed; mutation-tested by reverting the implementation and confirming all 7 new tests fail, then restoring it.
+  - **Production verified** on `https://preshopps.com/search` for a base search, a valid text query (`?q=nike%20shoes`), and a 101-character overlong query — all three returned the expected title/description (dynamic for the valid query, generic fallback for the other two), with zero `canonical`, `og:`, or `robots` tags present in any of the three responses.
+  - Search indexing/noindex policy, canonical URLs, and Open Graph metadata for `/search` were not changed and remain part of the separate Technical SEO decision (see "Current backlog ordering" below) — this entry closes only the title/description sub-slice, not `/search` SEO or Technical SEO more broadly.
+
+**`/search` dynamic title and description — COMPLETE.**
 
 ---
 
