@@ -326,6 +326,17 @@ The following are implemented and merged as of the product implementation milest
 
 **`/search` dynamic title and description — COMPLETE.**
 
+- Listing JSON-LD (Product/Offer) (commit `cc93a6c`): server-rendered `application/ld+json` added to `app/item/[publicCode]/page.tsx`, emitted only for a public, `available`, in-stock, non-negotiable, ordinary (non-inquiry-only) fixed-price listing with a positive displayed price and at least one image — reusing data the page already fetches, no added query.
+  - Excluded in this first slice, each confirmed by a focused test: `reserved`/`sold`/`archived` status, hidden/not-found listings, zero `availableQuantity`, `priceCents <= 0` (a real reachable state — `listings_price_cents_check` only enforces `>= 0`, and `publish_listing` only null-checks price), `isNegotiable: true` (checked independently of `isInquiryOnly`, since they are separate, uncoupled columns), and inquiry-only categories (Cars/Motorcycles/For Rent).
+  - No product-level rating/review, `brand`, `gtin`, `mpn`, or shipping/return/purchase-action claim is fabricated — `reviewCount`/`averageRating` on `ListingDetail` are the shop's own stats, not this item's, and are correctly never marked up as a product `aggregateRating`.
+  - Seller-supplied text has every less-than character replaced with its Unicode escape sequence after `JSON.stringify`, before embedding, so hostile content (e.g. a title containing a closing script tag) cannot break out of the script element — verified against the actual server-rendered HTML string, not just a helper's return value.
+  - Focused tests (38/38) and typecheck passed.
+  - **Production verified** on `https://preshopps.com` for one real eligible listing (`PSL-4AFDF795DAE7F72F`, "Men watch") and one real reserved listing (`PSL-B4937A1BF9088618`): the eligible page's JSON-LD `url` matched its own canonical URL, `price: "1345.00"` matched the visible `"₱1,345"`, `availability: InStock`, `itemCondition: NewCondition` (correctly, a brand-new listing), and `seller` identity were all present and correct; the reserved page emitted zero `application/ld+json` scripts.
+  - **Google's Rich Results Test was not run** — no credential-free, non-JS-executing way to invoke it was available in this environment. Rich-result eligibility/display in actual Google Search was therefore not independently validated or guaranteed; the PASS above reflects direct, hand-verified HTML inspection only.
+  - Shop-page JSON-LD, and any broader structured-data or Technical SEO decision (e.g. whether/how to extend this to inquiry-only categories, sold/archived listings, or other schema types) remain open, separate, not-yet-addressed items.
+
+**Listing JSON-LD (Product/Offer) — COMPLETE for this bounded slice.** The broader JSON-LD follow-up (shop pages, other categories/statuses) and Technical SEO more generally are not being marked complete by this entry.
+
 ---
 
 ## Current next major module
