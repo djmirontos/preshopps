@@ -355,6 +355,14 @@ The following are implemented and merged as of the product implementation milest
 
 **Listing image resize/compression/delivery — CLOSED FOR LAUNCH, no code change.** The Media upload/delivery and Storage hardening backlog item as a whole is not being marked complete by this entry.
 
+- Category media and illustration audit (read-only; no asset or code change): confirmed all 16 live categories already have a mapped illustration (`lib/marketplace/category-images.ts`, tested for completeness/no drift), rendered by `CategoryStrip.tsx` via `next/image` with responsive `srcset` delivery, matching the same delivery mechanism already confirmed for listing photos. Observed production `/_next/image` responses served small WebP samples for the category icons checked — these are illustrative samples from a small live check, not a guarantee across every image or device.
+  - **Source PNG resizing was evaluated but deferred.** A one-image pilot (`sports.png`, the largest source asset) resized it from 1254×1254/1.89MB to 384×384/194KB — a large source-file reduction — but an independent, cache-free re-encode comparison showed the resulting delivered WebP bytes at representative 96px/256px widths changed only marginally and inconsistently (a few dozen bytes smaller at one width, several hundred bytes larger at another), not a clear win either way.
+  - **No full production page-load waterfall or CDN cache-miss latency was measured.** This entry does not claim those checks passed, and does not claim source-image resizing would improve real page-load speed — that remains genuinely unmeasured.
+  - The `sports.png` pilot file was restored to its original committed state; no asset was changed by this closeout.
+  - **Closing the category illustration/media optimization backlog item for launch with no asset or code change.** The broader Media upload/delivery and Storage hardening item, and Technical SEO, remain open, separate backlog items, unaffected by this entry.
+
+**Category media and illustration — CLOSED FOR LAUNCH, no asset or code change.**
+
 ---
 
 ## Current next major module
@@ -416,8 +424,7 @@ Three unrelated, small correctness/reliability fixes also landed during this win
 
 The following are folded into item 3 above once that work begins, not currently scheduled or in progress:
 
-- Custom Preshopps category illustration system
-- Category media optimization
+- Custom Preshopps category illustration system and category media optimization — closed for launch, no asset or code change; see "Category media and illustration — CLOSED FOR LAUNCH" above
 - AVIF listing-image delivery — deferred pending measurements that justify the added encoding/cache cost; see "Listing image resize/compression/delivery — CLOSED FOR LAUNCH" above (the resize/compression audit, WebP-first delivery, and responsive image variants items formerly listed here are closed — see that entry)
 - OG/JSON-LD image URLs still referencing the raw source Storage image instead of the WebP-delivering path — optional, separate follow-up; see "Listing image resize/compression/delivery — CLOSED FOR LAUNCH" above
 - Orphaned Storage cleanup, Draft and published-listing galleries (see "Known accepted Phase B limitations" above)
