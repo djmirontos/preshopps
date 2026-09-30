@@ -182,7 +182,7 @@ async function getMetadata(rawParams: Record<string, string | string[] | undefin
   return generateMetadata({ searchParams: Promise.resolve(rawParams) });
 }
 
-describe("SearchPage generateMetadata -- title/description only (indexing/canonical/OG out of scope)", () => {
+describe("SearchPage generateMetadata -- title/description (canonical/OG remain out of scope; robots is covered separately below)", () => {
   it("falls back to the generic title/description for a base search with no params", async () => {
     const metadata = await getMetadata({});
     expect(metadata.title).toBe("Search Preshopps");
@@ -233,5 +233,53 @@ describe("SearchPage generateMetadata -- title/description only (indexing/canoni
     expect(metadata.title).toBe("Search Preshopps");
     expect(metadata.description).toBe("Search pre-loved and brand-new items for sale on Preshopps.");
     expect(metadata.title).not.toMatch(/a{50}/);
+  });
+});
+
+describe("SearchPage generateMetadata -- robots: { index: false, follow: true }, applied unconditionally", () => {
+  it("applies noindex/follow to a base search with no params", async () => {
+    const metadata = await getMetadata({});
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+  });
+
+  it("applies noindex/follow to a valid text query, alongside its own reflected title/description", async () => {
+    const metadata = await getMetadata({ q: "nike shoes" });
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+    expect(metadata.title).toBe('Search results for "nike shoes" | Preshopps');
+  });
+
+  it("applies noindex/follow to a filtered search (category/type/price/location combination)", async () => {
+    const metadata = await getMetadata({
+      q: "shoes",
+      category: "women",
+      type: "preloved",
+      min_price: "500",
+      province: "3",
+    });
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+  });
+
+  it("applies noindex/follow even when other params are malformed", async () => {
+    const metadata = await getMetadata({ min_price: "abc", condition: "not-a-real-condition", province: "not-a-number" });
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+  });
+
+  it("applies noindex/follow even for an overlong query that gets dropped from the title/description", async () => {
+    const overlong = "a".repeat(101);
+    const metadata = await getMetadata({ q: overlong });
+    expect(metadata.robots).toEqual({ index: false, follow: true });
+  });
+
+  it("never sets index: true or follow: false under any input", async () => {
+    for (const params of [{}, { q: "nike" }, { category: "cars" }, { q: "a".repeat(200) }]) {
+      const metadata = await getMetadata(params);
+      expect(metadata.robots).toMatchObject({ index: false, follow: true });
+    }
+  });
+
+  it("does not add canonical or Open Graph fields alongside the new robots directive", async () => {
+    const metadata = await getMetadata({ q: "nike shoes" });
+    expect(metadata.alternates).toBeUndefined();
+    expect(metadata.openGraph).toBeUndefined();
   });
 });

@@ -49,10 +49,17 @@ type SearchPageProps = {
  * deliberately NOT reflected here: their only human-readable labels
  * (category name, province/city/barangay name) require a DB lookup this
  * function does not already have, and echoing a raw slug or numeric id
- * as if it were a friendly name would be worse than omitting it. Indexing
- * policy (robots/noindex) and canonical/Open Graph fields are out of
- * scope for this slice -- see docs/PROJECT_STATUS.md's Technical SEO
- * backlog item.
+ * as if it were a friendly name would be worse than omitting it.
+ *
+ * robots: { index: false, follow: true } is applied unconditionally to
+ * every /search response -- base, a valid query, any filter combination,
+ * and a malformed/overlong q alike. This is the approved indexing policy
+ * for /search: a parameterized, near-infinite URL space should not be
+ * indexed, while the canonical listing/shop pages already are.
+ * follow: true so Googlebot still discovers linked listing/shop pages
+ * reachable from a search results page. Canonical and Open Graph fields
+ * remain deliberately absent -- out of scope for this slice, unaffected
+ * by this policy.
  */
 export async function generateMetadata({ searchParams }: SearchPageProps): Promise<Metadata> {
   const rawParams = await searchParams;
@@ -63,7 +70,7 @@ export async function generateMetadata({ searchParams }: SearchPageProps): Promi
     ? `Search results for "${q}" on Preshopps.`
     : "Search pre-loved and brand-new items for sale on Preshopps.";
 
-  return { title, description };
+  return { title, description, robots: { index: false, follow: true } };
 }
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
