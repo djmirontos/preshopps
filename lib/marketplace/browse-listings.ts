@@ -59,6 +59,7 @@ type BrowseListingsArgs = {
   p_sort: "newest";
   p_limit: number;
   p_listing_type?: "preloved" | "brand_new";
+  p_category_id?: number;
 };
 
 const VALID_CARD_CONDITIONS: ReadonlySet<string> = new Set<ListingCondition>([
@@ -180,4 +181,34 @@ export async function getHomepageMarketplaceData(): Promise<HomepageMarketplaceD
   ]);
 
   return { freshFinds, preLoved, brandNew };
+}
+
+const RELATED_LISTINGS_LIMIT = 6;
+
+/**
+ * "You may also like" for a sold/archived listing's own detail page (PRD
+ * §37.4). Calls browse_listings in global mode (p_shop_id omitted) with
+ * only p_category_id set -- the exact same call shape as the homepage
+ * rails above, just filtered to one category -- so every existing
+ * visibility rule (status = 'available' only, hidden_by_admin_at is null,
+ * seller not suspended) already applies with no new SQL. No ranking,
+ * personalization, or pagination is introduced: p_sort is fixed to
+ * browse_listings' own "newest" default and the result is capped at
+ * RELATED_LISTINGS_LIMIT.
+ *
+ * excludeListingId is filtered defensively, though it is not expected to
+ * ever matter in practice: this is only ever called for a sold/archived
+ * listing, and global-mode browse_listings only returns status =
+ * 'available' rows, so the viewed listing (never 'available' when this
+ * runs) cannot appear in its own results. The filter guards against that
+ * invariant changing later, not a currently-reachable case.
+ */
+export async function getRelatedListings(categoryId: number, excludeListingId: string): Promise<BrowseSection> {
+  const section = await browseListingsSection({
+    p_sort: "newest",
+    p_limit: RELATED_LISTINGS_LIMIT,
+    p_category_id: categoryId,
+  });
+
+  return { ...section, listings: section.listings.filter((listing) => listing.id !== excludeListingId) };
 }

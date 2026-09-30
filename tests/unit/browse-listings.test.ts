@@ -14,6 +14,7 @@ vi.mock("@/lib/supabase/env", () => ({
 
 import {
   getHomepageMarketplaceData,
+  getRelatedListings,
   mapBrowseRowToListingCard,
   type BrowseListingRow,
 } from "@/lib/marketplace/browse-listings";
@@ -146,6 +147,63 @@ describe("getHomepageMarketplaceData", () => {
     expect(source).not.toMatch(/NEXT_REDIRECT/);
     expect(source).not.toMatch(/NEXT_NOT_FOUND/);
     expect(source).not.toMatch(/\.digest\b/);
+  });
+});
+
+describe("getRelatedListings", () => {
+  beforeEach(() => {
+    rpcMock.mockReset();
+  });
+
+  it("calls browse_listings in global mode (no p_shop_id) filtered to only the given category, sorted newest, capped at 6", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    await getRelatedListings(1, "self-id");
+
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    const [fnName, args] = rpcMock.mock.calls[0];
+    expect(fnName).toBe("browse_listings");
+    expect(args).toEqual({ p_sort: "newest", p_limit: 6, p_category_id: 1 });
+  });
+
+  it("maps populated rows through to ListingCardData", async () => {
+    rpcMock.mockResolvedValue({ data: [sampleRow], error: null });
+    const result = await getRelatedListings(1, "some-other-id");
+
+    expect(result.hadError).toBe(false);
+    expect(result.listings).toHaveLength(1);
+    expect(result.listings[0]).toMatchObject({ id: sampleRow.listing_id, href: "/item/PLS-ABC123" });
+  });
+
+  it("defensively excludes the viewed listing by id, even though global mode's own status='available' filter already makes that unreachable for a sold/archived caller", async () => {
+    rpcMock.mockResolvedValue({ data: [sampleRow], error: null });
+    const result = await getRelatedListings(1, sampleRow.listing_id);
+
+    expect(result.listings).toEqual([]);
+    expect(result.hadError).toBe(false);
+  });
+
+  it("returns hadError=true and an empty array when the RPC returns a Postgrest error, without throwing", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    const result = await getRelatedListings(1, "some-id");
+
+    expect(result.hadError).toBe(true);
+    expect(result.listings).toEqual([]);
+  });
+
+  it("returns hadError=true when the RPC call throws", async () => {
+    rpcMock.mockRejectedValue(new Error("network down"));
+    const result = await getRelatedListings(1, "some-id");
+
+    expect(result.hadError).toBe(true);
+    expect(result.listings).toEqual([]);
+  });
+
+  it("returns hadError=false with an empty array for genuinely zero matches in the category", async () => {
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    const result = await getRelatedListings(1, "some-id");
+
+    expect(result.hadError).toBe(false);
+    expect(result.listings).toEqual([]);
   });
 });
 

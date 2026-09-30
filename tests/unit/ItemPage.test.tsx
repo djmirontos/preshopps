@@ -4,10 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ListingDetail, ListingDetailResult } from "@/lib/marketplace/listing-detail";
+import type { BrowseSection } from "@/lib/marketplace/browse-listings";
 import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
 
-const { getListingDetailMock, notFoundMock } = vi.hoisted(() => ({
+const { getListingDetailMock, getRelatedListingsMock, notFoundMock } = vi.hoisted(() => ({
   getListingDetailMock: vi.fn<(publicCode: string) => Promise<ListingDetailResult>>(),
+  getRelatedListingsMock: vi.fn<(categoryId: number, excludeListingId: string) => Promise<BrowseSection>>(),
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -15,6 +17,10 @@ const { getListingDetailMock, notFoundMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/marketplace/listing-detail", () => ({
   getListingDetail: getListingDetailMock,
+}));
+
+vi.mock("@/lib/marketplace/browse-listings", () => ({
+  getRelatedListings: getRelatedListingsMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -43,6 +49,7 @@ const sampleListing: ListingDetail = {
   availableQuantity: 1,
   meetupNote: null,
   postedLabel: "2 days ago",
+  categoryId: 5,
   categoryName: "Shoes",
   isInquiryOnly: false,
   locationLabel: "Tangub City, Misamis Occidental",
@@ -84,6 +91,9 @@ describe("ItemPage route parameter", () => {
 describe("ItemPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Safe default for every test that doesn't itself care about related
+    // listings -- overridden explicitly by the tests below that do.
+    getRelatedListingsMock.mockResolvedValue({ listings: [], hadError: false });
   });
 
   it("renders the listing when found", async () => {
@@ -445,5 +455,65 @@ describe("ItemPage", () => {
     render(await ItemPage(makeParams("PLS-CAR")));
     expect(screen.getByText("Vehicle Details")).toBeInTheDocument();
     expect(screen.getByText("Toyota")).toBeInTheDocument();
+  });
+
+  describe("Related listings (PRD §37.4) -- sold/archived pages only", () => {
+    const relatedCard = {
+      id: "related-1",
+      href: "/item/PLS-RELATED1",
+      title: "Related Sneakers",
+      priceCents: 150000,
+      listingType: "preloved" as const,
+      condition: "good" as const,
+      locationLabel: "Tangub City",
+      shopName: "Another Shop",
+    };
+
+    it.each(["sold", "archived"] as const)(
+      "fetches and renders related listings for a %s listing, keyed by the viewed listing's own category and id",
+      async (status) => {
+        getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, status } });
+        getRelatedListingsMock.mockResolvedValue({ listings: [relatedCard], hadError: false });
+
+        render(await ItemPage(makeParams("PLS-ABC123")));
+
+        expect(getRelatedListingsMock).toHaveBeenCalledWith(sampleListing.categoryId, sampleListing.id);
+        expect(screen.getByRole("heading", { name: "You may also like" })).toBeInTheDocument();
+        expect(screen.getByText("Related Sneakers")).toBeInTheDocument();
+      },
+    );
+
+    it.each(["available", "reserved"] as const)(
+      "never calls getRelatedListings for a %s listing -- not even to discard the result",
+      async (status) => {
+        getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, status } });
+
+        render(await ItemPage(makeParams("PLS-ABC123")));
+
+        expect(getRelatedListingsMock).not.toHaveBeenCalled();
+        expect(screen.queryByRole("heading", { name: "You may also like" })).not.toBeInTheDocument();
+      },
+    );
+
+    it("omits the entire section -- no heading -- when there are zero related listings", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, status: "sold" } });
+      getRelatedListingsMock.mockResolvedValue({ listings: [], hadError: false });
+
+      render(await ItemPage(makeParams("PLS-ABC123")));
+
+      expect(screen.queryByRole("heading", { name: "You may also like" })).not.toBeInTheDocument();
+    });
+
+    it("omits the section on a related-listings fetch failure, without preventing the rest of the page from rendering", async () => {
+      getListingDetailMock.mockResolvedValue({ status: "found", listing: { ...sampleListing, status: "archived" } });
+      getRelatedListingsMock.mockResolvedValue({ listings: [], hadError: true });
+
+      render(await ItemPage(makeParams("PLS-ABC123")));
+
+      expect(screen.queryByRole("heading", { name: "You may also like" })).not.toBeInTheDocument();
+      // The main listing itself still rendered fully -- the optional
+      // recommendation fetch failing did not throw or block anything above it.
+      expect(screen.getByRole("heading", { level: 1, name: "Nike Air Max 270" })).toBeInTheDocument();
+    });
   });
 });

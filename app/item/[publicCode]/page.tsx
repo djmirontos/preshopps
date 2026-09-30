@@ -13,10 +13,13 @@ import { ListingSellerCard } from "@/components/listing/ListingSellerCard";
 import { ListingSellerPreview } from "@/components/listing/ListingSellerPreview";
 import { ListingSpecificDetails } from "@/components/listing/ListingSpecificDetails";
 import { getListingDetail, type ListingDetail } from "@/lib/marketplace/listing-detail";
+import { getRelatedListings } from "@/lib/marketplace/browse-listings";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyShop } from "@/lib/seller/get-my-shop";
 import { getAppUrl } from "@/lib/env";
-import { formatPriceFromCents } from "@/components/marketplace/ListingCard";
+import { ListingCard, formatPriceFromCents } from "@/components/marketplace/ListingCard";
+import { ListingGrid } from "@/components/marketplace/ListingGrid";
+import { SectionHeader } from "@/components/marketplace/SectionHeader";
 import { CONDITION_LABELS } from "@/lib/marketplace/search-params";
 
 const META_DESCRIPTION_LENGTH = 160;
@@ -219,6 +222,19 @@ export default async function ItemPage({ params }: ItemPageProps) {
   const { listing } = result;
   const listingJsonLd = buildListingJsonLd(listing);
 
+  // Related-listings recommendations (PRD §37.4) are only fetched for a
+  // sold/archived listing -- available/reserved pages never call
+  // getRelatedListings at all, not even to discard the result. A failure
+  // here (hadError, or genuinely zero matches after excluding this
+  // listing) is handled entirely by omitting the section below; it can
+  // never prevent the rest of this page from rendering, since
+  // getRelatedListings never throws (browseListingsSection's own
+  // try/catch already converts a transport failure into hadError: true).
+  const relatedListings =
+    listing.status === "sold" || listing.status === "archived"
+      ? await getRelatedListings(listing.categoryId, listing.id)
+      : null;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       {listingJsonLd && (
@@ -299,6 +315,26 @@ export default async function ItemPage({ params }: ItemPageProps) {
         />
 
         <ListingMeta categoryName={listing.categoryName} postedLabel={listing.postedLabel} publicCode={listing.publicCode} />
+
+        {/* PRD §37.4: sold/archived pages should remain accessible with
+            related-item recommendations. The whole section is omitted --
+            no heading, no empty-state message -- whenever there is
+            nothing useful to show (hadError, or zero matches once this
+            listing is excluded), since this is a secondary, decorative
+            enhancement on an already-unavailable listing's page, not a
+            primary discovery surface. */}
+        {relatedListings && relatedListings.listings.length > 0 && (
+          <div>
+            <SectionHeader title="You may also like" />
+            <div className="mt-3">
+              <ListingGrid>
+                {relatedListings.listings.map((related) => (
+                  <ListingCard key={related.id} listing={related} />
+                ))}
+              </ListingGrid>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

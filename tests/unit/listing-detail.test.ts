@@ -152,6 +152,12 @@ describe("getListingDetail", () => {
 });
 
 describe("mapDetailRowToListingDetail", () => {
+  it("carries the numeric category_id through as categoryId, alongside the existing categoryName", () => {
+    const listing = mapDetailRowToListingDetail(sampleRow);
+    expect(listing.categoryId).toBe(1);
+    expect(listing.categoryName).toBe("Women");
+  });
+
   it("handles null optional fields safely", () => {
     const listing = mapDetailRowToListingDetail(sampleRow);
     expect(listing.originalPriceCents).toBeUndefined();

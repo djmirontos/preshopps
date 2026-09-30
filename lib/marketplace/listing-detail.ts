@@ -111,6 +111,7 @@ export type ListingDetail = {
   availableQuantity: number;
   meetupNote: string | null;
   postedLabel: string;
+  categoryId: number;
   categoryName: string;
   isInquiryOnly: boolean;
   locationLabel: string;
@@ -225,6 +226,7 @@ export function mapDetailRowToListingDetail(row: GetListingDetailRow): ListingDe
     availableQuantity: row.available_quantity,
     meetupNote: row.meetup_note,
     postedLabel: formatRelativeTime(row.published_at ?? row.created_at),
+    categoryId: row.category_id,
     categoryName: row.category_name,
     isInquiryOnly: row.is_inquiry_only,
     locationLabel: composeLocationLabel([row.barangay_name, row.city_name, row.province_name]),

@@ -20,6 +20,15 @@ vi.mock("@/lib/marketplace/listing-detail", () => ({
   getListingDetail: getListingDetailMock,
 }));
 
+// Not exercised by this file's own scenarios (every fixture here is
+// status: "available", which never calls getRelatedListings at all), but
+// the real module still needs mocking here so importing app/item/
+// [publicCode]/page.tsx doesn't pull in the real, server-only Supabase
+// client this file has no other reason to configure.
+vi.mock("@/lib/marketplace/browse-listings", () => ({
+  getRelatedListings: vi.fn(),
+}));
+
 vi.mock("@/lib/auth/session", () => ({
   getAuthUser: getAuthUserMock,
 }));
@@ -54,6 +63,7 @@ const sampleListing: ListingDetail = {
   availableQuantity: 1,
   meetupNote: null,
   postedLabel: "2 days ago",
+  categoryId: 5,
   categoryName: "Shoes",
   isInquiryOnly: false,
   locationLabel: "Tangub City, Misamis Occidental",
