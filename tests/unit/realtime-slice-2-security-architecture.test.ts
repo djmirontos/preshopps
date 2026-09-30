@@ -97,6 +97,9 @@ describe("Realtime Slice 2 -- no backend/migration change was made in this slice
       "0102_unread_messaging_summary_enum.sql",
       "0103_unread_messaging_summary.sql",
       "0104_schedule_unread_messaging_summaries.sql",
+      "0105_harden_review_image_path_validation.sql",
+      "0106_admin_listing_hide.sql",
+      "0107_list_public_shops.sql",
     ]);
   });
 

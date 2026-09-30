@@ -52,6 +52,9 @@ describe("0099: migration-list snapshot includes the new scheduler migration", (
       "0102_unread_messaging_summary_enum.sql",
       "0103_unread_messaging_summary.sql",
       "0104_schedule_unread_messaging_summaries.sql",
+      "0105_harden_review_image_path_validation.sql",
+      "0106_admin_listing_hide.sql",
+      "0107_list_public_shops.sql",
     ]);
   });
 });
