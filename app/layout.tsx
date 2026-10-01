@@ -69,6 +69,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <FavoritesProvider favoritedIds={favoritedIds}>
             <CartProvider initialLines={cartLines} isAuthenticated={Boolean(user)}>
               <NotificationsProvider
+                key={user?.id ?? "guest"}
                 isAuthenticated={Boolean(user)}
                 userId={user?.id ?? null}
                 initialUnreadMessageCount={initialUnreadMessageCount}
@@ -81,7 +82,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                     FloatingMessengerProvider's own file comment. Renders
                     nothing on its own; FloatingChatPanel below is the only
                     consumer that actually shows anything, and only for a
-                    signed-in viewer. */}
+                    signed-in viewer. Nested inside NotificationsProvider's
+                    key={userId ?? "guest"} above, so a sign-out/sign-in as a
+                    different account DOES remount this (and everything
+                    else here) -- deliberately, so a previously selected
+                    conversation id can never carry over to a new
+                    identity. */}
                 <FloatingMessengerProvider>
                   <AppHeader user={user} hasShop={Boolean(myShop)} />
                   <AccountSuspendedBanner restrictions={restrictionsResult.restrictions} />
