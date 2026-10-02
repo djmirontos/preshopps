@@ -61,6 +61,7 @@ describe("Buy Now -- migration 0089 exists and touches nothing else", () => {
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });
@@ -329,6 +330,7 @@ describe("Buy Now -- post-submit terminal-success fix (P2) stayed frontend-only"
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
   });
 
@@ -385,6 +387,7 @@ describe("Buy Now -- post-submit navigation fix (P3): straight to order detail, 
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
   });
 

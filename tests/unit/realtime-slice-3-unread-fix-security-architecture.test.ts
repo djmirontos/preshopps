@@ -118,6 +118,7 @@ describe("Realtime Slice 3 -- the only backend change is migration 0088's two ad
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
     expect(migrationFiles).toContain("0088_exact_unread_badge_counts.sql");
   });

@@ -52,6 +52,7 @@ describe("Floating Messenger slice -- no backend/migration/RLS change was made",
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
   });
 

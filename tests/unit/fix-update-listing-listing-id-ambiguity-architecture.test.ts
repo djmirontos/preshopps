@@ -46,6 +46,7 @@ describe("0090 -- migration numbering and scope", () => {
       "0105_harden_review_image_path_validation.sql",
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
+      "0108_enable_commerce_tables_rls.sql",
     ]);
   });
 
