@@ -48,6 +48,7 @@ describe("Account/Profile UI slice adds no backend/migration change", () => {
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
       "0108_enable_commerce_tables_rls.sql",
+      "0109_fix_admin_role_rpc_email_types.sql",
     ]);
     expect(migrationFiles.some((f) => f.startsWith("0086_"))).toBe(false);
   });

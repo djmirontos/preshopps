@@ -101,6 +101,7 @@ describe("Realtime Slice 2 -- no backend/migration change was made in this slice
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
       "0108_enable_commerce_tables_rls.sql",
+      "0109_fix_admin_role_rpc_email_types.sql",
     ]);
   });
 

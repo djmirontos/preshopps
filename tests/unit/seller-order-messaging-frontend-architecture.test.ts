@@ -35,6 +35,7 @@ describe("Seller order messaging frontend wiring: no backend/migration/RLS chang
       "0106_admin_listing_hide.sql",
       "0107_list_public_shops.sql",
       "0108_enable_commerce_tables_rls.sql",
+      "0109_fix_admin_role_rpc_email_types.sql",
     ]);
   });
 
