@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
+import { ListingVisibilityPanel } from "@/components/admin/ListingVisibilityPanel";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import {
   resolveAdminReport,
@@ -259,6 +260,10 @@ export function AdminReportDetailClient({ report, targetUsers }: Props) {
           </div>
         )}
       </div>
+
+      {report.targetType === "listing" && report.listingId && (
+        <ListingVisibilityPanel key={report.listingId} listingId={report.listingId} />
+      )}
 
       {users.length > 0 && (
         <div>

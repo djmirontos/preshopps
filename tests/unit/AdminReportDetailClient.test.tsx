@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
-const { resolveAdminReportMock, applyUserRestrictionMock, liftUserRestrictionMock } = vi.hoisted(() => ({
+const { resolveAdminReportMock, applyUserRestrictionMock, liftUserRestrictionMock, getListingHideStateMock } = vi.hoisted(() => ({
   resolveAdminReportMock: vi.fn(),
   applyUserRestrictionMock: vi.fn(),
   liftUserRestrictionMock: vi.fn(),
+  getListingHideStateMock: vi.fn(),
 }));
 
 vi.mock("@/lib/admin/moderation-actions", async () => {
@@ -14,6 +15,17 @@ vi.mock("@/lib/admin/moderation-actions", async () => {
     resolveAdminReport: resolveAdminReportMock,
     applyUserRestriction: applyUserRestrictionMock,
     liftUserRestriction: liftUserRestrictionMock,
+  };
+});
+
+// The listing visibility panel renders for every listing report, so its
+// reader must be stubbed here too. Default: visible, so these existing
+// resolve/restriction assertions are unaffected by the panel.
+vi.mock("@/lib/admin/listing-hide-actions", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/admin/listing-hide-actions")>("@/lib/admin/listing-hide-actions");
+  return {
+    ...actual,
+    getListingHideState: getListingHideStateMock,
   };
 });
 
@@ -72,6 +84,7 @@ function makeTarget(overrides: Partial<AdminTargetUser> = {}): AdminTargetUser {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getListingHideStateMock.mockResolvedValue({ ok: true, hiddenAt: null });
 });
 
 describe("AdminReportDetailClient -- resolve/dismiss", () => {
