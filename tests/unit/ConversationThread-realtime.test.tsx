@@ -445,6 +445,7 @@ describe("Realtime bug fix: no migration/RLS/publication change", () => {
       "0109_fix_admin_role_rpc_email_types.sql",
       "0110_fix_grant_admin_role_conflict_target.sql",
       "0111_fix_grant_admin_role_audit_action_type.sql",
+      "0112_admin_get_listing_hide_state.sql",
     ]);
   });
 });
@@ -1110,6 +1111,7 @@ describe("ConversationThread Realtime -- reconnect reconciliation", () => {
       "0109_fix_admin_role_rpc_email_types.sql",
       "0110_fix_grant_admin_role_conflict_target.sql",
       "0111_fix_grant_admin_role_audit_action_type.sql",
+      "0112_admin_get_listing_hide_state.sql",
     ]);
   });
 
