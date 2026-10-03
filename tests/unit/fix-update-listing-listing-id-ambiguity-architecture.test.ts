@@ -49,6 +49,7 @@ describe("0090 -- migration numbering and scope", () => {
       "0108_enable_commerce_tables_rls.sql",
       "0109_fix_admin_role_rpc_email_types.sql",
       "0110_fix_grant_admin_role_conflict_target.sql",
+      "0111_fix_grant_admin_role_audit_action_type.sql",
     ]);
   });
 
