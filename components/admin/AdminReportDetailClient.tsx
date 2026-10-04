@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/seller/ConfirmDialog";
 import { ListingVisibilityPanel } from "@/components/admin/ListingVisibilityPanel";
+import { ReviewVisibilityPanel } from "@/components/admin/ReviewVisibilityPanel";
 import { formatOrderDate } from "@/lib/orders/format-order-date";
 import {
   resolveAdminReport,
@@ -264,6 +265,8 @@ export function AdminReportDetailClient({ report, targetUsers }: Props) {
       {report.targetType === "listing" && report.listingId && (
         <ListingVisibilityPanel key={report.listingId} listingId={report.listingId} />
       )}
+
+      {report.targetType === "review" && report.reviewId && <ReviewVisibilityPanel key={report.reviewId} reviewId={report.reviewId} />}
 
       {users.length > 0 && (
         <div>

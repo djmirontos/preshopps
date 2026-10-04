@@ -217,7 +217,7 @@ describe("process-email-outbox Edge Function -- provider-not-configured consumes
 describe("process-email-outbox Edge Function -- template content matches the Next.js templates (no event-matrix or content change)", () => {
   const source = readFunctionSource();
 
-  it("implements exactly the same 8 original email event types plus the new unread_messages_summary, no more, no fewer", () => {
+  it("implements exactly the original 8 email event types, the unread_messages_summary, and the Phase 1 review_removed/review_restored events, no more, no fewer", () => {
     const eventsMatch = source.match(/type EmailEventType =\s*\n((?:\s*\|\s*"[a-z_]+"\s*\n?)+);/);
     expect(eventsMatch).not.toBeNull();
     const events = [...eventsMatch![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
@@ -231,6 +231,8 @@ describe("process-email-outbox Edge Function -- template content matches the Nex
         "order_expiration_reminder",
         "order_partial_acceptance",
         "order_seller_cancelled",
+        "review_removed",
+        "review_restored",
         "unread_messages_summary",
       ].sort(),
     );
@@ -472,5 +474,112 @@ describe("process-email-outbox Edge Function -- unread-summary template content 
     const source = readFunctionSource();
     const rendererSource = extractFunctionSource(source, "function renderUnreadMessagingSummaryTemplate(");
     expect(rendererSource).not.toMatch(/payload|\.body|Deno\.env|await |supabase\.rpc/);
+  });
+});
+
+// ============================================================
+// Review moderation email branches (review_removed / review_restored), executed
+// from the real Edge Function source (same extraction and TypeScript compilation
+// as loadTemplateRenderer above). The renderer is never given a private note;
+// the private-note test below additionally passes one as if misused, to prove
+// the template does not render any field it does not explicitly read.
+// ============================================================
+function loadReviewTemplateRenderer(): {
+  renderEmailTemplate: (eventType: string, payload: Record<string, unknown>) => { subject: string; text: string; html: string };
+} {
+  const source = readFunctionSource();
+  const eventType = source.match(/type EmailEventType =[\s\S]*?;\n/);
+  const templateType = source.match(/type EmailTemplate = [^\n]*\n/);
+  expect(eventType).not.toBeNull();
+  expect(templateType).not.toBeNull();
+  const tsSource = [
+    'const APP_BASE_URL = "https://preshopps.example";',
+    eventType![0],
+    templateType![0],
+    extractFunctionSource(source, "function escapeHtml("),
+    extractFunctionSource(source, "function wrapHtml("),
+    extractFunctionSource(source, "function getAppUrl("),
+    extractFunctionSource(source, "function sellerOrderLink("),
+    extractFunctionSource(source, "function buyerOrderLink("),
+    extractFunctionSource(source, "function supportLink("),
+    extractFunctionSource(source, "function messagesLink("),
+    extractFunctionSource(source, "function asString("),
+    extractFunctionSource(source, "function asNumber("),
+    extractFunctionSource(source, "function formatRestrictionType("),
+    extractFunctionSource(source, "function buildTemplate("),
+    extractFunctionSource(source, "function renderEmailTemplate("),
+    "return { renderEmailTemplate };",
+  ].join("\n\n");
+
+  const { outputText, diagnostics } = ts.transpileModule(tsSource, {
+    compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2020 },
+    reportDiagnostics: true,
+  });
+  expect(diagnostics ?? []).toHaveLength(0);
+
+  return new Function(outputText)() as {
+    renderEmailTemplate: (eventType: string, payload: Record<string, unknown>) => { subject: string; text: string; html: string };
+  };
+}
+
+describe("process-email-outbox -- review_removed / review_restored templates (executed)", () => {
+  const { renderEmailTemplate } = loadReviewTemplateRenderer();
+
+  it("review_removed: subject, the user-facing reason, and a link to the buyer's order", () => {
+    const template = renderEmailTemplate("review_removed", { review_id: "r1", order_public_code: "PSO-1", public_message: "Scam listing." });
+    expect(template.subject).toBe("Your Preshopps review was removed");
+    expect(template.text).toContain("A review you posted on Preshopps was removed after a moderation review.");
+    expect(template.text).toContain("Reason: Scam listing.");
+    expect(template.text).toContain("https://preshopps.example/orders/PSO-1");
+    expect(template.html).toContain('href="https://preshopps.example/orders/PSO-1"');
+  });
+
+  it("review_removed without an order code links to support instead of guessing an order URL", () => {
+    const template = renderEmailTemplate("review_removed", { review_id: "r1", order_public_code: "", public_message: "Scam." });
+    expect(template.text).toContain("https://preshopps.example/support");
+    expect(template.text).not.toContain("/orders/");
+  });
+
+  it("review_removed escapes markup in the reason on the HTML path and keeps the plain-text part verbatim", () => {
+    const hostile = '<script>alert("x")</script> & \'q\'';
+    const template = renderEmailTemplate("review_removed", { order_public_code: "PSO-1", public_message: hostile });
+    expect(template.html).not.toContain("<script>");
+    expect(template.html).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;q&#39;");
+    expect(template.text).toContain(`Reason: ${hostile}`);
+  });
+
+  it("review_removed never renders a private admin note, even if one were present in the payload", () => {
+    const template = renderEmailTemplate("review_removed", {
+      order_public_code: "PSO-1",
+      public_message: "Public reason.",
+      private_note: "SECRET-ADMIN-NOTE",
+      note: "SECRET-ADMIN-NOTE",
+    });
+    expect(template.text).not.toContain("SECRET-ADMIN-NOTE");
+    expect(template.html).not.toContain("SECRET-ADMIN-NOTE");
+  });
+
+  it("review_restored: includes the optional message as 'Note:' when supplied, escaped on HTML", () => {
+    const template = renderEmailTemplate("review_restored", { order_public_code: "PSO-1", public_message: "Reviewed <again>." });
+    expect(template.subject).toBe("Your Preshopps review is visible again");
+    expect(template.text).toContain("Note: Reviewed <again>.");
+    expect(template.html).toContain("Note: Reviewed &lt;again&gt;.");
+    expect(template.html).not.toContain("<again>");
+  });
+
+  it("review_restored without a message omits the Note line entirely", () => {
+    const template = renderEmailTemplate("review_restored", { order_public_code: "PSO-1", public_message: null });
+    expect(template.text).not.toContain("Note:");
+    expect(template.text).toContain("has been restored and is visible again.");
+  });
+
+  it("review_restored never renders a private admin note", () => {
+    const template = renderEmailTemplate("review_restored", { order_public_code: "PSO-1", public_message: null, private_note: "SECRET-ADMIN-NOTE" });
+    expect(template.text).not.toContain("SECRET-ADMIN-NOTE");
+    expect(template.html).not.toContain("SECRET-ADMIN-NOTE");
+  });
+
+  it("an event type with no template still throws, so unknown events are never sent blank", () => {
+    expect(() => renderEmailTemplate("review_unknown_event", {})).toThrow(/Unhandled email event type/);
   });
 });

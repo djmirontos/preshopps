@@ -37,6 +37,10 @@ export function getNotificationTitle(type: NotificationType): string {
       return "New review";
     case "review_reply":
       return "Seller replied to your review";
+    case "review_removed":
+      return "Your review was removed";
+    case "review_restored":
+      return "Your review was restored";
     case "moderation_restriction_applied":
       return "Account restriction applied";
     case "moderation_restriction_lifted":
@@ -83,6 +87,19 @@ export function getNotificationMessage(item: NotificationItem): string {
       return `${actor} left a review on your shop.`;
     case "review_reply":
       return "The seller replied to your review.";
+    case "review_removed": {
+      // Plain text. React renders it as text, so the reason is never parsed as markup.
+      const where = code ? ` on order ${code}` : "";
+      const reason = item.publicMessage;
+      return reason
+        ? `Your review${where} was removed after a moderation review. Reason: ${reason}`
+        : `Your review${where} was removed after a moderation review. The reason is on the order page.`;
+    }
+    case "review_restored": {
+      const where = code ? ` on order ${code}` : "";
+      const note = item.publicMessage;
+      return note ? `Your review${where} was restored and is visible again. Note: ${note}` : `Your review${where} was restored and is visible again.`;
+    }
     case "moderation_restriction_applied":
       return "A restriction was applied to your account. Review your Account status for details.";
     case "moderation_restriction_lifted":
@@ -150,6 +167,12 @@ export function getNotificationHref(item: NotificationItem): string | null {
       return "/account#account-status";
     case "moderation_restriction_lifted":
       return "/account";
+    case "review_removed":
+    case "review_restored":
+      // Buyer-only: the notification carries order_id, so get_my_notifications
+      // projects the order code and the link lands on the order page, where
+      // the removal reason is shown.
+      return item.orderPublicCode ? `/orders/${item.orderPublicCode}` : null;
     case "order_completed":
     case "new_review":
     case "review_reply":

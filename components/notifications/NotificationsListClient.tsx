@@ -93,6 +93,7 @@ export function NotificationsListClient({ initialNotifications, initialHadError,
           conversationId: lastEvent.conversationId,
           conversationListingTitle: null,
           reviewId: lastEvent.reviewId,
+          publicMessage: lastEvent.publicMessage,
         };
         return [newItem, ...prev];
       });

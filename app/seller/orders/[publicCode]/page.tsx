@@ -6,6 +6,8 @@ import { SellerOrderDetailClient } from "@/components/seller/SellerOrderDetailCl
 import { SellerOrderReviewSection } from "@/components/seller/SellerOrderReviewSection";
 import { DisputeSection } from "@/components/disputes/DisputeSection";
 import { getOrderReview } from "@/lib/reviews/get-order-review";
+import { getOrderReviewRemoval } from "@/lib/reviews/get-order-review-removal";
+import { reviewVisibilityFromRemovalResult } from "@/lib/reviews/review-visibility";
 import { getOrderDisputeSummary } from "@/lib/disputes/get-order-dispute-summary";
 
 type PageProps = {
@@ -50,6 +52,9 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
 
   const orderReviewResult = result.order.status === "completed" ? await getOrderReview(result.order.orderId) : null;
   const orderReview = orderReviewResult?.status === "found" ? orderReviewResult.review : null;
+  const reviewVisibility = orderReview?.reviewId
+    ? reviewVisibilityFromRemovalResult(await getOrderReviewRemoval(result.order.orderId))
+    : null;
 
   const disputeSummaryResult = await getOrderDisputeSummary(result.order.orderId);
   const existingDispute = disputeSummaryResult.status === "found" ? disputeSummaryResult.summary : null;
@@ -69,7 +74,7 @@ export default async function SellerOrderDetailPage({ params }: PageProps) {
         existingDispute={existingDispute}
       />
 
-      <SellerOrderReviewSection review={orderReview} />
+      <SellerOrderReviewSection review={orderReview} visibility={reviewVisibility} />
     </div>
   );
 }

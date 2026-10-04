@@ -21,6 +21,9 @@ export type RawNotificationRow = {
   review_id: string | null;
   created_at: string;
   read_at: string | null;
+  /** User-facing review moderation text. Absent on rows created before the
+   * contract change; normalized to null where it is read. */
+  public_message?: string | null;
 };
 
 /** A minimal, just-arrived notification signal -- consumers that need the
@@ -36,6 +39,7 @@ export type NewNotificationEvent = {
   orderId: string | null;
   conversationId: string | null;
   reviewId: string | null;
+  publicMessage: string | null;
 };
 
 type NotificationsContextValue = {
@@ -455,6 +459,7 @@ export function NotificationsProvider({
                 orderId: row.order_id,
                 conversationId: row.conversation_id,
                 reviewId: row.review_id,
+                publicMessage: typeof row.public_message === "string" ? row.public_message : null,
               });
             },
           )

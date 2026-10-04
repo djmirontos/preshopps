@@ -3,8 +3,11 @@ import Link from "next/link";
 import { getAuthUser } from "@/lib/auth/session";
 import { getMyOrderDetail } from "@/lib/orders/get-my-order-detail";
 import { getOrderReview } from "@/lib/reviews/get-order-review";
+import { getOrderReviewRemoval } from "@/lib/reviews/get-order-review-removal";
+import { reviewVisibilityFromRemovalResult } from "@/lib/reviews/review-visibility";
 import { ReviewFormClient } from "@/components/orders/ReviewFormClient";
 import { ReviewReadOnlyView } from "@/components/orders/ReviewReadOnlyView";
+import { ReviewRemovalNotice, ReviewVisibilityUnknownNotice } from "@/components/orders/ReviewRemovalNotice";
 
 type PageProps = {
   params: Promise<{ publicCode: string }>;
@@ -69,6 +72,9 @@ export default async function OrderReviewPage({ params }: PageProps) {
   }
 
   const { review } = reviewResult;
+  const removalResult = review.reviewId === null ? null : await getOrderReviewRemoval(order.orderId);
+  const visibility = removalResult === null ? null : reviewVisibilityFromRemovalResult(removalResult);
+  const removal = removalResult?.status === "found" && removalResult.removal.isRemoved ? removalResult.removal : null;
   const purchasedItemTitles = order.items.filter((item) => item.status === "accepted").map((item) => item.title);
 
   return (
@@ -81,6 +87,9 @@ export default async function OrderReviewPage({ params }: PageProps) {
         {review.reviewId === null ? "Leave a review" : review.canEditReview ? "Edit your review" : "Your review"}
       </h1>
       <p className="mt-1 text-sm text-ink-secondary">{order.shopName}</p>
+
+      {visibility === "removed" && removal && <ReviewRemovalNotice publicMessage={removal.publicMessage} />}
+      {visibility === "unknown" && <ReviewVisibilityUnknownNotice />}
 
       {review.reviewId === null && !review.canCreateReview && (
         <p className="mt-6 text-sm text-ink-secondary">This order isn&rsquo;t eligible for a review right now.</p>

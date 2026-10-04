@@ -39,6 +39,7 @@ function item(overrides: Partial<NotificationItem> = {}): NotificationItem {
     conversationId: null,
     conversationListingTitle: null,
     reviewId: null,
+    publicMessage: null,
     ...overrides,
   };
 }

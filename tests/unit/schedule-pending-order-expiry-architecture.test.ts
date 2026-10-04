@@ -60,6 +60,11 @@ describe("0099: migration-list snapshot includes the new scheduler migration", (
       "0110_fix_grant_admin_role_conflict_target.sql",
       "0111_fix_grant_admin_role_audit_action_type.sql",
       "0112_admin_get_listing_hide_state.sql",
+      "0113_review_moderation_enum_values.sql",
+      "0114_review_moderation_state_and_audit.sql",
+      "0115_review_moderation_rpcs.sql",
+      "0116_review_moderation_public_read_filters.sql",
+      "0117_review_moderation_edit_guards.sql",
     ]);
   });
 });

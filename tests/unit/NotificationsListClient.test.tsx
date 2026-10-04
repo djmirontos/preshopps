@@ -73,6 +73,7 @@ function makeNotification(overrides: Partial<NotificationItem> = {}): Notificati
     conversationId: null,
     conversationListingTitle: null,
     reviewId: null,
+    publicMessage: null,
     ...overrides,
   };
 }

@@ -24,6 +24,8 @@ export type NotificationType =
   | "new_message"
   | "new_review"
   | "review_reply"
+  | "review_removed"
+  | "review_restored"
   | "moderation_restriction_applied"
   | "moderation_restriction_lifted";
 
@@ -47,6 +49,9 @@ export type GetMyNotificationsRow = {
   conversation_id: string | null;
   conversation_listing_title: string | null;
   review_id: string | null;
+  /** User-facing review moderation text (removal reason or restore message).
+   * Null for every other type. Private admin notes are never projected here. */
+  public_message: string | null;
 };
 
 export type NotificationItem = {
@@ -61,6 +66,7 @@ export type NotificationItem = {
   conversationId: string | null;
   conversationListingTitle: string | null;
   reviewId: string | null;
+  publicMessage: string | null;
 };
 
 export type NotificationsCursor = {
@@ -87,6 +93,8 @@ function mapRow(row: GetMyNotificationsRow): NotificationItem {
     conversationId: row.conversation_id,
     conversationListingTitle: row.conversation_listing_title,
     reviewId: row.review_id,
+    // Missing key (a feed row from before the contract change) normalizes to null.
+    publicMessage: typeof row.public_message === "string" ? row.public_message : null,
   };
 }
 

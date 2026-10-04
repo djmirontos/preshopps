@@ -26,6 +26,7 @@ function row(overrides: Record<string, unknown> = {}) {
     conversation_id: null,
     conversation_listing_title: null,
     review_id: null,
+    public_message: null,
     ...overrides,
   };
 }
@@ -72,6 +73,7 @@ describe("getMyNotifications", () => {
         conversationId: null,
         conversationListingTitle: null,
         reviewId: null,
+        publicMessage: null,
       },
     ]);
   });
@@ -107,5 +109,36 @@ describe("getMyNotifications", () => {
     rpcMock.mockResolvedValue({ data: [row({ read_at: "2026-02-01T11:00:00.000Z" })], error: null });
     const result = await getMyNotifications(20);
     expect(result.notifications[0].readAt).toBe("2026-02-01T11:00:00.000Z");
+  });
+});
+
+describe("getMyNotifications -- user-facing review moderation message (behavioral)", () => {
+  it("carries the removal reason from the feed row onto the item", async () => {
+    rpcMock.mockResolvedValue({
+      data: [row({ type: "review_removed", review_id: "review-1", public_message: "Scam listing." })],
+      error: null,
+    });
+    const result = await getMyNotifications(20);
+    expect(result.notifications[0]).toMatchObject({ type: "review_removed", publicMessage: "Scam listing." });
+  });
+
+  it("carries an optional restore message, and a null message stays null", async () => {
+    rpcMock.mockResolvedValue({
+      data: [
+        row({ type: "review_restored", review_id: "review-1", public_message: "Reviewed again." }),
+        row({ notification_id: "notif-2", type: "review_restored", review_id: "review-1", public_message: null }),
+      ],
+      error: null,
+    });
+    const result = await getMyNotifications(20);
+    expect(result.notifications.map((n) => n.publicMessage)).toEqual(["Reviewed again.", null]);
+  });
+
+  it("a feed row from before the contract change (no public_message key) normalizes to null", async () => {
+    const legacy = row({ type: "review_removed", review_id: "review-1" });
+    delete (legacy as Record<string, unknown>).public_message;
+    rpcMock.mockResolvedValue({ data: [legacy], error: null });
+    const result = await getMyNotifications(20);
+    expect(result.notifications[0].publicMessage).toBeNull();
   });
 });

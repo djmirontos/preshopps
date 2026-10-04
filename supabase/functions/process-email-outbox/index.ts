@@ -87,6 +87,8 @@ type EmailEventType =
   | "order_seller_cancelled"
   | "moderation_restriction_applied"
   | "moderation_restriction_lifted"
+  | "review_removed"
+  | "review_restored"
   | "unread_messages_summary";
 
 type EmailTemplate = { subject: string; text: string; html: string };
@@ -227,6 +229,36 @@ function renderEmailTemplate(eventType: EmailEventType, payload: Record<string, 
         [`Your account restriction (${restrictionType}) has been lifted.`, ...(note ? [`Note: ${note}`] : [])],
         supportLink(),
         "Contact support",
+      );
+    }
+    case "review_removed": {
+      // public_message is the user-facing reason (required on removal). It is
+      // escaped on the HTML path by wrapHtml. The private admin note is never
+      // part of this payload (see 0115_review_moderation_rpcs.sql).
+      const publicMessage = asString(payload.public_message);
+      const orderCode = asString(payload.order_public_code);
+      return buildTemplate(
+        "Your Preshopps review was removed",
+        [
+          "A review you posted on Preshopps was removed after a moderation review.",
+          ...(publicMessage ? [`Reason: ${publicMessage}`] : []),
+          "If you believe this is a mistake, please contact support.",
+        ],
+        orderCode ? buyerOrderLink(orderCode) : supportLink(),
+        orderCode ? "View your order" : "Contact support",
+      );
+    }
+    case "review_restored": {
+      const publicMessage = asString(payload.public_message);
+      const orderCode = asString(payload.order_public_code);
+      return buildTemplate(
+        "Your Preshopps review is visible again",
+        [
+          "A review you posted on Preshopps has been restored and is visible again.",
+          ...(publicMessage ? [`Note: ${publicMessage}`] : []),
+        ],
+        orderCode ? buyerOrderLink(orderCode) : supportLink(),
+        orderCode ? "View your order" : "Contact support",
       );
     }
     default: {

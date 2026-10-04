@@ -28,6 +28,10 @@ vi.mock("@/lib/seller/get-my-shop-order-detail", () => ({
   getMyShopOrderDetail: getMyShopOrderDetailMock,
 }));
 
+vi.mock("@/lib/reviews/get-order-review-removal", () => ({
+  getOrderReviewRemoval: vi.fn(async () => ({ status: "none" })),
+}));
+
 vi.mock("@/lib/reviews/get-order-review", () => ({
   getOrderReview: getOrderReviewMock,
 }));
