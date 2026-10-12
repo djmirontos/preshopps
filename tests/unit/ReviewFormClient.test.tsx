@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { pushMock, refreshMock, createReviewMock, updateReviewMock, uploadImageMock, deleteUploadedImageMock, notifySuccessMock } = vi.hoisted(() => ({
+const { pushMock, refreshMock, createReviewMock, updateReviewMock, notifySuccessMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
   createReviewMock: vi.fn(),
   updateReviewMock: vi.fn(),
-  uploadImageMock: vi.fn(),
-  deleteUploadedImageMock: vi.fn(),
   notifySuccessMock: vi.fn(),
 }));
 
@@ -24,15 +22,6 @@ vi.mock("@/lib/reviews/review-actions", async () => {
   };
 });
 
-vi.mock("@/lib/image-processing/upload-image", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/image-processing/upload-image")>("@/lib/image-processing/upload-image");
-  return {
-    ...actual,
-    uploadImage: uploadImageMock,
-    deleteUploadedImage: deleteUploadedImageMock,
-  };
-});
-
 vi.mock("@/lib/notifications/toast", () => ({
   notifySuccess: notifySuccessMock,
 }));
@@ -41,19 +30,7 @@ import { ReviewFormClient } from "@/components/orders/ReviewFormClient";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  deleteUploadedImageMock.mockResolvedValue(true);
-  if (!("createObjectURL" in URL)) {
-    // jsdom does not implement this -- provide a minimal stand-in so
-    // selecting a file for preview doesn't throw.
-    // @ts-expect-error -- test-environment polyfill
-    URL.createObjectURL = vi.fn(() => "blob:mock-preview");
-  }
 });
-
-function selectFile(input: HTMLElement, name = "photo.jpg") {
-  const file = new File(["fake-bytes"], name, { type: "image/jpeg" });
-  fireEvent.change(input, { target: { files: [file] } });
-}
 
 describe("ReviewFormClient -- create mode", () => {
   it("requires a star rating before submitting -- no RPC call, error is associated with the fieldset", async () => {
@@ -64,7 +41,7 @@ describe("ReviewFormClient -- create mode", () => {
     expect(createReviewMock).not.toHaveBeenCalled();
   });
 
-  it("submits create_review with the chosen rating, trimmed body, and no photos when none were added", async () => {
+  it("submits create_review with the chosen rating, trimmed body, and no photos (pilot restriction: new reviews never have photos)", async () => {
     createReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", createdAt: "2026-01-01T00:00:00.000Z" });
     render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={["Uniqlo Shirt"]} />);
 
@@ -114,46 +91,21 @@ describe("ReviewFormClient -- create mode", () => {
     expect(screen.queryByLabelText(/product rating/i)).not.toBeInTheDocument();
   });
 
-  it("includes an uploaded photo's storage path when submitting, and disables Submit while the upload is in flight", async () => {
-    let resolveUpload: (value: { ok: true; path: string }) => void = () => {};
-    uploadImageMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveUpload = resolve;
-        }),
-    );
-    createReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", createdAt: "2026-01-01T00:00:00.000Z" });
-
+  it("PILOT RESTRICTION: renders no Add Photo control or photo picker at all in create mode", () => {
     render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
-
-    selectFile(screen.getByLabelText(/add a review photo/i));
-
-    const submitButton = screen.getByRole("button", { name: /uploading photos/i });
-    expect(submitButton).toBeDisabled();
-
-    resolveUpload({ ok: true, path: "review-images/buyer-1/order-1/new-photo.jpg" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submit review" })).not.toBeDisabled());
-
-    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
-
-    await waitFor(() =>
-      expect(createReviewMock).toHaveBeenCalledWith("order-1", 5, null, ["review-images/buyer-1/order-1/new-photo.jpg"]),
-    );
+    expect(screen.queryByLabelText(/add a review photo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Photos")).not.toBeInTheDocument();
   });
 
-  it("best-effort deletes a newly-uploaded photo when the review mutation itself fails", async () => {
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/orphaned.jpg" });
-    createReviewMock.mockResolvedValue({ ok: false, code: "ORDER_NOT_REVIEWABLE" });
-
+  it("maps a REVIEW_IMAGES_DISABLED failure (e.g. a direct RPC call bypassing the UI) to safe copy", async () => {
+    createReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_IMAGES_DISABLED" });
     render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
-    selectFile(screen.getByLabelText(/add a review photo/i));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submit review" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
     fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
 
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/orphaned.jpg"));
+    expect(await screen.findByText("Photos can't be added to reviews right now.")).toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 
@@ -231,39 +183,7 @@ describe("ReviewFormClient -- create mode, restriction-aware INTERACTION_BLOCKED
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 
-  it("best-effort deletes a newly-uploaded photo when the failure carries a confirmed restriction presentation", async () => {
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/orphaned.jpg" });
-    createReviewMock.mockResolvedValue({
-      ok: false,
-      code: "INTERACTION_BLOCKED",
-      restriction: { message: "Your buying access is currently restricted.", ctaLabel: "View account status", href: "/account#account-status" },
-    });
-
-    render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
-    selectFile(screen.getByLabelText(/add a review photo/i));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submit review" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
-
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/orphaned.jpg"));
-  });
-
-  it("best-effort deletes a newly-uploaded photo when the failure is a generic blocked result with no confirmed restriction", async () => {
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/orphaned-2.jpg" });
-    createReviewMock.mockResolvedValue({ ok: false, code: "INTERACTION_BLOCKED" });
-
-    render(<ReviewFormClient mode="create" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" purchasedItemTitles={[]} />);
-    fireEvent.click(screen.getByRole("radio", { name: /5 stars/i }));
-    selectFile(screen.getByLabelText(/add a review photo/i));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submit review" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
-
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/orphaned-2.jpg"));
-  });
-
-  it("a successful creation after a restriction failure retains existing arguments, cleanup, and navigation behavior", async () => {
+  it("a successful creation after a restriction failure retains existing arguments and navigation behavior", async () => {
     createReviewMock.mockResolvedValueOnce({
       ok: false,
       code: "INTERACTION_BLOCKED",
@@ -333,95 +253,7 @@ describe("ReviewFormClient -- edit mode", () => {
     expect(notifySuccessMock.mock.invocationCallOrder[0]).toBeLessThan(pushMock.mock.invocationCallOrder[0]);
   });
 
-  it("blocks a second submit while success cleanup is still pending, then toasts and navigates exactly once once it resolves", async () => {
-    let resolveCleanup: (value: boolean) => void = () => {};
-    deleteUploadedImageMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveCleanup = resolve;
-        }),
-    );
-    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
-
-    render(
-      <ReviewFormClient
-        mode="edit"
-        buyerId="buyer-1"
-        orderId="order-1"
-        orderPublicCode="PSO-ABC"
-        reviewId="review-1"
-        initialRating={3}
-        initialImagePaths={["review-images/buyer-1/order-1/remove.jpg"]}
-        initialImageUrls={["https://example.supabase.co/x/remove.jpg"]}
-        purchasedItemTitles={[]}
-      />,
-    );
-
-    const submitButton = screen.getByRole("button", { name: "Save changes" });
-    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
-    fireEvent.click(submitButton);
-
-    // update_review has already resolved successfully, but the removed
-    // photo's own cleanup (deleteUploadedImage) is still pending.
-    await waitFor(() => expect(updateReviewMock).toHaveBeenCalledTimes(1));
-    expect(submitButton).toBeDisabled();
-
-    // A second click while cleanup is still in flight must never re-enter
-    // the handler and call update_review again.
-    fireEvent.click(submitButton);
-    expect(updateReviewMock).toHaveBeenCalledTimes(1);
-    expect(notifySuccessMock).not.toHaveBeenCalled();
-    expect(pushMock).not.toHaveBeenCalled();
-
-    resolveCleanup(true);
-
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
-    expect(notifySuccessMock).toHaveBeenCalledWith("Review updated");
-    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
-    expect(pushMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("blocks a retry until failure cleanup finishes, then a fresh submit succeeds normally", async () => {
-    let resolveCleanup: (value: boolean) => void = () => {};
-    deleteUploadedImageMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveCleanup = resolve;
-        }),
-    );
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/orphaned.jpg" });
-    updateReviewMock.mockResolvedValueOnce({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
-
-    render(
-      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
-    );
-
-    selectFile(screen.getByLabelText(/add a review photo/i));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled());
-    const submitButton = screen.getByRole("button", { name: "Save changes" });
-
-    fireEvent.click(submitButton);
-
-    expect(await screen.findByText("The 7-day edit window for this review has closed.")).toBeInTheDocument();
-    // The failed submission's own orphaned-upload cleanup is still
-    // pending -- retry must stay blocked until it finishes.
-    expect(submitButton).toBeDisabled();
-    expect(updateReviewMock).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(submitButton);
-    expect(updateReviewMock).toHaveBeenCalledTimes(1);
-
-    resolveCleanup(true);
-    await waitFor(() => expect(submitButton).not.toBeDisabled());
-
-    updateReviewMock.mockResolvedValueOnce({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => expect(updateReviewMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
-  });
-
-  it("maps REVIEW_EDIT_WINDOW_CLOSED to safe copy on a stale submit", async () => {
+  it("maps REVIEW_EDIT_WINDOW_CLOSED to safe copy on a submit", async () => {
     updateReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
     render(
       <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
@@ -432,7 +264,47 @@ describe("ReviewFormClient -- edit mode", () => {
     expect(notifySuccessMock).not.toHaveBeenCalled();
   });
 
-  it("resubmits an existing image path unchanged, and never deletes it if the mutation fails", async () => {
+  it("maps a REVIEW_IMAGES_DISABLED failure (e.g. a direct RPC call bypassing the UI) to safe copy", async () => {
+    updateReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_IMAGES_DISABLED" });
+    render(
+      <ReviewFormClient mode="edit" buyerId="buyer-1" orderId="order-1" orderPublicCode="PSO-ABC" reviewId="review-1" initialRating={3} purchasedItemTitles={[]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Photos can't be changed on reviews right now.")).toBeInTheDocument();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("PILOT RESTRICTION: resubmits an existing review's photos completely unchanged on every save -- editing rating/text never requires touching them", async () => {
+    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+    render(
+      <ReviewFormClient
+        mode="edit"
+        buyerId="buyer-1"
+        orderId="order-1"
+        orderPublicCode="PSO-ABC"
+        reviewId="review-1"
+        initialRating={3}
+        initialBody="Original text"
+        initialImagePaths={["review-images/buyer-1/order-1/keep1.jpg", "review-images/buyer-1/order-1/keep2.jpg"]}
+        initialImageUrls={["https://example.supabase.co/x/keep1.jpg", "https://example.supabase.co/x/keep2.jpg"]}
+        purchasedItemTitles={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/your review/i), { target: { value: "Updated text only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(updateReviewMock).toHaveBeenCalledWith("review-1", 3, "Updated text only", [
+        "review-images/buyer-1/order-1/keep1.jpg",
+        "review-images/buyer-1/order-1/keep2.jpg",
+      ]),
+    );
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
+  });
+
+  it("PILOT RESTRICTION: an existing photo is still resubmitted unchanged even when the save itself fails -- nothing is dropped by a failed attempt", async () => {
     updateReviewMock.mockResolvedValue({ ok: false, code: "REVIEW_EDIT_WINDOW_CLOSED" });
     render(
       <ReviewFormClient
@@ -453,71 +325,10 @@ describe("ReviewFormClient -- edit mode", () => {
     await waitFor(() =>
       expect(updateReviewMock).toHaveBeenCalledWith("review-1", 3, null, ["review-images/buyer-1/order-1/existing.jpg"]),
     );
-    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Photos")).toBeInTheDocument();
   });
 
-  it("successful edit removing a persisted photo deletes only that removed path, after update_review succeeds", async () => {
-    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
-    render(
-      <ReviewFormClient
-        mode="edit"
-        buyerId="buyer-1"
-        orderId="order-1"
-        orderPublicCode="PSO-ABC"
-        reviewId="review-1"
-        initialRating={3}
-        initialImagePaths={["review-images/buyer-1/order-1/keep.jpg", "review-images/buyer-1/order-1/remove.jpg"]}
-        initialImageUrls={["https://example.supabase.co/x/keep.jpg", "https://example.supabase.co/x/remove.jpg"]}
-        purchasedItemTitles={[]}
-      />,
-    );
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Remove photo" })[1]);
-    // Removing an existing (previously-persisted) image must never delete it
-    // immediately -- only after a successful save.
-    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => expect(updateReviewMock).toHaveBeenCalledWith("review-1", 3, null, ["review-images/buyer-1/order-1/keep.jpg"]));
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/remove.jpg"));
-    expect(deleteUploadedImageMock).not.toHaveBeenCalledWith("review-images/buyer-1/order-1/keep.jpg");
-    expect(deleteUploadedImageMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("successful replacement deletes the old persisted path but keeps the new one", async () => {
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/replacement.jpg" });
-    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
-
-    render(
-      <ReviewFormClient
-        mode="edit"
-        buyerId="buyer-1"
-        orderId="order-1"
-        orderPublicCode="PSO-ABC"
-        reviewId="review-1"
-        initialRating={4}
-        initialImagePaths={["review-images/buyer-1/order-1/old.jpg"]}
-        initialImageUrls={["https://example.supabase.co/x/old.jpg"]}
-        purchasedItemTitles={[]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
-    selectFile(screen.getByLabelText(/add a review photo/i));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() =>
-      expect(updateReviewMock).toHaveBeenCalledWith("review-1", 4, null, ["review-images/buyer-1/order-1/replacement.jpg"]),
-    );
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/old.jpg"));
-    expect(deleteUploadedImageMock).not.toHaveBeenCalledWith("review-images/buyer-1/order-1/replacement.jpg");
-  });
-
-  it("leaves an unchanged persisted photo alone on a successful save -- no delete call at all", async () => {
-    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
+  it("PILOT RESTRICTION: renders existing photos read-only, with no Add Photo and no Remove Photo control", () => {
     render(
       <ReviewFormClient
         mode="edit"
@@ -532,38 +343,9 @@ describe("ReviewFormClient -- edit mode", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() =>
-      expect(updateReviewMock).toHaveBeenCalledWith("review-1", 5, null, ["review-images/buyer-1/order-1/unchanged.jpg"]),
-    );
-    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
-  });
-
-  it("a cleanup failure after a successful save still navigates away as a success (never surfaced as a submit error)", async () => {
-    updateReviewMock.mockResolvedValue({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
-    deleteUploadedImageMock.mockRejectedValue(new Error("network down"));
-
-    render(
-      <ReviewFormClient
-        mode="edit"
-        buyerId="buyer-1"
-        orderId="order-1"
-        orderPublicCode="PSO-ABC"
-        reviewId="review-1"
-        initialRating={3}
-        initialImagePaths={["review-images/buyer-1/order-1/remove.jpg"]}
-        initialImageUrls={["https://example.supabase.co/x/remove.jpg"]}
-        purchasedItemTitles={[]}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove photo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
-    expect(refreshMock).toHaveBeenCalled();
-    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Photos")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/add a review photo/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove photo" })).not.toBeInTheDocument();
   });
 
   it("a generic INTERACTION_BLOCKED edit failure with no confirmed restriction (e.g. a deleted-account or buyer_restricted-alone collision) shows only the existing generic message, with no detail and no link", async () => {
@@ -643,33 +425,6 @@ describe("ReviewFormClient -- edit mode, restriction-aware INTERACTION_BLOCKED e
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });
 
-  it("best-effort deletes a newly-uploaded photo when a restricted edit fails with a confirmed account-suspension presentation", async () => {
-    uploadImageMock.mockResolvedValue({ ok: true, path: "review-images/buyer-1/order-1/edit-orphaned.jpg" });
-    updateReviewMock.mockResolvedValue({
-      ok: false,
-      code: "INTERACTION_BLOCKED",
-      restriction: { message: "Your account is currently suspended.", ctaLabel: "View account status", href: "/account#account-status" },
-    });
-
-    render(
-      <ReviewFormClient
-        mode="edit"
-        buyerId="buyer-1"
-        orderId="order-1"
-        orderPublicCode="PSO-ABC"
-        reviewId="review-1"
-        initialRating={3}
-        purchasedItemTitles={[]}
-      />,
-    );
-    selectFile(screen.getByLabelText(/add a review photo/i));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => expect(deleteUploadedImageMock).toHaveBeenCalledWith("review-images/buyer-1/order-1/edit-orphaned.jpg"));
-  });
-
   it("a failed restricted edit never navigates and never replaces the persisted review", async () => {
     updateReviewMock.mockResolvedValue({
       ok: false,
@@ -697,7 +452,7 @@ describe("ReviewFormClient -- edit mode, restriction-aware INTERACTION_BLOCKED e
     expect(screen.getByDisplayValue("Original text")).toBeInTheDocument();
   });
 
-  it("a successful retry after a restriction failure clears the detail/link and preserves existing cleanup, navigation, and refresh behavior", async () => {
+  it("a successful retry after a restriction failure clears the detail/link and preserves existing navigation and refresh behavior", async () => {
     updateReviewMock.mockResolvedValueOnce({
       ok: false,
       code: "INTERACTION_BLOCKED",
@@ -723,9 +478,9 @@ describe("ReviewFormClient -- edit mode, restriction-aware INTERACTION_BLOCKED e
     updateReviewMock.mockResolvedValueOnce({ ok: true, reviewId: "review-1", updatedAt: "2026-01-02T00:00:00.000Z" });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
+    await waitFor(() => expect(updateReviewMock).toHaveBeenLastCalledWith("review-1", 3, null, ["review-images/buyer-1/order-1/keep.jpg"]));
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders/PSO-ABC"));
     expect(refreshMock).toHaveBeenCalled();
-    expect(deleteUploadedImageMock).not.toHaveBeenCalled();
     expect(screen.queryByText("Your account is currently suspended.")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View account status" })).not.toBeInTheDocument();
   });

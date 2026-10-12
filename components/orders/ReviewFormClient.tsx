@@ -6,7 +6,6 @@ import Link from "next/link";
 import { StarRatingInput } from "@/components/reviews/StarRatingInput";
 import { ReviewImagePicker } from "@/components/orders/ReviewImagePicker";
 import { createReview, updateReview, CREATE_REVIEW_ERROR_MESSAGES, UPDATE_REVIEW_ERROR_MESSAGES } from "@/lib/reviews/review-actions";
-import { deleteUploadedImage } from "@/lib/image-processing/upload-image";
 import { notifySuccess } from "@/lib/notifications/toast";
 import type { InteractionBlockedPresentation } from "@/lib/moderation/interpret-interaction-blocked";
 
@@ -22,6 +21,11 @@ type SubmitError = { message: string; restriction?: InteractionBlockedPresentati
 
 type Props = {
   mode: "create" | "edit";
+  /** Unused since the pilot photo restriction (0118) removed the upload
+   * control that needed it (ReviewImagePicker no longer uploads anything,
+   * so it no longer needs the owner id to scope the upload path). Kept in
+   * this type, rather than removed, only so existing call sites don't need
+   * an unrelated prop-drop edit; never read in this component's body. */
   buyerId: string;
   orderId: string;
   orderPublicCode: string;
@@ -40,38 +44,28 @@ type Props = {
  * context only, per the locked "seller-focused, not a product rating"
  * rule.
  *
- * Photos upload immediately on selection via ReviewImagePicker (against
- * the review-images bucket from 0048_media_storage_foundation.sql); Submit
- * is disabled while any photo is still compressing/uploading so a
- * half-finished upload can never be silently dropped from the review.
- * imagePaths always holds the exact set create_review/update_review should
- * receive (existing images kept + newly uploaded ones), reported by the
- * picker on every change.
- *
- * Orphan cleanup, both directions:
- * - Mutation FAILS: only storage objects that did not exist in
- *   initialImagePaths (i.e. uploaded this session) are best-effort
- *   deleted -- a previously-persisted image is never deleted just because
- *   a later edit attempt failed.
- * - Mutation SUCCEEDS (edit mode): any path that was in initialImagePaths
- *   but is no longer in the final saved set (removed or replaced by the
- *   buyer) is best-effort deleted AFTER the RPC confirms success -- never
- *   before, and never a path that's still part of the final saved set.
- *   deleteUploadedImage already never throws and its result is ignored
- *   here on purpose: a cleanup failure (e.g. a transient storage error)
- *   must never turn an already-successful review save into a visible
- *   failure -- it only leaves a harmless orphaned file, logged
- *   server-side by deleteUploadedImage itself, never surfaced to the user.
+ * PILOT RESTRICTION (0118_pilot_disable_new_review_photos.sql): photo
+ * upload/removal is temporarily disabled. ReviewImagePicker is now a
+ * read-only display of initialImagePaths/initialImageUrls -- it never
+ * reports a change, so the exact same array is sent to create_review/
+ * update_review on every submit. A create-mode review therefore always
+ * submits zero photos (there is nothing to preserve yet); an edit-mode
+ * review always resubmits its existing photos completely unchanged,
+ * letting a buyer freely edit rating/text without being forced to touch
+ * or lose them. There is no longer any upload/orphan-cleanup path in this
+ * component -- nothing here can ever create or delete a Storage object.
+ * Server-side, create_review/update_review independently reject any
+ * genuinely new photo path with REVIEW_IMAGES_DISABLED; this component
+ * hiding the picker is a UX convenience only, never the enforcement
+ * boundary.
  *
  * Edit-mode confirmation: a successful update_review call fires exactly
  * one notifySuccess("Review updated") toast, right before the existing
  * navigation. Create mode is unchanged -- it keeps its existing
- * navigation-only confirmation (no toast), since this addition is scoped
- * to edit only.
+ * navigation-only confirmation (no toast).
  */
 export function ReviewFormClient({
   mode,
-  buyerId,
   orderId,
   orderPublicCode,
   reviewId,
@@ -87,23 +81,14 @@ export function ReviewFormClient({
 
   const [rating, setRating] = useState<number | null>(initialRating ?? null);
   const [body, setBody] = useState(initialBody ?? "");
-  const [imagePaths, setImagePaths] = useState<string[]>(initialImagePaths);
-  const [imagesUploading, setImagesUploading] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<SubmitError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const bodyTooLong = body.length > BODY_MAX_LENGTH;
-
-  async function cleanUpNewlyUploadedImages(currentPaths: string[]) {
-    const newPaths = currentPaths.filter((path) => !initialImagePaths.includes(path));
-    await Promise.all(newPaths.map((path) => deleteUploadedImage(path)));
-  }
-
-  async function cleanUpRemovedPersistedImages(finalPaths: string[]) {
-    const removedPaths = initialImagePaths.filter((path) => !finalPaths.includes(path));
-    await Promise.all(removedPaths.map((path) => deleteUploadedImage(path)));
-  }
+  // Never changes after mount (the picker is read-only) -- always exactly
+  // the set create_review/update_review should receive.
+  const imagePaths = initialImagePaths;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -115,7 +100,7 @@ export function ReviewFormClient({
     }
     setRatingError(null);
 
-    if (bodyTooLong || imagesUploading) {
+    if (bodyTooLong) {
       return;
     }
 
@@ -127,11 +112,6 @@ export function ReviewFormClient({
       const result = await createReview(orderId, rating, bodyToSend, imagePaths);
       if (!result.ok) {
         setSubmitError({ message: CREATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
-        // Retry is only allowed once this failure's own cleanup has
-        // finished -- re-enabling Submit any earlier could let a second
-        // click race the still-in-flight delete of this same orphaned
-        // upload.
-        await cleanUpNewlyUploadedImages(imagePaths);
         setIsSubmitting(false);
         return;
       }
@@ -139,28 +119,9 @@ export function ReviewFormClient({
       const result = await updateReview(reviewId as string, rating, bodyToSend, imagePaths);
       if (!result.ok) {
         setSubmitError({ message: UPDATE_REVIEW_ERROR_MESSAGES[result.code], restriction: result.restriction });
-        await cleanUpNewlyUploadedImages(imagePaths);
         setIsSubmitting(false);
         return;
       }
-    }
-
-    // Deliberately left true (Submit stays disabled) all the way through
-    // cleanup and navigation below -- the RPC already succeeded, so a
-    // second click here (e.g. during a slow Storage cleanup call) must
-    // never be allowed to re-enter this handler and submit a duplicate
-    // mutation, double-fire the toast, or double-navigate. The component
-    // unmounts on the route change below, so there is no later point
-    // where this needs to be reset back to false.
-    //
-    // Best-effort only -- deleteUploadedImage itself never throws, but this
-    // extra guard ensures a cleanup problem can never prevent the already-
-    // successful save from navigating away normally (rule: cleanup failure
-    // must not make a successfully saved review appear failed).
-    try {
-      await cleanUpRemovedPersistedImages(imagePaths);
-    } catch (err) {
-      console.error("Post-save review image cleanup threw:", err instanceof Error ? err.message : err);
     }
 
     // Edit only -- create keeps its existing, unchanged navigation-only
@@ -212,14 +173,7 @@ export function ReviewFormClient({
         </p>
       </div>
 
-      <ReviewImagePicker
-        buyerId={buyerId}
-        orderId={orderId}
-        initialPaths={initialImagePaths}
-        initialUrls={initialImageUrls}
-        onPathsChange={setImagePaths}
-        onUploadingChange={setImagesUploading}
-      />
+      <ReviewImagePicker initialPaths={initialImagePaths} initialUrls={initialImageUrls} />
 
       {submitError && (
         <>
@@ -239,10 +193,10 @@ export function ReviewFormClient({
 
       <button
         type="submit"
-        disabled={isSubmitting || imagesUploading}
+        disabled={isSubmitting}
         className="h-11 w-full rounded-[10px] bg-brand-action px-4 text-sm font-semibold text-brand-action-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto"
       >
-        {isSubmitting ? "Saving…" : imagesUploading ? "Uploading photos…" : mode === "create" ? "Submit review" : "Save changes"}
+        {isSubmitting ? "Saving…" : mode === "create" ? "Submit review" : "Save changes"}
       </button>
     </form>
   );

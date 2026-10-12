@@ -46,7 +46,8 @@ export type CreateReviewErrorCode =
   | "RATING_INVALID"
   | "REVIEW_BODY_TOO_LONG"
   | "TOO_MANY_REVIEW_IMAGES"
-  | "REVIEW_IMAGE_PATH_INVALID";
+  | "REVIEW_IMAGE_PATH_INVALID"
+  | "REVIEW_IMAGES_DISABLED";
 
 const CREATE_REVIEW_ERROR_CODES: ReadonlySet<string> = new Set<CreateReviewErrorCode>([
   "NOT_AUTHENTICATED",
@@ -59,6 +60,7 @@ const CREATE_REVIEW_ERROR_CODES: ReadonlySet<string> = new Set<CreateReviewError
   "REVIEW_BODY_TOO_LONG",
   "TOO_MANY_REVIEW_IMAGES",
   "REVIEW_IMAGE_PATH_INVALID",
+  "REVIEW_IMAGES_DISABLED",
 ]);
 
 export const CREATE_REVIEW_ERROR_MESSAGES: ErrorMap<CreateReviewErrorCode> = {
@@ -72,6 +74,11 @@ export const CREATE_REVIEW_ERROR_MESSAGES: ErrorMap<CreateReviewErrorCode> = {
   REVIEW_BODY_TOO_LONG: "Your review is too long. Please shorten it to 1000 characters or fewer.",
   TOO_MANY_REVIEW_IMAGES: "A review can have at most 2 photos.",
   REVIEW_IMAGE_PATH_INVALID: "One of your review photos couldn't be attached. Please try again.",
+  // Pilot restriction (0118_pilot_disable_new_review_photos.sql): new review
+  // photos are temporarily disabled. This path is not reachable from the
+  // current UI (ReviewImagePicker no longer offers an upload control), but
+  // is mapped here in case create_review is ever called directly.
+  REVIEW_IMAGES_DISABLED: "Photos can't be added to reviews right now.",
   UNKNOWN: "Something went wrong. Please try again.",
 };
 
@@ -142,7 +149,8 @@ export type UpdateReviewErrorCode =
   | "RATING_INVALID"
   | "REVIEW_BODY_TOO_LONG"
   | "TOO_MANY_REVIEW_IMAGES"
-  | "REVIEW_IMAGE_PATH_INVALID";
+  | "REVIEW_IMAGE_PATH_INVALID"
+  | "REVIEW_IMAGES_DISABLED";
 
 const UPDATE_REVIEW_ERROR_CODES: ReadonlySet<string> = new Set<UpdateReviewErrorCode>([
   "NOT_AUTHENTICATED",
@@ -154,6 +162,7 @@ const UPDATE_REVIEW_ERROR_CODES: ReadonlySet<string> = new Set<UpdateReviewError
   "REVIEW_BODY_TOO_LONG",
   "TOO_MANY_REVIEW_IMAGES",
   "REVIEW_IMAGE_PATH_INVALID",
+  "REVIEW_IMAGES_DISABLED",
 ]);
 
 export const UPDATE_REVIEW_ERROR_MESSAGES: ErrorMap<UpdateReviewErrorCode> = {
@@ -166,6 +175,12 @@ export const UPDATE_REVIEW_ERROR_MESSAGES: ErrorMap<UpdateReviewErrorCode> = {
   REVIEW_BODY_TOO_LONG: "Your review is too long. Please shorten it to 1000 characters or fewer.",
   TOO_MANY_REVIEW_IMAGES: "A review can have at most 2 photos.",
   REVIEW_IMAGE_PATH_INVALID: "One of your review photos couldn't be attached. Please try again.",
+  // Pilot restriction (0118_pilot_disable_new_review_photos.sql): only a
+  // review's own already-existing photos may be resubmitted; a genuinely
+  // new path is rejected. Not reachable from the current UI (no add
+  // control), but mapped here in case update_review is ever called
+  // directly with an unrecognized path.
+  REVIEW_IMAGES_DISABLED: "Photos can't be changed on reviews right now.",
   UNKNOWN: "Something went wrong. Please try again.",
 };
 

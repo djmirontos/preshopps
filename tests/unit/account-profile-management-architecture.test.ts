@@ -69,6 +69,7 @@ describe("0092 -- migration numbering", () => {
       "0115_review_moderation_rpcs.sql",
       "0116_review_moderation_public_read_filters.sql",
       "0117_review_moderation_edit_guards.sql",
+      "0118_pilot_disable_new_review_photos.sql",
     ]);
   });
 

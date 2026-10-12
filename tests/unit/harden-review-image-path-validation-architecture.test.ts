@@ -240,11 +240,14 @@ describe("0105 preserves every other create_review/update_review behavior outsid
 });
 
 describe("0105 does not require any frontend change", () => {
-  it("ReviewImagePicker already uploads to exactly the prefix this migration now requires", () => {
-    const picker = readFile("components/orders/ReviewImagePicker.tsx");
-    expect(picker).toMatch(/uploadImage\("review-images", buyerId, orderId, file/);
-  });
-
+  // The first of these two checks (ReviewImagePicker uploads to exactly the
+  // prefix this migration requires) is superseded, not falsified, by the
+  // later pilot restriction 0118_pilot_disable_new_review_photos.sql:
+  // ReviewImagePicker no longer uploads anything at all (0118 removed the
+  // upload control), so it can no longer be asserted here. 0105's own rule
+  // is still live underneath -- it is simply never exercised by a new
+  // upload during the pilot. See reviews-architecture.test.ts for the
+  // current ReviewImagePicker/0118 coverage.
   it("uploadImage already builds {ownerUserId}/{entityId}/{randomFileName} under the caller's own auth.uid()-enforced folder, and returns the bucket-prefixed path this migration now validates", () => {
     const uploadImage = readFile("lib/image-processing/upload-image.ts");
     expect(uploadImage).toMatch(/const path = `\$\{ownerUserId\}\/\$\{entityId\}\/\$\{randomFileName\(\)\}`;/);

@@ -135,21 +135,28 @@ describe("Review reply has no delete path anywhere", () => {
   });
 });
 
-describe("Review photo upload uses the shared media storage foundation", () => {
-  it("ReviewFormClient submits create_review/update_review with the picker's current image paths, not a hardcoded array", () => {
+describe("Review photo upload is pilot-restricted (0118_pilot_disable_new_review_photos.sql)", () => {
+  it("ReviewFormClient submits create_review/update_review with imagePaths, not a hardcoded array", () => {
     const source = readFile("components/orders/ReviewFormClient.tsx");
     expect(source).toMatch(/createReview\(orderId, rating, bodyToSend, imagePaths\)/);
     expect(source).toMatch(/updateReview\(reviewId as string, rating, bodyToSend, imagePaths\)/);
   });
 
-  it("ReviewImagePicker uploads to the review-images bucket only, with the buyer's own id and order id -- never an arbitrary bucket/owner", () => {
-    const source = readFile("components/orders/ReviewImagePicker.tsx");
-    expect(source).toMatch(/uploadImage\(\s*["']review-images["']\s*,\s*buyerId\s*,\s*orderId/);
+  it("ReviewFormClient never changes imagePaths away from initialImagePaths -- there is no upload path left to report a new one", () => {
+    const source = readFile("components/orders/ReviewFormClient.tsx");
+    expect(source).toMatch(/const imagePaths = initialImagePaths;/);
+    expect(source).not.toMatch(/setImagePaths|useState<string\[\]>\(initialImagePaths\)/);
   });
 
-  it("ReviewImagePicker caps selection at 2 images", () => {
+  it("ReviewImagePicker no longer imports or calls uploadImage/deleteUploadedImage -- it is read-only", () => {
     const source = readFile("components/orders/ReviewImagePicker.tsx");
-    expect(source).toMatch(/MAX_IMAGES\s*=\s*2/);
+    expect(source).not.toMatch(/uploadImage|deleteUploadedImage/);
+    expect(source).not.toMatch(/<input[^>]*type=["']file["']/);
+  });
+
+  it("ReviewImagePicker renders nothing at all once there are no existing photos to show", () => {
+    const source = readFile("components/orders/ReviewImagePicker.tsx");
+    expect(source).toMatch(/if \(initialPaths\.length === 0\)\s*\{\s*return null;/);
   });
 
   it("no review component uploads via a service-role client or arbitrary bucket string", () => {
@@ -158,6 +165,13 @@ describe("Review photo upload uses the shared media storage foundation", () => {
       const source = readFile(file);
       expect(source.toLowerCase()).not.toContain("service_role");
     }
+  });
+
+  it("0118 rejects a new create_review photo outright and rejects any update_review photo not already attached to that exact review", () => {
+    const source = readFile("supabase/migrations/0118_pilot_disable_new_review_photos.sql");
+    expect(source).toMatch(/'REVIEW_IMAGES_DISABLED'/);
+    expect(source).not.toMatch(/create table|alter table|drop table|create type|alter type|create policy|drop policy|storage\.buckets/i);
+    expect(source).not.toMatch(/delete from public\.reviews|delete from storage\.objects/i);
   });
 });
 
